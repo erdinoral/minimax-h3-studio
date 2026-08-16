@@ -15,6 +15,7 @@ module.exports = {
       "download/shared.js",
       "download/fl2va.js",
       "download/ref2va.js",
+      "download/lora.js",
       "download/text_encoder_int8.js",
       "remove/fl2va.js",
       "remove/ref2va.js",
@@ -32,7 +33,8 @@ module.exports = {
     let has = {
       fl2va: info.exists("app/models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"),
       ref2va: info.exists("app/models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
-      encoder_int8: info.exists("app/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors")
+      encoder_int8: info.exists("app/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
+      lora: info.exists("app/models/loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors")
     }
 
     if (running.install) {
@@ -46,14 +48,16 @@ module.exports = {
       if (running.start) {
         let local = info.local("start.js")
         if (local && local.url) {
+          // Studio only in the menu — Comfy is a headless backend for this session.
+          // Stopping start.js (Pinokio Stop) tears down Comfy + Studio together.
           return [{
             default: true,
-            icon: "fa-solid fa-rocket",
-            text: "Open Web UI",
+            icon: "fa-solid fa-clapperboard",
+            text: "Open H3 Studio",
             href: local.url,
           }, {
             icon: "fa-solid fa-terminal",
-            text: "Terminal",
+            text: "Terminal / Stop",
             href: "start.js",
           }]
         } else {
@@ -110,6 +114,14 @@ module.exports = {
           icon: "fa-solid fa-download",
           text: "INT8 text encoder — optional upgrade (27.1GB)",
           href: "download/text_encoder_int8.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.lora) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "LightX2V Turbo LoRA — 4-step FL2VA (~2GB)",
+          href: "download/lora.js",
           mode: "refresh"
         })
       }

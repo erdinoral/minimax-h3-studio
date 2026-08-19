@@ -18,7 +18,10 @@ module.exports = {
           "python main.py --listen 127.0.0.1 --disable-auto-launch"
         ],
         on: [{
-          "event": "/To see the GUI go to: +(http:\\/\\/[a-zA-Z0-9.]+:[0-9]+)/i",
+          // Loosened: just look for any http://host:port anywhere in the line,
+          // instead of requiring the exact "To see the GUI go to:" prefix.
+          // Different ComfyUI builds/locales can print this differently.
+          "event": "/(http:\\/\\/[a-zA-Z0-9.]+:[0-9]+)/i",
           "done": true
         }, {
           "event": "/errno/i",
@@ -32,8 +35,11 @@ module.exports = {
     {
       method: "local.set",
       params: {
-        comfy_url: "{{input.event[1]}}",
-        studio_port: "{{port}}"
+        // Fallback: if the regex above never matched, input.event[1] is
+        // undefined and this would otherwise resolve to the literal string
+        // "{{input.event[1]}}", which is what caused the ENOENT downstream.
+        comfy_url: "{{input.event && input.event[1] ? input.event[1] : 'http://127.0.0.1:8188'}}",
+        studio_port: "{{port ? port : 8787}}"
       }
     },
     // 2) H3 Studio — the only UI Pinokio opens (local.url).
@@ -62,7 +68,9 @@ module.exports = {
     {
       method: "local.set",
       params: {
-        url: "{{input.event[1]}}"
+        // Same fallback pattern here, in case the Studio line also fails to match
+        // for some reason (e.g. uvicorn prints a different startup banner).
+        url: "{{input.event && input.event[1] ? input.event[1] : 'http://127.0.0.1:' + local.studio_port}}"
       }
     }
   ]

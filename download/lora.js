@@ -1,5 +1,5 @@
 // LightX2V Turbo LoRA — FL2VA 4-step distill (Comfy-compatible conversion).
-// ~2 GB. Optional: Studio Ayarlar → LoRA → Uygula also downloads if missing.
+// ~1.8 GB. Optional: Studio Ayarlar → click the LoRA name (or Uygula) also downloads if missing.
 module.exports = {
   run: [
     {

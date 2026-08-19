@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 import subprocess
 import time
@@ -79,6 +80,112 @@ def suggested_sections(duration_sec: float, clip_sec: int = 5) -> list[dict[str,
     return out
 
 
+def _section_at(sections: list[dict[str, Any]], t_mid: float) -> str:
+    for s in sections:
+        if float(s.get("startSec") or 0) <= t_mid < float(s.get("endSec") or 0) + 0.001:
+            return str(s.get("name") or "verse")
+    return sections[-1].get("name") if sections else "verse"
+
+
+def _mean_volume_db(path: Path, start: float, length: float) -> Optional[float]:
+    cmd = [
+        _ffmpeg(),
+        "-hide_banner",
+        "-nostats",
+        "-ss",
+        f"{max(0.0, start):.2f}",
+        "-t",
+        f"{max(0.2, length):.2f}",
+        "-i",
+        str(path),
+        "-af",
+        "volumedetect",
+        "-f",
+        "null",
+        "-",
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    m = re.search(r"mean_volume:\s*(-?[\d.]+)\s*dB", r.stderr or "", re.I)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except ValueError:
+        return None
+
+
+def probe_energy_timeline(
+    path: Path,
+    *,
+    duration_sec: float,
+    clip_sec: int = 5,
+) -> list[dict[str, Any]]:
+    """Loudness per clip window (ffmpeg volumedetect). Not beat-tracking."""
+    clip = int(clip_sec) if int(clip_sec or 0) in (4, 5, 6, 8, 10, 15) else 5
+    dur = max(0.1, float(duration_sec))
+    n = max(1, math.ceil(dur / clip))
+    window = clip
+    if n > 36:
+        window = max(clip, int(math.ceil(dur / 36)))
+        n = max(1, math.ceil(dur / window))
+    sections = suggested_sections(dur, clip)
+    levels: list[Optional[float]] = []
+    for i in range(n):
+        a = i * window
+        length = min(window, max(0.2, dur - a))
+        levels.append(_mean_volume_db(path, a, length))
+    valid = [x for x in levels if x is not None]
+    if not valid:
+        return []
+    ranked = sorted(valid)
+    lo_cut = ranked[max(0, int(len(ranked) * 0.35))]
+    hi_cut = ranked[min(len(ranked) - 1, int(len(ranked) * 0.72))]
+    out: list[dict[str, Any]] = []
+    for i, db in enumerate(levels):
+        a = round(i * window, 2)
+        b = round(min(dur, (i + 1) * window), 2)
+        if db is None:
+            energy = "mid"
+        elif db <= lo_cut:
+            energy = "low"
+        elif db >= hi_cut:
+            energy = "high"
+        else:
+            energy = "mid"
+        mid = (a + b) / 2.0
+        out.append(
+            {
+                "index": i + 1,
+                "startSec": a,
+                "endSec": b,
+                "meanDb": round(db, 1) if db is not None else None,
+                "energy": energy,
+                "section": _section_at(sections, mid),
+            }
+        )
+    return out
+
+
+def stamp_shots_with_timeline(brief: dict[str, Any], timeline: list[dict[str, Any]]) -> dict[str, Any]:
+    shots = brief.get("shots") if isinstance(brief.get("shots"), list) else []
+    for i, shot in enumerate(shots):
+        if not isinstance(shot, dict) or i >= len(timeline):
+            continue
+        t = timeline[i]
+        shot["startSec"] = t.get("startSec")
+        shot["endSec"] = t.get("endSec")
+        shot["energy"] = t.get("energy")
+        shot["section"] = t.get("section")
+        act = (shot.get("action") or "").strip()
+        tag = f"{t.get('section')} · {t.get('energy')} energy"
+        if tag.lower() not in act.lower():
+            shot["action"] = f"{tag}; {act}" if act else tag
+    brief["shots"] = shots
+    brief["force_continue"] = True
+    brief["silentAudio"] = True
+    return brief
+
+
 def save_upload(
     music_dir: Path,
     *,
@@ -141,6 +248,7 @@ def build_song_director_seed(
     lyrics: str = "",
     concept: str = "",
     visual_style: str = "realistic",
+    timeline: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     dur = float(meta.get("durationSec") or 0)
     n = max(1, math.ceil(dur / clip_sec))
@@ -148,22 +256,42 @@ def build_song_director_seed(
     lyr = (lyrics or meta.get("lyrics") or "").strip()
     idea = (concept or meta.get("concept") or "").strip()
     sec_txt = json.dumps(sections, ensure_ascii=False)
-    lyr_block = lyr[:6000] if lyr else "(söz yok — mood/enerjiye göre sahne yaz)"
+    tl = timeline or meta.get("energyTimeline") or []
+    if tl:
+        rows = []
+        for t in tl[:n]:
+            db = t.get("meanDb")
+            db_s = f"{db}dB" if db is not None else "?"
+            rows.append(
+                f"#{t.get('index')} {t.get('startSec')}–{t.get('endSec')}s "
+                f"{t.get('section')} energy={t.get('energy')} rms={db_s}"
+            )
+        tl_txt = "\n".join(rows)
+    else:
+        tl_txt = "(enerji ölçümü yok — bölüm tahminine uy)"
+    lyr_block = lyr[:6000] if lyr else "(söz yok — enerji eğrisine göre sahne yaz; uydurma lyric overlay yazma)"
     return (
         f"Müzik klibi üret. Şarkı: {meta.get('filename')} · süre {dur:.1f}sn · "
-        f"klip {clip_sec}sn → tam {n} shot continue zinciri.\n"
+        f"klip {clip_sec}sn → tam {n} shot, TEK continue zinciri (shot1 standalone, 2+ continue).\n"
         f"purpose=music_video visualStyle={visual_style} aspect=16:9 "
-        f"totalDurationSec={int(round(dur))} expectedShotCount={n} clipDurationSec={clip_sec}.\n"
-        f"Konsept: {idea or 'dark cinematic music video matching the song energy'}\n"
-        f"Bölüm tahmini (zamanlama rehberi): {sec_txt}\n"
-        f"Sözler / lyric ipucu:\n{lyr_block}\n\n"
-        "Her shot için SCENE-style uzun İngilizce h3Prompt yaz (≥900 karakter). "
-        "Shot 2+ 'Continue directly from the previous shot.' ile başlasın. "
-        "Karakter/kıyafet tutarlı. "
+        f"totalDurationSec={int(round(dur))} expectedShotCount={n} clipDurationSec={clip_sec} "
+        f"silentAudio=true force_continue=true.\n"
+        f"Konsept: {idea or 'cinematic music video; one lead, one wardrobe, one primary location'}\n"
+        f"Bölüm tahmini: {sec_txt}\n"
+        f"GERÇEK SES EĞRİSİ (her satır = bir shot; enerjiye uy — high=chorus push, low=intro/outro hold):\n"
+        f"{tl_txt}\n"
+        f"Sözler / lyric ipucu (sadece görüntü hikâyesi; ağız şarkı söylemesin, lip-sync yok):\n{lyr_block}\n\n"
+        "TUTARLILIK (zorunlu):\n"
+        "- characters[] içinde 1–2 kişi: age, face, hair, eyes, build, EXACT wardrobe. "
+        "Her h3Prompt aynı kartı tekrarlar; kıyafet/saç değişmez.\n"
+        "- Tek ana mekân (veya tek gece/tek iç mekân). Chorus’ta kamera/ışık büyür, set değişmez.\n"
+        "- Shot 2+ h3Prompt 'Continue directly from the previous shot.' + Same [names], identical clothing.\n"
+        "- Her shot ≥1100 karakter İngilizce SCENE; energy=high ise daha geniş hareket / ışık; "
+        "energy=low ise yakın, yavaş, mikro eylem.\n"
+        "- Söz varsa o zaman aralığındaki duyguyu yansıt; ekranda yazı/lyric overlay yok.\n"
         "CRITICAL silentAudio=true: no dialogue, no singing, no SFX, no generated music — "
-        "SILENT VISUAL ONLY (song muxed later). "
-        "görüntü şarkı bölümlerine (intro/verse/chorus) uysun. "
-        "Bitince ready:true ile TAM JSON brief ver (purpose=music_video, silentAudio=true)."
+        "SILENT VISUAL ONLY (song muxed later).\n"
+        "Bitince ready:true ile TAM JSON brief ver (purpose=music_video, silentAudio=true, characters[], shots[n])."
     )
 
 
@@ -185,32 +313,17 @@ def concat_and_mux(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     work = out_path.parent / f"_mux_{out_path.stem}"
     work.mkdir(parents=True, exist_ok=True)
-    list_file = work / "concat.txt"
-    lines = []
-    for p in video_paths:
-        # ffmpeg concat demuxer needs escaped single quotes
-        esc = str(p.resolve()).replace("'", r"'\''")
-        lines.append(f"file '{esc}'")
-    list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        list_file = work / "concat.txt"
+        lines = []
+        for p in video_paths:
+            # ffmpeg concat demuxer needs escaped single quotes
+            esc = str(p.resolve()).replace("'", r"'\''")
+            lines.append(f"file '{esc}'")
+        list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    silent = work / "concat_silent.mp4"
-    cmd1 = [
-        _ffmpeg(),
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(list_file),
-        "-c",
-        "copy",
-        str(silent),
-    ]
-    r1 = subprocess.run(cmd1, capture_output=True, text=True)
-    if r1.returncode != 0 or not silent.exists():
-        # re-encode fallback (codec mismatch across clips)
-        cmd1b = [
+        silent = work / "concat_silent.mp4"
+        cmd1 = [
             _ffmpeg(),
             "-y",
             "-f",
@@ -219,45 +332,63 @@ def concat_and_mux(
             "0",
             "-i",
             str(list_file),
-            "-an",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            "-r",
-            "24",
+            "-c",
+            "copy",
             str(silent),
         ]
-        r1b = subprocess.run(cmd1b, capture_output=True, text=True)
-        if r1b.returncode != 0 or not silent.exists():
-            raise RuntimeError(
-                f"video birleştirme başarısız: {(r1b.stderr or r1.stderr or '')[-600:]}"
-            )
+        r1 = subprocess.run(cmd1, capture_output=True, text=True)
+        if r1.returncode != 0 or not silent.exists():
+            # re-encode fallback (codec mismatch across clips)
+            cmd1b = [
+                _ffmpeg(),
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(list_file),
+                "-an",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-r",
+                "24",
+                str(silent),
+            ]
+            r1b = subprocess.run(cmd1b, capture_output=True, text=True)
+            if r1b.returncode != 0 or not silent.exists():
+                raise RuntimeError(
+                    f"video birleştirme başarısız: {(r1b.stderr or r1.stderr or '')[-600:]}"
+                )
 
-    cmd2 = [
-        _ffmpeg(),
-        "-y",
-        "-i",
-        str(silent),
-        "-i",
-        str(audio_path),
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a:0",
-        "-c:v",
-        "copy",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-shortest",
-        str(out_path),
-    ]
-    r2 = subprocess.run(cmd2, capture_output=True, text=True)
-    if r2.returncode != 0 or not out_path.exists():
-        raise RuntimeError(f"şarkı mux başarısız: {(r2.stderr or '')[-600:]}")
-    return out_path
+        cmd2 = [
+            _ffmpeg(),
+            "-y",
+            "-i",
+            str(silent),
+            "-i",
+            str(audio_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            str(out_path),
+        ]
+        r2 = subprocess.run(cmd2, capture_output=True, text=True)
+        if r2.returncode != 0 or not out_path.exists():
+            raise RuntimeError(f"şarkı mux başarısız: {(r2.stderr or '')[-600:]}")
+        return out_path
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def _has_audio_stream(path: Path) -> bool:
@@ -347,67 +478,70 @@ def concat_keep_audio_mix_score(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     work = out_path.parent / f"_cinema_mux_{out_path.stem}"
     work.mkdir(parents=True, exist_ok=True)
-    normalized: list[Path] = []
-    for i, p in enumerate(video_paths):
-        dest = work / f"clip_{i:03d}.mp4"
-        _normalize_clip_keep_audio(p, dest)
-        normalized.append(dest)
+    try:
+        normalized: list[Path] = []
+        for i, p in enumerate(video_paths):
+            dest = work / f"clip_{i:03d}.mp4"
+            _normalize_clip_keep_audio(p, dest)
+            normalized.append(dest)
 
-    list_file = work / "concat.txt"
-    lines = []
-    for p in normalized:
-        esc = str(p.resolve()).replace("'", r"'\''")
-        lines.append(f"file '{esc}'")
-    list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        list_file = work / "concat.txt"
+        lines = []
+        for p in normalized:
+            esc = str(p.resolve()).replace("'", r"'\''")
+            lines.append(f"file '{esc}'")
+        list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    concat = work / "concat.mp4"
-    cmd1 = [
-        _ffmpeg(),
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(list_file),
-        "-c",
-        "copy",
-        str(concat),
-    ]
-    r1 = subprocess.run(cmd1, capture_output=True, text=True)
-    if r1.returncode != 0 or not concat.exists():
-        raise RuntimeError(f"video birleştirme başarısız: {(r1.stderr or '')[-600:]}")
+        concat = work / "concat.mp4"
+        cmd1 = [
+            _ffmpeg(),
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c",
+            "copy",
+            str(concat),
+        ]
+        r1 = subprocess.run(cmd1, capture_output=True, text=True)
+        if r1.returncode != 0 or not concat.exists():
+            raise RuntimeError(f"video birleştirme başarısız: {(r1.stderr or '')[-600:]}")
 
-    vol = max(0.02, min(0.6, float(score_volume)))
-    cmd2 = [
-        _ffmpeg(),
-        "-y",
-        "-i",
-        str(concat),
-        "-stream_loop",
-        "-1",
-        "-i",
-        str(audio_path),
-        "-filter_complex",
-        (
-            f"[1:a]volume={vol},aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=stereo[sc];"
-            "[0:a]aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=stereo[dx];"
-            "[dx][sc]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
-        ),
-        "-map",
-        "0:v:0",
-        "-map",
-        "[a]",
-        "-c:v",
-        "copy",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-shortest",
-        str(out_path),
-    ]
-    r2 = subprocess.run(cmd2, capture_output=True, text=True)
-    if r2.returncode != 0 or not out_path.exists():
-        raise RuntimeError(f"film müziği karışımı başarısız: {(r2.stderr or '')[-600:]}")
-    return out_path
+        vol = max(0.02, min(0.6, float(score_volume)))
+        cmd2 = [
+            _ffmpeg(),
+            "-y",
+            "-i",
+            str(concat),
+            "-stream_loop",
+            "-1",
+            "-i",
+            str(audio_path),
+            "-filter_complex",
+            (
+                f"[1:a]volume={vol},aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=stereo[sc];"
+                "[0:a]aformat=sample_fmts=fltp:sample_rates=32000:channel_layouts=stereo[dx];"
+                "[dx][sc]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]"
+            ),
+            "-map",
+            "0:v:0",
+            "-map",
+            "[a]",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-shortest",
+            str(out_path),
+        ]
+        r2 = subprocess.run(cmd2, capture_output=True, text=True)
+        if r2.returncode != 0 or not out_path.exists():
+            raise RuntimeError(f"film müziği karışımı başarısız: {(r2.stderr or '')[-600:]}")
+        return out_path
+    finally:
+        shutil.rmtree(work, ignore_errors=True)

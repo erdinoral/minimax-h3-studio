@@ -30,6 +30,24 @@ module.exports = {
     {
       method: "shell.run",
       params: {
+        path: "app/custom_nodes",
+        message: [
+          "git clone https://github.com/jlucasmcrell/ComfyUI-H3-Multishot"
+        ],
+      },
+      when: "{{!exists('app/custom_nodes/ComfyUI-H3-Multishot')}}"
+    },
+    {
+      method: "shell.run",
+      params: {
+        path: "app/custom_nodes/ComfyUI-H3-Multishot",
+        message: "git pull",
+      },
+      when: "{{exists('app/custom_nodes/ComfyUI-H3-Multishot')}}"
+    },
+    {
+      method: "shell.run",
+      params: {
         venv: "env",
         path: "app",
         message: [

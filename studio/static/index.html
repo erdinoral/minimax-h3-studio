@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>H3 Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=cinema15" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema33" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -24,7 +24,6 @@
         <button type="button" class="chip" data-lang="tr">TR</button>
         <button type="button" class="chip" data-lang="en">EN</button>
       </div>
-      <button type="button" id="btn-layout-edit" class="menu-btn" title="Sütun / ölçü düzenle (üretimi durdurmaz)">Düzenle</button>
       <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
       <button type="button" id="btn-support" class="menu-btn" title="Sorun bildir / fikir yaz">Destek</button>
       <button type="button" id="btn-settings" class="menu-btn">Ayarlar</button>
@@ -32,58 +31,9 @@
     </nav>
   </header>
 
-  <div class="layout-edit-bar hidden" id="layout-edit-bar">
-    <div class="layout-edit-row">
-      <span class="layout-edit-title">Serbest düzenleme</span>
-      <span class="muted layout-edit-hint">Sarı çubukları sürükle · Üretim listesi başlığının altındaki çubuk = panel yüksekliği · kaydet iç içe bozmaz</span>
-      <button type="button" class="btn-secondary" id="btn-layout-save">Kaydet</button>
-      <button type="button" class="btn-ghost" id="btn-layout-reset">Varsayılan</button>
-      <button type="button" class="btn-ghost" id="btn-layout-done">Bitir</button>
-    </div>
-    <div class="layout-edit-row layout-edit-sliders">
-      <label class="layout-edit-field">Sol sütun %
-        <input type="number" id="layout-col-left" min="12" max="70" step="1" />
-      </label>
-      <label class="layout-edit-field">Ayarlar sütun %
-        <input type="number" id="layout-drawer-ayar" min="16" max="36" step="1" />
-      </label>
-      <label class="layout-edit-field">Boşluk
-        <input type="number" id="layout-gap" min="0" max="40" step="1" />
-      </label>
-      <label class="layout-edit-field">Yazı boyu %
-        <input type="number" id="layout-font" min="80" max="140" step="5" />
-      </label>
-      <label class="layout-edit-field">Prompt H
-        <input type="number" id="layout-prompt-h" min="56" max="160" step="4" />
-      </label>
-      <label class="layout-edit-field hidden">Sahne H
-        <input type="number" id="layout-scene-h" min="200" max="900" step="10" />
-      </label>
-      <label class="layout-edit-field">Player H
-        <input type="number" id="layout-player-h" min="160" max="480" step="10" />
-      </label>
-      <label class="layout-edit-field hidden">Yeni prompt H
-        <input type="number" id="layout-batch-h" min="80" max="280" step="10" />
-      </label>
-      <label class="layout-edit-field hidden">Liste H
-        <input type="number" id="layout-batch-list-h" min="80" max="320" step="10" />
-      </label>
-      <label class="layout-edit-field hidden">Kuyruk H
-        <input type="number" id="layout-queue-h" min="100" max="280" step="10" />
-      </label>
-      <label class="layout-edit-field">Alt paneller H
-        <input type="number" id="layout-prod-h" min="280" max="720" step="10" />
-      </label>
-      <label class="layout-edit-field hidden">Ayarlar H
-        <input type="number" id="layout-ayar-h" min="280" max="720" step="10" />
-      </label>
-    </div>
-  </div>
-
   <main class="workspace" id="view-studio">
     <!-- grid: scene | player | player / prompt | ayar | prod -->
-    <section class="zone zone-scene panel scene layout-zone" data-layout="scene">
-        <div class="layout-handle layout-handle-e" data-handle="col-left" title="Sürükle: sol sütun genişliği"></div>
+    <section class="zone zone-scene panel scene">
         <h2>Sahne / Proje</h2>
         <label>Üretim modu</label>
         <div class="chips" id="mode-chips">
@@ -248,8 +198,7 @@
         </div>
     </section>
 
-    <section class="zone zone-player panel player layout-zone" data-layout="player">
-      <div class="layout-handle layout-handle-s" data-handle="player" title="Sürükle: player yüksekliği"></div>
+    <section class="zone zone-player panel player">
       <div class="player-stage">
         <button type="button" class="player-close hidden" id="btn-player-close" title="Aktif üretimi kapat">×</button>
         <video id="player" controls playsinline></video>
@@ -277,8 +226,7 @@
       </div>
     </section>
 
-    <section class="zone zone-prompt panel prompt layout-zone" data-layout="prompt">
-      <div class="layout-handle layout-handle-s" data-handle="prompt" title="Sürükle: prompt yüksekliği"></div>
+    <section class="zone zone-prompt panel prompt">
       <h2>Prompt / Sahne</h2>
       <textarea id="prompt" rows="3" placeholder="Sahneyi, kamerayı, diyalogu ve sesi anlat… (Ctrl+Enter = sıraya ekle)"></textarea>
       <div class="gen-actions">
@@ -288,13 +236,17 @@
       <p class="muted gen-hint" id="gen-hint">Mod: Yeni video · Sıraya ekle = kuyruğa ekle</p>
     </section>
 
-    <section class="zone zone-ayar panel drawer-ayar-panel layout-zone" data-layout="drawer-ayar">
-      <div class="layout-handle layout-handle-e" data-handle="drawer-ayar" title="Sürükle: Ayarlar / Üretim oranı"></div>
+    <section class="zone zone-ayar panel drawer-ayar-panel">
       <h2>Ayarlar</h2>
       <div class="drawer-body">
         <label>Seed <input type="number" id="seed" value="-1" /> <small>(-1 = random)</small></label>
         <label>Steps <input type="number" id="steps" value="20" min="1" max="50" /></label>
-        <button type="button" class="btn-secondary" id="btn-fast-preset" title="5sn · 480p · 12 step · sessiz">Fast preset</button>
+        <label id="ayar-speed-label">Hız</label>
+        <div class="chips wrap" id="speed-chips" role="group" aria-label="Hız">
+          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 12 step">Taslak</button>
+          <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step">Hızlı</button>
+        </div>
+        <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Step sayısı Ayarlar’daki kutudan gelir — LoRA zorlamaz.</p>
         <label>Sampler
           <select id="sampler">
             <option value="res_multistep">res_multistep</option>
@@ -305,45 +257,22 @@
         <label>Scheduler
           <select id="scheduler"><option>simple</option></select>
         </label>
-        <div class="llm-prod-pick" id="llm-prod-pick">
-          <label>Yönetmen (hangi LLM)
-            <select id="llm-provider">
-              <option value="ollama">Ollama (yerel)</option>
-              <option value="openai">OpenAI</option>
-              <option value="gemini">Gemini (Google)</option>
-              <option value="grok">Grok (xAI)</option>
-              <option value="claude">Claude (Anthropic)</option>
-            </select>
-          </label>
-          <label id="llm-prod-model-wrap">Model
-            <select id="director-model"><option value="">—</option></select>
-          </label>
-          <button type="button" class="btn-secondary" id="btn-llm-provider-save">Yönetmeni uygula</button>
-          <p class="muted mode-hint" id="llm-prod-hint">API anahtarları sağ üst <strong>Ayarlar</strong>’da. Üretim (Comfy/H3) bundan etkilenmez.</p>
-        </div>
         <div class="lora-prod-pick" id="lora-prod-pick">
           <label>LoRA
             <select id="lora-select">
               <option value="">Yok (varsayılan)</option>
             </select>
           </label>
-          <label class="file-pick">
-            <input type="file" id="lora-file" class="file-pick-input" accept=".safetensors" />
-            <span class="file-pick-btn">LoRA ekle</span>
-            <span class="file-pick-name">.safetensors</span>
-          </label>
           <button type="button" class="btn-secondary" id="btn-lora-apply">Uygula</button>
-          <p class="muted mode-hint" id="lora-hint">H3 LoRA seç → Uygula. Step/sampler LoRA’dan; süre chip’ten. Ayar değişince LoRA düşmez.</p>
+          <p class="muted mode-hint" id="lora-hint">LoRA dosyası sağ üst Ayarlar’dan iner. Buradan seçip Uygula.</p>
         </div>
       </div>
     </section>
 
-    <section class="zone zone-prod panel drawer-production layout-zone" data-layout="drawer-prod">
-      <div class="layout-handle layout-handle-s" data-handle="prod-h" title="Üretim listesi yüksekliği — sürükle"></div>
+    <section class="zone zone-prod panel drawer-production">
       <h2>Üretim listesi</h2>
       <div class="drawer-body drawer-body-production">
-        <div class="job-queue layout-zone" data-layout="job-queue">
-          <div class="layout-handle layout-handle-s" data-handle="job-queue" title="Sürükle: kuyruk yüksekliği"></div>
+        <div class="job-queue">
           <div class="job-queue-head">Kuyruk</div>
           <ul id="job-list" class="job-list"></ul>
         </div>
@@ -357,18 +286,32 @@
     </section>
   </main>
 
+  <button type="button" class="director-llm-tab menu-btn" id="btn-director-llm-tab" aria-expanded="false" aria-controls="director-dock">H3 Yönetmen</button>
   <div class="director-backdrop hidden" id="director-backdrop"></div>
-  <section class="director size-md collapsed" id="director-dock">
+  <section class="director size-md" id="director-dock" aria-hidden="true">
     <div class="director-head">
       <h2>H3 Yönetmen</h2>
       <span class="muted director-project" id="director-project">Proje seç</span>
       <div class="director-tools">
         <span class="muted" id="director-status">Ollama …</span>
-        <button type="button" class="dir-tool" id="btn-dir-smaller" title="Küçült">−</button>
-        <button type="button" class="dir-tool" id="btn-dir-bigger" title="Büyüt">+</button>
-        <button type="button" class="dir-tool" id="btn-dir-modal" title="Büyük pencere">⛶</button>
-        <button type="button" class="dir-tool" id="btn-dir-collapse" title="Kapat">×</button>
+        <button type="button" class="dir-tool" id="btn-dir-collapse" data-i18n-title="dir.llmClose" title="Kapat">×</button>
       </div>
+    </div>
+    <div class="llm-prod-pick" id="llm-prod-pick">
+      <label id="llm-prod-provider-label"><span data-i18n="ayar.llm">Yönetmen (hangi LLM)</span>
+        <select id="llm-provider">
+          <option value="ollama">Ollama (yerel)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Gemini (Google)</option>
+          <option value="grok">Grok (xAI)</option>
+          <option value="claude">Claude (Anthropic)</option>
+        </select>
+      </label>
+      <label id="llm-prod-model-wrap"><span data-i18n="ayar.model">Model</span>
+        <select id="director-model"><option value="">—</option></select>
+      </label>
+      <button type="button" class="btn-secondary" id="btn-llm-provider-save">Yönetmeni uygula</button>
+      <p class="muted mode-hint" id="llm-prod-hint" data-i18n="ayar.llmHint">API anahtarları sağ üst Ayarlar’da. Üretim (Comfy/H3) bundan etkilenmez.</p>
     </div>
     <div class="director-scroll" id="director-scroll">
       <div class="chips wrap director-chips" id="director-chips" role="group" aria-label="Proje tarzı">
@@ -535,6 +478,15 @@
           <label>Adım
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
           </label>
+          <label>LoRA
+            <select id="cinema-lora-select">
+              <option value="">Yok (varsayılan)</option>
+            </select>
+          </label>
+          <label class="cinema-seamless-label" title="ComfyUI-H3-Multishot: tek take, kesiksiz ses">
+            <input type="checkbox" id="cinema-seamless" />
+            <span id="cinema-seamless-label">Kesintisiz zincir</span>
+          </label>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
           <button type="button" class="cta" id="btn-cinema-produce">Filmi kuyruğa al</button>
         </div>
@@ -640,7 +592,7 @@
     <div class="gallery-panel settings-panel">
       <header>
         <h2>Ayarlar</h2>
-        <span class="muted gallery-order-hint">API anahtarları · bu makinede saklanır</span>
+        <span class="muted gallery-order-hint">API anahtarları · LoRA indirme · bu makinede saklanır</span>
         <button type="button" class="menu-btn" id="btn-settings-close">← Studio</button>
       </header>
       <div class="llm-settings" id="llm-settings">
@@ -717,11 +669,26 @@
           <button type="button" class="btn-ghost" id="btn-notify-test">Test mesajı gönder</button>
         </div>
         <p class="muted mode-hint" id="notify-settings-hint">Tik’ler otomatik kaydolur · AkiFactory aktar → Test → Telegram’a bak.</p>
+
+        <h3 class="llm-settings-title" id="settings-lora-title" style="margin-top:1.25rem">H3 LoRA’lar</h3>
+        <p class="muted mode-hint lora-shop-title" id="lora-shop-title">Hazır LoRA’lar — yoksa isme tıkla, Hugging Face’ten iner</p>
+        <div class="lora-shop" id="lora-shop"></div>
+        <label class="file-pick">
+          <input type="file" id="lora-file" class="file-pick-input" accept=".safetensors" />
+          <span class="file-pick-btn">LoRA ekle</span>
+          <span class="file-pick-name">.safetensors</span>
+        </label>
+        <label class="lora-url-row">
+          <span class="muted">URL</span>
+          <input type="url" id="lora-url" placeholder="https://huggingface.co/.../foo.safetensors" />
+          <button type="button" class="btn-ghost" id="btn-lora-url">URL’den al</button>
+        </label>
+        <p class="muted mode-hint" id="settings-lora-hint">PC’de yoksa tek tık indirir (Hugging Face). Hazır olanlar yeşil. Üretim Ayarlar’dan seçip Uygula. SDXL/Pony/Wan/Flux listede yok.</p>
       </div>
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema15"></script>
-  <script src="/static/app.js?v=cinema15"></script>
+  <script src="/static/i18n.js?v=cinema33"></script>
+  <script src="/static/app.js?v=cinema33"></script>
 </body>
 </html>

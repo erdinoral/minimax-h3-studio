@@ -350,6 +350,7 @@ def build_t2v_prompt(
     silent_audio: bool = False,
     lora_name: Optional[str] = None,
     lora_strength: float = 0.75,
+    sage_attention: Optional[str] = "auto",
 ) -> dict[str, Any]:
     """Build FL2VA graph. silent_audio skips AudioVAE load + VAEDecodeAudio (faster end)."""
     m = {**DEFAULT_MODELS, **(models or {})}
@@ -465,7 +466,120 @@ def build_t2v_prompt(
             "inputs": {"image": last_frame_name},
         }
         g["104"]["inputs"]["last_frame"] = ["201", 0]
-    return apply_lora(g, lora_name, lora_strength)
+    return apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention)
+
+
+MULTISHOT_MAX_SHOTS = 8
+MULTISHOT_PACK = "ComfyUI-H3-Multishot"
+MULTISHOT_SAMPLER = "H3MultishotSampler"
+
+
+def detect_multishot_pack(comfy_root: Optional[Path] = None) -> bool:
+    """True when jlucasmcrell's Seamless Chain pack is on disk (Comfy must restart to load it)."""
+    root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
+    return (root / "custom_nodes" / MULTISHOT_PACK / "__init__.py").is_file()
+
+
+def build_multishot_prompt(
+    *,
+    script: str,
+    width: int = 1344,
+    height: int = 768,
+    frames_per_shot: int = 124,
+    seed: int = 0,
+    steps: int = 20,
+    sampler: str = "res_multistep",
+    scheduler: str = "simple",
+    shot_count: int = 0,
+    models: Optional[dict] = None,
+    filename_prefix: str = "video/H3_Studio",
+    silent_audio: bool = False,
+    lora_name: Optional[str] = None,
+    lora_strength: float = 0.75,
+    sage_attention: Optional[str] = "auto",
+    start_image_name: Optional[str] = None,
+) -> dict[str, Any]:
+    """CORE Seamless Chain: H3MultishotSampler (last-frame weld, no Motion-Context).
+
+    script: one prompt per shot, '---' on its own line (or JSON {"prompts": [...]}).
+    shot_count 0 = one sampled shot per script block (pack max 8).
+    """
+    m = {**DEFAULT_MODELS, **(models or {})}
+    g: dict[str, Any] = {
+        "6": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": m["unet"], "weight_dtype": "default"},
+        },
+        "13": {
+            "class_type": "CLIPLoader",
+            "inputs": {
+                "clip_name": m["clip"],
+                "type": "minimax",
+                "device": "default",
+            },
+        },
+        "11": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": m["vae"]},
+        },
+        "24": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": m["audio_vae"]},
+        },
+        "104": {
+            "class_type": MULTISHOT_SAMPLER,
+            "inputs": {
+                "model": ["6", 0],
+                "clip": ["13", 0],
+                "video_vae": ["11", 0],
+                "audio_vae": ["24", 0],
+                "script": script,
+                "shot_count": int(shot_count or 0),
+                "width": width,
+                "height": height,
+                "frames_per_shot": frames_per_shot,
+                "seed": seed,
+                "steps": steps,
+                "seed_per_shot": True,
+                "sampler_name": sampler,
+                "scheduler": scheduler,
+                "save_every_shot": False,
+            },
+        },
+        "92": {
+            "class_type": "SaveVideo",
+            "inputs": {
+                "video": ["91", 0],
+                "filename_prefix": filename_prefix,
+                "format": "auto",
+                "codec": "auto",
+            },
+        },
+    }
+    if silent_audio:
+        g["91"] = {
+            "class_type": "CreateVideo",
+            "inputs": {
+                "images": ["104", 0],
+                "fps": 24.0,
+            },
+        }
+    else:
+        g["91"] = {
+            "class_type": "CreateVideo",
+            "inputs": {
+                "images": ["104", 0],
+                "audio": ["104", 1],
+                "fps": 24.0,
+            },
+        }
+    if start_image_name:
+        g["200"] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": start_image_name},
+        }
+        g["104"]["inputs"]["start_image"] = ["200", 0]
+    return apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention)
 
 
 def build_ref2va_prompt(
@@ -487,6 +601,7 @@ def build_ref2va_prompt(
     include_video_audio: bool = True,
     lora_name: Optional[str] = None,
     lora_strength: float = 0.75,
+    sage_attention: Optional[str] = "auto",
 ) -> dict[str, Any]:
     """Build Ref2VA graph (MiniMaxH3ReferenceToVideo + Ref2VA UNET).
 
@@ -630,7 +745,7 @@ def build_ref2va_prompt(
                 "fps": 24.0,
             },
         }
-    return apply_lora(g, lora_name, lora_strength)
+    return apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention)
 
 
 def apply_lora(
@@ -654,9 +769,39 @@ def apply_lora(
             "strength_model": st,
         },
     }
-    for nid in ("16", "9"):
-        node = g.get(nid) or {}
-        inputs = node.get("inputs") or {}
+    for nid, node in g.items():
+        if nid == "7":
+            continue
+        inputs = (node or {}).get("inputs") or {}
         if inputs.get("model") == ["6", 0]:
             inputs["model"] = ["7", 0]
+    return g
+
+
+def detect_sage_mode(comfy_root: Optional[Path] = None) -> Optional[str]:
+    """Pick a KJNodes sage mode if Comfy env actually has the package."""
+    root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
+    if not (root / "custom_nodes" / "ComfyUI-KJNodes").exists():
+        return None
+    env = root / "env"
+    sps: list[Path] = []
+    win = env / "Lib" / "site-packages"
+    if win.exists():
+        sps.append(win)
+    sps.extend(sorted(env.glob("lib/python*/site-packages")))
+    for sp in sps:
+        if (sp / "sageattn3").exists() or any(sp.glob("sageattn3*.dist-info")):
+            return "sageattn3"
+        if (sp / "sageattention").exists() or any(sp.glob("sageattention*.dist-info")):
+            return "auto"
+    return None
+
+
+def apply_sage_attention(
+    g: dict[str, Any],
+    mode: Optional[str] = "auto",
+    *,
+    comfy_root: Optional[Path] = None,
+) -> dict[str, Any]:
+    """Studio no longer patches Sage Attention into graphs."""
     return g

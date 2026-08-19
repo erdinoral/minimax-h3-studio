@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import unquote, urlparse
 
 # studio/ → launcher root → app/models/loras (Pinokio drive link)
 STUDIO_ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +34,7 @@ CATALOG: list[dict[str, Any]] = [
         "strength": 0.75,
         "graphs": ["fl2va"],
         "hint": "Yeni video / first-last · 4 step · strength 0.75 · Ref/V2V’de kullanılmaz",
+        "size_hint": "~1.8 GB",
         "url": (
             "https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/"
             "loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors"
@@ -50,7 +52,13 @@ CATALOG: list[dict[str, Any]] = [
         "strength": 0.8,
         "graphs": ["fl2va"],
         "hint": "4 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz",
-        "url": "",
+        "size_hint": "~1.8 GB",
+        "url": (
+            "https://huggingface.co/t8star/"
+            "minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8/resolve/main/"
+            "minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors"
+            "?download=true"
+        ),
         "preset": True,
     },
     {
@@ -63,7 +71,11 @@ CATALOG: list[dict[str, Any]] = [
         "strength": 0.8,
         "graphs": ["fl2va"],
         "hint": "6 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz",
-        "url": "",
+        "size_hint": "~0.8 GB",
+        "url": (
+            "https://huggingface.co/SanDiegoDude/H3-Turbo-6-Step-LoRA-Comfy/resolve/main/"
+            "minimax_h3_turbo_6step_ema_fl2va_pruned.safetensors?download=true"
+        ),
         "preset": True,
     },
     {
@@ -76,7 +88,11 @@ CATALOG: list[dict[str, Any]] = [
         "strength": 0.8,
         "graphs": ["fl2va"],
         "hint": "Turbo · step600 eğitim adımı (4 step değil) · FL2VA · step sen ayarla",
-        "url": "",
+        "size_hint": "~0.7 GB",
+        "url": (
+            "https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/main/"
+            "minimax_h3_turbo_v4_step600_ema.safetensors?download=true"
+        ),
         "preset": False,
     },
     {
@@ -89,20 +105,29 @@ CATALOG: list[dict[str, Any]] = [
         "strength": 0.8,
         "graphs": ["fl2va", "ref2va"],
         "hint": "Gerçekçi insan · T2V / I2V / Ref · step/sampler aynı kalır",
-        "url": "",
+        "size_hint": "~125 MB",
+        "url": (
+            "https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA/resolve/main/"
+            "h3-realism-people-t2v-i2v-r2v.safetensors?download=true"
+        ),
         "preset": False,
     },
     {
         "id": "pinkfluffybunny",
         "label": "PinkFluffyBunny (karakter)",
-        "file": "PinkFluffyBunny-pruned-v1-rank128.safetensors",
+        "file": "PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors",
+        "aliases": ["PinkFluffyBunny-pruned-v1-rank128.safetensors"],
         "steps": None,
         "sampler": None,
         "scheduler": None,
         "strength": 0.75,
         "graphs": ["fl2va", "ref2va"],
         "hint": "Karakter LoRA · Yeni video + Ref/yüz · step aynı",
-        "url": "",
+        "size_hint": "~2.3 GB",
+        "url": (
+            "https://huggingface.co/SexGod1979/PinkFluffyBunny-MiniMax-H3/resolve/main/"
+            "PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors?download=true"
+        ),
         "preset": False,
     },
 ]
@@ -156,24 +181,21 @@ def disk_spec(filename: str, bytes_n: int = 0) -> dict[str, Any]:
         "preset": preset,
         "ready": True,
         "bytes": bytes_n,
+        "downloadable": False,
+        "size_hint": "",
     }
 
 
-def find_spec(lora_id: str = "", file: str = "") -> Optional[dict[str, Any]]:
-    lid = (lora_id or "").strip()
-    fname = Path(file or "").name
-    if lid.startswith("file:"):
-        fname = lid[5:].strip() or fname
-    for spec in CATALOG:
-        if lid and spec["id"] == lid:
-            return spec
-        if fname and spec["file"] == fname:
-            return spec
+def candidates(spec: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+    fname = Path(spec.get("file") or "").name
     if fname:
-        path = LORAS_DIR / fname
-        if path.is_file():
-            return disk_spec(fname, path.stat().st_size)
-    return None
+        names.append(fname)
+    for alias in spec.get("aliases") or []:
+        a = Path(alias or "").name
+        if a and a not in names:
+            names.append(a)
+    return names
 
 
 def file_ready(filename: str) -> bool:
@@ -184,15 +206,59 @@ def file_ready(filename: str) -> bool:
     return path.is_file() and path.stat().st_size > 1024 * 1024
 
 
+def spec_ready(spec: dict[str, Any]) -> bool:
+    names = candidates(spec)
+    if not names:
+        return True
+    return any(file_ready(n) for n in names)
+
+
+def resolved_file(spec: dict[str, Any]) -> str:
+    for name in candidates(spec):
+        if file_ready(name):
+            return name
+    return Path(spec.get("file") or "").name
+
+
+def _copy_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    item = dict(spec)
+    item["aliases"] = list(spec.get("aliases") or [])
+    item["file"] = resolved_file(spec) or spec.get("file") or ""
+    return item
+
+
+def find_spec(lora_id: str = "", file: str = "") -> Optional[dict[str, Any]]:
+    lid = (lora_id or "").strip()
+    fname = Path(file or "").name
+    if lid.startswith("file:"):
+        fname = lid[5:].strip() or fname
+    for spec in CATALOG:
+        if lid and spec["id"] == lid:
+            return _copy_spec(spec)
+        if fname and fname in candidates(spec):
+            return _copy_spec(spec)
+    if fname:
+        path = LORAS_DIR / fname
+        if path.is_file():
+            return disk_spec(fname, path.stat().st_size)
+    return None
+
+
 def public_list() -> list[dict[str, Any]]:
-    known_files = {spec["file"] for spec in CATALOG if spec.get("file")}
+    known_files: set[str] = set()
+    for spec in CATALOG:
+        known_files.update(candidates(spec))
     out = []
     for spec in CATALOG:
-        item = {k: spec[k] for k in spec if k != "url"}
-        item["ready"] = file_ready(spec["file"]) if spec["file"] else True
+        item = {k: spec[k] for k in spec if k not in ("url", "aliases")}
+        item["ready"] = spec_ready(spec)
+        item["downloadable"] = bool(spec.get("url"))
+        item["size_hint"] = spec.get("size_hint") or ""
         item["bytes"] = 0
-        if spec["file"]:
-            p = LORAS_DIR / spec["file"]
+        on_disk = resolved_file(spec) if spec.get("file") else ""
+        if on_disk:
+            item["file"] = on_disk
+            p = LORAS_DIR / on_disk
             if p.is_file():
                 item["bytes"] = p.stat().st_size
         # Local-only entries (no download URL) stay hidden until the file exists.
@@ -213,4 +279,20 @@ def public_list() -> list[dict[str, Any]]:
 
 def dest_for(spec: dict[str, Any]) -> Path:
     LORAS_DIR.mkdir(parents=True, exist_ok=True)
-    return LORAS_DIR / spec["file"]
+    lid = spec.get("id") or ""
+    for row in CATALOG:
+        if lid and row.get("id") == lid and row.get("file"):
+            return LORAS_DIR / row["file"]
+    return LORAS_DIR / Path(spec.get("file") or "lora.safetensors").name
+
+
+def filename_from_url(url: str, fallback: str = "") -> str:
+    """Last path segment if it is a .safetensors file (Hugging Face resolve URLs work)."""
+    raw = (url or "").strip()
+    name = Path(unquote(urlparse(raw).path)).name
+    if name.lower().endswith(".safetensors") and is_h3_lora_name(name):
+        return name
+    fb = Path(fallback or "").name
+    if fb.lower().endswith(".safetensors") and is_h3_lora_name(fb):
+        return fb
+    return ""

@@ -22,6 +22,17 @@
       ]
     },
     {
+      "title": "H3 LoRAs",
+      "links": [
+        { "title": "LightX2V Turbo", "value": "https://huggingface.co/Kijai/MiniMax-H3_comfy" },
+        { "title": "ErosMax Turbo", "value": "https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8" },
+        { "title": "H3 Turbo 6-step", "value": "https://huggingface.co/SanDiegoDude/H3-Turbo-6-Step-LoRA-Comfy" },
+        { "title": "H3 Turbo v4", "value": "https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora" },
+        { "title": "Realism People", "value": "https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA" },
+        { "title": "PinkFluffyBunny", "value": "https://huggingface.co/SexGod1979/PinkFluffyBunny-MiniMax-H3" }
+      ]
+    },
+    {
       "title": "Prompting guides",
       "links": [
         { "title": "Base (T2V / FL2V)", "value": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_base_en.md" },
@@ -32,7 +43,8 @@
       "title": "ComfyUI",
       "links": [
         { "title": "GitHub", "value": "https://github.com/comfyanonymous/ComfyUI" },
-        { "title": "H3 tutorial", "value": "https://docs.comfy.org/tutorials/video/minimax/minimax-h3" }
+        { "title": "H3 tutorial", "value": "https://docs.comfy.org/tutorials/video/minimax/minimax-h3" },
+        { "title": "H3 Multishot (Seamless Chain)", "value": "https://github.com/jlucasmcrell/ComfyUI-H3-Multishot" }
       ]
     }
   ]

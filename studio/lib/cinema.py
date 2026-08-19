@@ -20,6 +20,9 @@ SETUP_HINTS: dict[str, dict[str, str]] = {
         "music_video": "music-video cinematic, rhythmic cutting energy, stylized lighting, bold graphic frames",
         "anamorphic": "anamorphic feature look, oval bokeh, horizontal flares, widescreen compression",
         "found_footage": "found-footage / camcorder aesthetic, raw diegetic camera, imperfect exposure",
+        "noir": "classic noir cinematic, high-contrast shadows, wet streets, moral twilight",
+        "golden": "golden-hour romantic cinematic, long warm rims, honeyed atmosphere",
+        "retro_80s": "1980s cinematic, neon practicals, analog video-era energy, synth-night streets",
     },
     "camera": {
         "35mm": "shot on 35mm spherical cinema lenses, natural falloff, classic motion-picture texture",

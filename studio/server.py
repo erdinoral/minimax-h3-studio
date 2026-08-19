@@ -27,8 +27,26 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
     "director_progress", default=None
 )
 
-from lib.comfy import ComfyClient, build_t2v_prompt, build_ref2va_prompt, enhance_ref_prompt
-from lib.loras import LORAS_DIR, dest_for, file_ready, find_spec, is_h3_lora_name, public_list
+from lib.comfy import (
+    ComfyClient,
+    build_t2v_prompt,
+    build_ref2va_prompt,
+    build_multishot_prompt,
+    detect_sage_mode,
+    detect_multishot_pack,
+    enhance_ref_prompt,
+    MULTISHOT_MAX_SHOTS,
+)
+from lib.loras import (
+    LORAS_DIR,
+    dest_for,
+    file_ready,
+    filename_from_url,
+    find_spec,
+    is_h3_lora_name,
+    public_list,
+    spec_ready,
+)
 from lib.director import (
     apply_audio_policy,
     apply_shot_patches,
@@ -57,7 +75,9 @@ from lib.music import (
     concat_and_mux,
     concat_keep_audio_mix_score,
     load_meta,
+    probe_energy_timeline,
     save_upload,
+    stamp_shots_with_timeline,
     suggested_sections,
     update_meta,
 )
@@ -76,6 +96,9 @@ REFS = DATA / "refs"
 REF_VIDEOS = DATA / "ref_videos"
 MUSIC = DATA / "music"
 CINEMA_FINALS = DATA / "cinema_finals"
+COMFY_ROOT = ROOT.parent / "app"
+COMFY_OUTPUT = COMFY_ROOT / "output"
+COMFY_INPUT = COMFY_ROOT / "input"
 ALLOWED_DURATIONS = (4, 5, 6, 8, 10, 15)
 LOGS = ROOT / "logs"
 JOBS_FILE = DATA / "jobs.json"
@@ -244,6 +267,10 @@ def _lora_fields(body: Any) -> dict[str, Any]:
     }
 
 
+def _sage_mode(src: Any = None) -> str:
+    return "disabled"
+
+
 def _with_lora_preset(
     body: Any,
     steps: int,
@@ -251,26 +278,7 @@ def _with_lora_preset(
     scheduler: str,
     graph: str = "fl2va",
 ) -> tuple[int, str, str]:
-    """If a catalog LoRA with preset is attached, its step/sampler win.
-
-    Do not change steps when this LoRA cannot run on the current graph
-    (e.g. LightX2V / 4-step turbo on Ref2VA).
-    """
-    spec = find_spec(
-        lora_id=getattr(body, "lora_id", None) or "",
-        file=getattr(body, "lora_name", None) or "",
-    )
-    if not spec or not spec.get("file") or spec.get("preset") is False:
-        return steps, sampler, scheduler
-    graphs = spec.get("graphs") or ["fl2va", "ref2va"]
-    if graph not in graphs:
-        return steps, sampler, scheduler
-    if spec.get("steps"):
-        steps = int(spec["steps"])
-    if spec.get("sampler"):
-        sampler = str(spec["sampler"])
-    if spec.get("scheduler"):
-        scheduler = str(spec["scheduler"])
+    """Steps / sampler / scheduler come from the request. LoRA does not override them."""
     return steps, sampler, scheduler
 
 
@@ -448,29 +456,119 @@ def _load_gallery():
         g["url"] = f"/api/gallery/{gid}/video"
         cleaned[gid] = g
 
-    # Add orphan mp4s present on disk but missing from index
-    for p in GALLERY.glob("*.mp4"):
-        gid = p.stem
-        if gid in cleaned:
-            continue
-        cleaned[gid] = {
-            "id": gid,
-            "prompt": "",
-            "duration": None,
-            "width": None,
-            "height": None,
-            "mode": "archive",
-            "seed": None,
-            "done_at": p.stat().st_mtime,
-            "created_at": p.stat().st_mtime,
-            "url": f"/api/gallery/{gid}/video",
-            "local_path": str(p),
-        }
-        dirty = True
-
     _gallery = list(cleaned.values())
     if dirty or len(_gallery) != len(by_id):
         _save_gallery()
+
+
+def _unlink_retry(path: Path, attempts: int = 8) -> bool:
+    """Delete a file; retry because Windows often locks the gallery <video> source."""
+    if not path or str(path) in ("", ".", "None"):
+        return True
+    try:
+        if not path.exists() or not path.is_file():
+            return True
+    except OSError:
+        return True
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            path.unlink()
+            return True
+        except Exception as e:
+            last = e
+            time.sleep(0.12 * (i + 1))
+    slog.warn("silinemedi", path=str(path), err=last)
+    return False
+
+
+def _keep_media_ids() -> set[str]:
+    keep = {str(g.get("id") or "") for g in _gallery if g.get("id")}
+    for j in _jobs:
+        jid = str(j.get("id") or "")
+        if jid and j.get("status") in ("queued", "running"):
+            keep.add(jid)
+    keep.discard("")
+    return keep
+
+
+def _purge_id_files(item_id: str, extra: Optional[list[Path]] = None) -> None:
+    """Remove gallery clip plus Comfy/studio copies for one job id."""
+    jid = (item_id or "").strip()
+    if not jid:
+        return
+    paths: list[Path] = [
+        GALLERY / f"{jid}.mp4",
+        CLIPS / f"{jid}.mp4",
+        FRAMES / f"{jid}_last.png",
+        FRAMES / f"{jid}_first.png",
+        COMFY_INPUT / f"h3_studio_{jid}_last.png",
+        COMFY_INPUT / f"h3_studio_{jid}_first.png",
+    ]
+    if extra:
+        paths.extend([p for p in extra if p])
+    prefix = jid[:8]
+    for folder in (
+        COMFY_OUTPUT / "video" / "H3_Studio",
+        COMFY_OUTPUT / "video" / "H3_Studio_Ref",
+    ):
+        if not folder.is_dir():
+            continue
+        try:
+            for p in folder.glob(f"{prefix}*"):
+                if p.is_file():
+                    paths.append(p)
+        except OSError:
+            pass
+    seen: set[str] = set()
+    for p in paths:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        _unlink_retry(p)
+
+
+def _sweep_orphaned_media() -> dict[str, int]:
+    """Drop Comfy/studio leftovers whose gallery item was already deleted."""
+    keep = _keep_media_ids()
+    keep_prefix = {k[:8] for k in keep if len(k) >= 8}
+    removed = {"comfy_out": 0, "comfy_in": 0, "gallery_orphan": 0, "mux_tmp": 0}
+    for folder_name in ("H3_Studio", "H3_Studio_Ref"):
+        folder = COMFY_OUTPUT / "video" / folder_name
+        if not folder.is_dir():
+            continue
+        for p in list(folder.iterdir()):
+            if not p.is_file():
+                continue
+            pref = p.name.split("_", 1)[0]
+            if pref not in keep_prefix and _unlink_retry(p):
+                removed["comfy_out"] += 1
+    if COMFY_INPUT.is_dir():
+        for p in list(COMFY_INPUT.iterdir()):
+            if not p.is_file():
+                continue
+            m = re.match(r"h3_studio_([0-9a-f-]{36})_", p.name, re.I)
+            if m and m.group(1) not in keep and _unlink_retry(p):
+                removed["comfy_in"] += 1
+    if GALLERY.is_dir():
+        for p in list(GALLERY.glob("*.mp4")):
+            if p.stem not in keep and _unlink_retry(p):
+                removed["gallery_orphan"] += 1
+    for parent in (MUSIC, CINEMA_FINALS):
+        if not parent.is_dir():
+            continue
+        for p in list(parent.iterdir()):
+            if p.is_dir() and (
+                p.name.startswith("_mux_") or p.name.startswith("_cinema_mux_")
+            ):
+                try:
+                    shutil.rmtree(p, ignore_errors=True)
+                    removed["mux_tmp"] += 1
+                except Exception as e:
+                    slog.warn("mux tmp silinemedi", path=str(p), err=e)
+    slog.info("orphan media sweep", **removed)
+    return removed
 
 def _archive_job_to_gallery(job: dict) -> None:
     """Copy finished clip into permanent gallery. Survives wipe / clear jobs."""
@@ -641,6 +739,7 @@ class GenerateBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    sage_attention: Optional[str] = "auto"
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -687,6 +786,7 @@ class BatchBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    sage_attention: Optional[str] = "auto"
     # Parallel to prompts: "t2v" | "continue". When set, first/continue is per shot.
     modes: Optional[list[str]] = None
     # Cinema film score is mixed later — do NOT set music_id (that silences dialogue).
@@ -711,8 +811,10 @@ class CinemaProduceBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    sage_attention: Optional[str] = "auto"
     link_continue: bool = True
     audio: Optional[dict[str, Any]] = None
+    seamless: bool = False
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -979,6 +1081,10 @@ async def startup():
                 _archive_job_to_gallery(j)
             except Exception as e:
                 slog.warn("startup gallery backfill", job=str(j.get("id", ""))[:8], err=e)
+    try:
+        _sweep_orphaned_media()
+    except Exception as e:
+        slog.warn("orphan media sweep failed", err=e)
     # Resume: keep prompt_id if Comfy still has it; otherwise re-queue cleanly.
     live_pids: set[str] = set()
     try:
@@ -1134,6 +1240,8 @@ async def system_stats():
         "vram_total_gb": None,
         "vram_percent": None,
         "comfy_online": False,
+        "sage_mode": detect_sage_mode(COMFY_ROOT),
+        "multishot": detect_multishot_pack(COMFY_ROOT),
     }
     # 1) Accurate board VRAM + util
     try:
@@ -1208,19 +1316,19 @@ async def gallery_video(item_id: str):
 
 @app.delete("/api/gallery/{item_id}")
 async def delete_gallery_item(item_id: str):
-    """Remove one item from the permanent gallery (explicit only)."""
+    """Remove one item from the permanent gallery and delete its files."""
     global _gallery
     entry = next((g for g in _gallery if g.get("id") == item_id), None)
     if not entry:
         raise HTTPException(404, "galeri kaydı yok")
-    for p in (GALLERY / f"{item_id}.mp4", Path(entry.get("local_path") or "")):
-        try:
-            if p and str(p) != "." and p.exists() and p.is_file():
-                p.unlink()
-        except Exception as e:
-            slog.warn("gallery silinemedi", path=str(p), err=e)
+    extra = []
+    lp = entry.get("local_path")
+    if lp:
+        extra.append(Path(lp))
+    _purge_id_files(item_id, extra)
     _gallery = [g for g in _gallery if g.get("id") != item_id]
     _save_gallery()
+    slog.info("gallery deleted", job=item_id[:8])
     return {"ok": True, "id": item_id}
 
 
@@ -1478,6 +1586,7 @@ async def generate(body: GenerateBody):
         "mode": mode,
         "silent_audio": silent,
         "purpose": purpose,
+        "sage_attention": _sage_mode(body),
         **_lora_fields(lora_src),
     }
     async with _lock:
@@ -1624,6 +1733,7 @@ async def batch(body: BatchBody):
                 "_batch_link_next": True,
                 "silent_audio": silent,
                 "purpose": purpose,
+                "sage_attention": _sage_mode(body),
                 **_lora_fields(lora_src),
             }
             if mode == "face" and shot_refs:
@@ -2022,6 +2132,100 @@ def _cinema_batch_items(batch_id: str) -> list[dict]:
     return items
 
 
+async def _queue_cinema_seamless(
+    *,
+    body: CinemaProduceBody,
+    parsed: list[dict],
+    prompts: list[str],
+    lib: dict,
+    audio: dict,
+    cinema_batch: str,
+    silent: bool,
+    purpose: str,
+) -> dict:
+    """One H3MultishotSampler job: script blocks joined with --- (pack max 8 shots)."""
+    if not detect_multishot_pack(COMFY_ROOT):
+        raise HTTPException(
+            400,
+            "H3 Multishot paketi yok — Pinokio: Download Models → H3 Multishot, sonra Stop → Start",
+        )
+    if len(parsed) > MULTISHOT_MAX_SHOTS:
+        raise HTTPException(
+            400,
+            f"Kesintisiz zincir en fazla {MULTISHOT_MAX_SHOTS} shot (pack limiti). "
+            "Fazlası için kutuyu kapatıp Continue zincirini kullan.",
+        )
+    w, h = resolve_size(body.aspect, body.quality)
+    steps = body.steps if body.steps and body.steps > 0 else 20
+    sampler = body.sampler or "res_multistep"
+    scheduler = body.scheduler or "simple"
+    texts: list[str] = []
+    bound_hits: list[dict] = []
+    for text in prompts:
+        bound = cinema.bind_prompt(
+            text,
+            existing_refs=[],
+            lora_id=getattr(body, "lora_id", None) or "",
+        )
+        texts.append(bound["prompt"] if bound.get("hits") else text)
+        bound_hits.append(bound)
+    merged_hits = {"hits": []}
+    for b in bound_hits:
+        merged_hits["hits"].extend(b.get("hits") or [])
+    lora_src, _graph = _lora_src_for_shot(body, merged_hits, "t2v")
+    steps, sampler, scheduler = _with_lora_preset(
+        lora_src, steps, sampler, scheduler, graph="fl2va"
+    )
+    script = "\n---\n".join(texts)
+    seed = body.seed if body.seed >= 0 else int(time.time() * 1000) % (2**53)
+    job = {
+        "id": str(uuid.uuid4()),
+        "status": "queued",
+        "prompt": script,
+        "script": script,
+        "duration": body.duration,
+        "aspect": body.aspect,
+        "quality": str(body.quality),
+        "width": w,
+        "height": h,
+        "seed": seed,
+        "steps": steps,
+        "sampler": sampler,
+        "scheduler": scheduler,
+        "progress_label": "sırada · kesintisiz zincir",
+        "continue_from": None,
+        "first_frame_name": None,
+        "ref_images": [],
+        "progress": 0,
+        "error": None,
+        "output": None,
+        "created_at": time.time(),
+        "mode": "multishot",
+        "batch_index": 1,
+        "batch_total": 1,
+        "shot_count": len(parsed),
+        "silent_audio": silent,
+        "purpose": purpose,
+        "sage_attention": _sage_mode(body),
+        "cinema_batch": cinema_batch,
+        "batch_id": cinema_batch,
+        **_lora_fields(lora_src),
+    }
+    if audio.get("score_id"):
+        job["score_id"] = audio.get("score_id")
+    async with _lock:
+        _jobs.append(job)
+        _save_jobs()
+    slog.info(
+        "cinema seamless queued",
+        shots=len(parsed),
+        batch=cinema_batch,
+        size=f"{w}x{h}",
+        duration=body.duration,
+    )
+    return {"jobs": [job], "count": 1}
+
+
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
@@ -2064,34 +2268,54 @@ async def cinema_produce(body: CinemaProduceBody):
     )
     prompts = [cinema.apply_look(s["text"], head) for s in parsed]
     modes = [s["mode"] for s in parsed]
-    bb = BatchBody(
-        prompts=prompts,
-        modes=modes,
-        duration=body.duration,
-        aspect=body.aspect,
-        quality=body.quality,
-        steps=body.steps if body.steps and body.steps > 0 else 20,
-        sampler=body.sampler,
-        scheduler=body.scheduler,
-        link_continue=False,
-        append_to_chain=False,
-        seed=body.seed,
-        silent_audio=silent,
-        purpose=purpose or "short_film",
-        face_lock=True,
-        lora_id=body.lora_id,
-        lora_name=body.lora_name,
-        lora_strength=body.lora_strength,
-        cinema_batch=cinema_batch,
-        score_id=audio.get("score_id") or None,
-    )
-    queued = await batch(bb)
+    if body.seamless:
+        queued = await _queue_cinema_seamless(
+            body=body,
+            parsed=parsed,
+            prompts=prompts,
+            lib=lib,
+            audio=audio,
+            cinema_batch=cinema_batch,
+            silent=silent,
+            purpose=purpose or "short_film",
+        )
+    else:
+        bb = BatchBody(
+            prompts=prompts,
+            modes=modes,
+            duration=body.duration,
+            aspect=body.aspect,
+            quality=body.quality,
+            steps=body.steps if body.steps and body.steps > 0 else 20,
+            sampler=body.sampler,
+            scheduler=body.scheduler,
+            link_continue=False,
+            append_to_chain=False,
+            seed=body.seed,
+            silent_audio=silent,
+            purpose=purpose or "short_film",
+            face_lock=True,
+            lora_id=body.lora_id,
+            lora_name=body.lora_name,
+            lora_strength=body.lora_strength,
+            sage_attention=_sage_mode(body),
+            cinema_batch=cinema_batch,
+            score_id=audio.get("score_id") or None,
+        )
+        queued = await batch(bb)
     audio["last_batch"] = cinema_batch
     lib["audio"] = audio
     cinema.save(lib)
     queued["cinema_batch"] = cinema_batch
     queued["score_id"] = audio.get("score_id") or ""
-    slog.info("cinema produce", shots=len(parsed), count=queued.get("count"), batch=cinema_batch)
+    queued["seamless"] = bool(body.seamless)
+    slog.info(
+        "cinema produce",
+        shots=len(parsed),
+        count=queued.get("count"),
+        batch=cinema_batch,
+        seamless=bool(body.seamless),
+    )
     return queued
 
 
@@ -2250,6 +2474,7 @@ async def storyboard(body: StoryboardBody):
             "mode": "t2v",
             "silent_audio": silent,
             "purpose": purpose,
+            "sage_attention": _sage_mode(body),
             "batch_id": batch_id,
             "batch_index": i + 1,
             "batch_total": n_clips,
@@ -2438,6 +2663,11 @@ class LoraDownloadBody(BaseModel):
     id: str = ""
 
 
+class LoraImportBody(BaseModel):
+    url: str = ""
+    filename: Optional[str] = None
+
+
 @app.get("/api/loras")
 async def loras_get():
     return {"ok": True, "loras": public_list(), "download": dict(_lora_dl_status)}
@@ -2448,7 +2678,7 @@ async def loras_download(body: LoraDownloadBody):
     spec = find_spec(lora_id=body.id or "")
     if not spec or not spec.get("file") or not spec.get("url"):
         raise HTTPException(400, "bilinmeyen LoRA")
-    if file_ready(spec["file"]):
+    if spec_ready(spec):
         return {"ok": True, "ready": True, "id": spec["id"], "file": spec["file"]}
     if _lora_dl_status.get("busy"):
         return {
@@ -2501,6 +2731,40 @@ async def loras_upload(file: UploadFile = File(...)):
         raise HTTPException(500, str(e)) from e
     slog.info("lora uploaded", file=orig, bytes=size)
     return {"ok": True, "file": orig, "id": f"file:{orig}", "loras": public_list()}
+
+
+@app.post("/api/loras/import")
+async def loras_import(body: LoraImportBody):
+    """Download an H3 .safetensors LoRA from a direct HTTP(S) URL (HF resolve works)."""
+    url = (body.url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "http(s) URL gerekli")
+    name = filename_from_url(url, body.filename or "")
+    if not name:
+        raise HTTPException(
+            400,
+            "Dosya adı .safetensors olmalı — Hugging Face resolve linki veya filename yaz",
+        )
+    if not is_h3_lora_name(name):
+        raise HTTPException(
+            400, "SDXL / Pony / Wan / Flux / ClipProj dosyası H3 video LoRA değil"
+        )
+    if file_ready(name):
+        return {"ok": True, "ready": True, "id": f"file:{name}", "file": name, "loras": public_list()}
+    if _lora_dl_status.get("busy"):
+        return {
+            "ok": True,
+            "ready": False,
+            "busy": True,
+            "id": _lora_dl_status.get("id"),
+        }
+    spec = {
+        "id": f"file:{name}",
+        "file": name,
+        "url": url,
+    }
+    asyncio.create_task(_download_lora_file(spec))
+    return {"ok": True, "ready": False, "busy": True, "id": spec["id"], "file": name}
 
 
 async def _download_lora_file(spec: dict) -> None:
@@ -3381,6 +3645,7 @@ async def director_commit(body: DirectorCommitBody):
             lora_id=lora_bits.get("lora_id") or None,
             lora_name=lora_bits.get("lora_name") or None,
             lora_strength=lora_bits.get("lora_strength"),
+            sage_attention=_sage_mode(body),
         )
         queued = await batch(bb)
 
@@ -3490,6 +3755,21 @@ async def music_analyze(body: MusicAnalyzeBody):
         clipDurationSec=clip,
     )
     meta = load_meta(MUSIC, body.music_id)
+    audio_path = Path(meta.get("path") or "")
+    timeline: list = []
+    if audio_path.exists():
+        try:
+            timeline = probe_energy_timeline(
+                audio_path,
+                duration_sec=float(meta.get("durationSec") or 0),
+                clip_sec=clip,
+            )
+        except Exception as e:
+            slog.warn("music energy probe failed", err=str(e))
+            timeline = []
+    if timeline:
+        update_meta(MUSIC, body.music_id, energyTimeline=timeline)
+        meta = load_meta(MUSIC, body.music_id)
 
     sid = body.session_id
     if not sid or sid not in _sessions:
@@ -3511,6 +3791,7 @@ async def music_analyze(body: MusicAnalyzeBody):
         lyrics=lyrics,
         concept=concept,
         visual_style=body.visual_style or "realistic",
+        timeline=timeline,
     )
     sess["messages"].append({"role": "user", "content": seed})
     history = [{"role": "system", "content": (system_prompt() or "") + ui_lang_addendum(ui_lang)}] + sess["messages"][-24:]
@@ -3518,7 +3799,7 @@ async def music_analyze(body: MusicAnalyzeBody):
         content = await llm.chat(
             model,
             history,
-            temperature=0.65,
+            temperature=0.5,
             think=False,
             retries=3,
             num_predict=4096,
@@ -3576,6 +3857,11 @@ async def music_analyze(body: MusicAnalyzeBody):
         else:
             brief = ensure_shot_count_sync(brief)
 
+        if timeline:
+            brief = stamp_shots_with_timeline(brief, timeline)
+        brief["force_continue"] = True
+        brief["silentAudio"] = True
+
     if not brief or not brief.get("shots"):
         sess["messages"].append({"role": "assistant", "content": reply})
         sess["last_raw"] = content
@@ -3590,8 +3876,8 @@ async def music_analyze(body: MusicAnalyzeBody):
     need = brief.get("expectedShotCount") or n
     reply = (
         f"Şarkı analizi hazır: {meta.get('filename')} · {meta.get('durationSec')}sn → "
-        f"{n} shot (hedef {need}). Lip-sync yok; finalde şarkı mux edilecek. "
-        "**Üretime al**’a bas; bitince **Şarkılı final**."
+        f"{n} shot (hedef {need}). Görüntü şarkı enerjisine göre yazıldı; lip-sync yok. "
+        "**Üretime al** → bitince **Şarkılı final**."
     )
     if brief.get("shotsIncomplete"):
         reply += f"\n\nUyarı: {n}/{need} shot — yine de kuyruğa alabilirsin."
@@ -3850,13 +4136,15 @@ async def _run_job(job: dict):
         job["progress"] = 5
         job["progress_label"] = "frame / graph"
         _save_jobs()
-        first = await _resolve_first_frame(job)
-        if job.get("mode") == "continue" or job.get("continue_from"):
-            if not first:
-                raise RuntimeError(
-                    "Devam için last frame yok — önce bitmiş videoda last frame hazırlanmalı"
-                )
-            job["first_frame_name"] = first
+        first = None
+        if (job.get("mode") or "").lower() != "multishot":
+            first = await _resolve_first_frame(job)
+            if job.get("mode") == "continue" or job.get("continue_from"):
+                if not first:
+                    raise RuntimeError(
+                        "Devam için last frame yok — önce bitmiş videoda last frame hazırlanmalı"
+                    )
+                job["first_frame_name"] = first
         # H3 first_frame path hard-fails on non-×32 sizes (e.g. 1280×720).
         w, h = snap_h3_size(int(job.get("width") or 1280), int(job.get("height") or 736))
         if job.get("width") != w or job.get("height") != h:
@@ -3873,7 +4161,27 @@ async def _run_job(job: dict):
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
         lora_name, lora_strength = _lora_for_graph(job)
-        if mode in ("ref", "face", "v2v"):
+        if mode == "multishot":
+            script = (job.get("script") or job.get("prompt") or "").strip()
+            if not script:
+                raise RuntimeError("Kesintisiz zincir için script yok")
+            prompt = build_multishot_prompt(
+                script=script,
+                width=w,
+                height=h,
+                frames_per_shot=length,
+                seed=int(job["seed"]),
+                steps=int(job["steps"]),
+                sampler=job.get("sampler") or "res_multistep",
+                scheduler=job.get("scheduler") or "simple",
+                shot_count=0,
+                filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
+                silent_audio=silent,
+                lora_name=lora_name,
+                lora_strength=lora_strength,
+                sage_attention=_sage_mode(job),
+            )
+        elif mode in ("ref", "face", "v2v"):
             refs = [str(x) for x in (job.get("ref_images") or []) if x]
             if not refs and not ref_videos:
                 raise RuntimeError("Referans görsel/video eksik")
@@ -3895,6 +4203,7 @@ async def _run_job(job: dict):
                 include_video_audio=bool(job.get("include_video_audio", True)),
                 lora_name=lora_name,
                 lora_strength=lora_strength,
+                sage_attention=_sage_mode(job),
             )
         elif mode == "face_continue" or (
             (mode == "continue" or job.get("continue_from")) and face_refs
@@ -3931,6 +4240,7 @@ async def _run_job(job: dict):
                 silent_audio=silent,
                 lora_name=lora_name,
                 lora_strength=lora_strength,
+                sage_attention=_sage_mode(job),
             )
             job["mode"] = "face_continue"
             job["ref_role"] = "face"
@@ -3950,6 +4260,7 @@ async def _run_job(job: dict):
                 silent_audio=silent,
                 lora_name=lora_name,
                 lora_strength=lora_strength,
+                sage_attention=_sage_mode(job),
             )
         job["progress"] = 10
         job["progress_label"] = "Comfy kuyruğa"

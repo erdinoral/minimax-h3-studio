@@ -50,6 +50,17 @@ module.exports = {
         message: [ "uv pip install -r requirements.txt", ]
       }
     },
+    // H3 Multishot / Seamless Chain (jlucasmcrell) — CORE sampler only.
+    // Same clone-into-custom_nodes pattern as KJNodes above.
+    {
+      method: "shell.run",
+      params: {
+        path: "app/custom_nodes",
+        message: [
+          "git clone https://github.com/jlucasmcrell/ComfyUI-H3-Multishot"
+        ],
+      }
+    },
     // Must run AFTER requirements.txt so its pins win. ComfyUI's requirements
     // already resolve to a CUDA 13 torch today, so this is a guarantee rather
     // than a fix -- the H3 NVFP4 / INT8-ConvRot weights need cu130 to hit the

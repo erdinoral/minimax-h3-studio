@@ -16,6 +16,12 @@ module.exports = {
       "download/fl2va.js",
       "download/ref2va.js",
       "download/lora.js",
+      "download/lora-erosmax.js",
+      "download/lora-turbo6.js",
+      "download/lora-turbov4.js",
+      "download/lora-realism.js",
+      "download/lora-pinkfluffybunny.js",
+      "download/multishot.js",
       "download/text_encoder_int8.js",
       "remove/fl2va.js",
       "remove/ref2va.js",
@@ -34,7 +40,13 @@ module.exports = {
       fl2va: info.exists("app/models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"),
       ref2va: info.exists("app/models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
       encoder_int8: info.exists("app/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
-      lora: info.exists("app/models/loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors")
+      lora: info.exists("app/models/loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors"),
+      loraErosmax: info.exists("app/models/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors"),
+      loraTurbo6: info.exists("app/models/loras/minimax_h3_turbo_6step_ema_fl2va_pruned.safetensors"),
+      loraTurboV4: info.exists("app/models/loras/minimax_h3_turbo_v4_step600_ema.safetensors"),
+      loraRealism: info.exists("app/models/loras/h3-realism-people-t2v-i2v-r2v.safetensors"),
+      loraPink: info.exists("app/models/loras/PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors") || info.exists("app/models/loras/PinkFluffyBunny-pruned-v1-rank128.safetensors"),
+      multishot: info.exists("app/custom_nodes/ComfyUI-H3-Multishot")
     }
 
     if (running.install) {
@@ -120,8 +132,56 @@ module.exports = {
       if (!has.lora) {
         downloads.push({
           icon: "fa-solid fa-download",
-          text: "LightX2V Turbo LoRA — 4-step FL2VA (~2GB)",
+          text: "LightX2V Turbo LoRA — 4-step FL2VA (~1.8GB)",
           href: "download/lora.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraErosmax) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "ErosMax Turbo LoRA — 4-step FL2VA (~1.8GB)",
+          href: "download/lora-erosmax.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraTurbo6) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "H3 Turbo 6-step EMA LoRA (~0.8GB)",
+          href: "download/lora-turbo6.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraTurboV4) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "H3 Turbo v4 EMA LoRA (~0.7GB)",
+          href: "download/lora-turbov4.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraRealism) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "H3 Realism People LoRA (~125MB)",
+          href: "download/lora-realism.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraPink) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "PinkFluffyBunny character LoRA (~2.3GB)",
+          href: "download/lora-pinkfluffybunny.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.multishot) {
+        downloads.push({
+          icon: "fa-solid fa-link",
+          text: "H3 Multishot (Seamless Chain) nodes",
+          href: "download/multishot.js",
           mode: "refresh"
         })
       }

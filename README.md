@@ -79,6 +79,8 @@ Bottom chat uses the local **H3 Yönetmen** persona (`studio/prompts/director_sy
 2. Pick the model under **Ayarlar → Yönetmen modeli**.
 3. Chat or tap chips → when brief is ready: **Sahneye aktar** or **Aktar + kuyruğa al**.
 
+**Music video from a song:** expand the Director dock → **Şarkı seç** → optional concept/lyrics → **Şarkıdan brief**. Studio measures loudness per clip window (not beat-sync) and the Director writes a silent continue chain (same face/wardrobe). Queue with **Üretime al**, keep **Devam zincirine ekle** on, then **Şarkılı final** to mux your track. Face/reference stills in Reference mode help identity further. H3 will not lipsync to the file.
+
 One-time after update (if Studio deps missing):
 
 ```text
@@ -115,29 +117,49 @@ Spoken dialogue uses `<d>` tags, e.g. `<d>[English] Follow the wind, live free.<
 
 ### LoRA (H3 Studio)
 
-Production **Ayarlar** (bottom): pick a LoRA → **Uygula**. That fills steps / sampler / strength and uses the file on the next generate.
+Production **Ayarlar**: named list — **click a LoRA to download it**, then **Uygula**. That attaches the file (and strength). **Steps stay whatever you typed** in the Steps box — a turbo LoRA can run at 4 or 10 (or any count). Sampler is also yours. The list still shows a recommended step count in the hint.
 
-| LoRA | What it does |
-|---|---|
-| **Yok** | Default 20 step · `res_multistep` |
-| **LightX2V Turbo** | FL2VA 4-step distill · `er_sde` · strength 0.75. New video / first-last only — skipped on Ref / V2V / face. ~2 GB. |
-| **ErosMax Turbo** | FL2VA 4-step · same skip on Ref / face. |
-| **H3 Turbo 6-step EMA** | FL2VA 6-step · same skip on Ref / face. |
-| **H3 Turbo v4 EMA** | FL2VA turbo (`step600` is training, not 4 inference steps) — set steps yourself. |
-| **H3 Realism People** | T2V / I2V / Ref · keeps your step/sampler. |
-| **PinkFluffyBunny** | Character LoRA · works on new video and Ref/face. |
+| LoRA | Size | What it does |
+|---|---|---|
+| **Yok** | — | Default 20 step · `res_multistep` |
+| **LightX2V Turbo** | ~1.8 GB | FL2VA 4-step distill · `er_sde` · strength 0.75. New video / first-last only — skipped on Ref / V2V / face. |
+| **ErosMax Turbo** | ~1.8 GB | FL2VA 4-step · same skip on Ref / face. |
+| **H3 Turbo 6-step EMA** | ~0.8 GB | FL2VA 6-step · same skip on Ref / face. |
+| **H3 Turbo v4 EMA** | ~0.7 GB | FL2VA turbo (`step600` is training, not 4 inference steps) — set steps yourself. |
+| **H3 Realism People** | ~125 MB | T2V / I2V / Ref · keeps your step/sampler. |
+| **PinkFluffyBunny** | ~2.3 GB | Character LoRA · works on new video and Ref/face. |
 
-If LightX2V is missing, **Uygula** downloads it into `app/models/loras`, or use Pinokio **Download Models → LightX2V Turbo LoRA**.
+Missing files download into `app/models/loras` from Hugging Face when you click the name (or **Uygula**). Same files are also in Pinokio **Download Models**.
 
-Drop extra H3 `.safetensors` via **LoRA ekle** (or copy into `app/models/loras`) — they appear in the list. Studio hides SDXL / Pony / Wan / Flux / ClipProj files; those are not MiniMax H3 video LoRAs. Turbo files whose names contain `4step` / `6step` get matching step presets. For a consistent person, use **Yüz referansı** or a Direktör character card (Ref2VA).
+Drop extra H3 `.safetensors` via **LoRA ekle**, paste a Hugging Face **resolve** URL into **URL’den al**, or copy the file into `app/models/loras` — they appear in the same list. Studio hides SDXL / Pony / Wan / Flux / ClipProj files; those are not MiniMax H3 video LoRAs. Catalog hints may mention 4-step / 6-step as a recommendation only.
+
+Cinema studio has the **same LoRA list** next to duration/steps (film-wide). Character cards still have an optional per-character LoRA for Ref2VA identity shots. For a consistent person without a character LoRA, use **Yüz referansı** or a Direktör still (Ref2VA).
+
+```text
+GET  /api/loras
+POST /api/loras/download   # { id } catalog entry with a url (downloadable: true)
+POST /api/loras/upload     # multipart .safetensors
+POST /api/loras/import     # { url, filename? } direct HF / .safetensors link
+```
+
+### H3 Multishot — Kesintisiz zincir (Seamless Chain)
+
+[ComfyUI-H3-Multishot](https://github.com/jlucasmcrell/ComfyUI-H3-Multishot) (jlucasmcrell) is a **custom node pack**, not a LoRA. It welds 10–15s H3 blocks into **one take** (picture + audio, no cut at the join). Studio queues that as a single Comfy graph (`H3MultishotSampler`, CORE path — last-frame hand-off, no Motion-Context / JoyEcho).
+
+**Install (existing Pinokio install):** menu **Download Models → H3 Multishot (Seamless Chain) nodes**, or **Update**. Then **Stop → Start** so Comfy loads the pack.
+
+**Cinema:** **Kesintisiz zincir** (on when the pack is present). Shot texts are joined with `---` and render as one clip. Pack limit: **8 shots**. Uncheck it to use the older per-shot Continue chain (last-frame I2V, up to 80 shots).
+
+Optional full v2 extras (LLM writer, `context_pin`, accelerators) stay out of Studio; CORE is enough for cinema.
 
 ### Direktör · Sinema stüdyosu
 
 **Sahne → Direktör** opens a two-column cinema studio for long-form films.
 
 - **Sol sütun (üst/alt):** **Karakter ekle+** opens a card (name, description, reference still; optional character LoRA). **Mekan ekle+** is the same for locations (region name, description, still).
-- **Film setup:** Higgsfield-style pills (look, camera, color palette, lighting, era, purpose, style). Each opens a popover; the selected value is locked into every shot prompt. **Auto** skips that lock.
-- **Kalite:** duration, 480/720/1080, and steps live in this panel and drive the queue.
+- **Film setup presets:** the first pill (**Ön ayar / Preset**) fills camera, color palette, lighting, era, purpose, style, and audio mode. You can still override any pill afterwards. **Auto** clears those locks.
+- **Gallery delete** removes the card and the files: studio clip, last frame, Comfy `app/output/video/H3_Studio` copy, and uploaded last-frame stills.
+- **Kalite:** duration, 480/720/1080, steps, film LoRA, and **Kesintisiz zincir** live in this panel and drive the queue.
 - **Ses / müzik (Higgsfield film):** H3 cannot emit the *same* song on every shot — each clip invents a new score. **Diyalog + SFX** mode forbids generated BGM, locks each character’s **Ses tarifi** into every prompt, then you upload **one** film track and **Aynı müziği filme karıştır** after the queue finishes (dialogue stays; the score is mixed underneath). Do not use the music-video mux here — that *replaces* audio and kills speech.
 - **Sağ sütun — shot listesi:** write a shot, then **+ Yeni video** (t2v / new chain) or **+ Continue** (last frame of the previous shot). Tags on each card can flip the mode later.
 - Mention a character or location **name** in a shot — that still is attached on New Video shots (Ref2VA). Continue shots keep last-frame I2V and put identity in the prompt text.
@@ -147,7 +169,7 @@ GET  /api/cinema
 PUT  /api/cinema
 POST /api/cinema/character
 POST /api/cinema/location
-POST /api/cinema/produce   # shots: [{ text, mode: "t2v"|"continue" }], audio: { mode, score_id }
+POST /api/cinema/produce   # shots: [{ text, mode }], seamless: true → one Multishot take (max 8)
 POST /api/cinema/mux       # concat clips, keep dialogue, mix one score
 GET  /api/cinema/final/{batch_id}
 POST /api/director/chat            # plan_mode: true → shot tahtasını görür, patch ile düzenler
@@ -208,9 +230,9 @@ Cost scales steeply with pixel count. Community figures on a 32 GB RTX 5090 at 1
 | 10 s, with sage-attention | ~23 min |
 | 10 s, 20 steps, without | ~58 min |
 
-So 1080p is very much usable — it just costs time, and quality is reportedly better than 768p. Practical levers: **sage-attention** (roughly halves it), and **steps** (15 is usually fine; 10 degrades the audio noticeably).
+So 1080p is very much usable — it just costs time, and quality is reportedly better than 768p. Practical levers (besides LoRA): **shorter clips**, **480p/720p**, **15 steps**, **silent decode** on music videos. Studio has **Taslak** (5s · 480p · 12) and **Hızlı** (5s · 720p · 15). Studio graphs do **not** patch Sage Attention.
 
-See **SageAttention 3** below — this launcher can build the Blackwell FP4 kernels for you.
+See **SageAttention 3** below if you want those kernels in Comfy itself; H3 Studio no longer uses them.
 
 At 1080p the working set exceeds 32 GB of VRAM, so ComfyUI offloads to system RAM. Your 93 GB is comfortable for this.
 

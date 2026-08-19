@@ -45,6 +45,8 @@
     loraStrength: 0.75,
     loraApplied: false,
     loraCatalog: [],
+    loraDownload: {},
+    multishot: false,
     // Director tabs: per-session chat state
     directorSessions: [], // { id, title, messages: [ {role, content} ] }
     directorSessionCounter: 0,
@@ -114,6 +116,107 @@
     return typeof h3Lang === "function" ? h3Lang() : "tr";
   }
 
+  const CINEMA_LOOK_PRESETS = {
+    auto: {
+      camera: "auto",
+      palette: "auto",
+      lighting: "auto",
+      era: "auto",
+      purpose: "auto",
+      style: "auto",
+      audio: "film",
+    },
+    feature: {
+      camera: "35mm",
+      palette: "kodak",
+      lighting: "volumetric",
+      era: "present",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    handheld: {
+      camera: "handheld",
+      palette: "rec709",
+      lighting: "natural",
+      era: "present",
+      purpose: "social",
+      style: "realistic",
+      audio: "film",
+    },
+    documentary: {
+      camera: "16mm",
+      palette: "rec709",
+      lighting: "natural",
+      era: "present",
+      purpose: "documentary",
+      style: "realistic",
+      audio: "film",
+    },
+    commercial: {
+      camera: "35mm",
+      palette: "teal_orange",
+      lighting: "studio",
+      era: "present",
+      purpose: "ad",
+      style: "realistic",
+      audio: "film",
+    },
+    music_video: {
+      camera: "anamorphic2x",
+      palette: "neon",
+      lighting: "neon",
+      era: "present",
+      purpose: "music_video",
+      style: "realistic",
+      audio: "silent",
+    },
+    anamorphic: {
+      camera: "anamorphic2x",
+      palette: "teal_orange",
+      lighting: "volumetric",
+      era: "present",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    found_footage: {
+      camera: "handheld",
+      palette: "bleach",
+      lighting: "natural",
+      era: "present",
+      purpose: "documentary",
+      style: "found_footage",
+      audio: "film",
+    },
+    noir: {
+      camera: "35mm",
+      palette: "noir",
+      lighting: "practical",
+      era: "present",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    golden: {
+      camera: "35mm",
+      palette: "golden_hour",
+      lighting: "natural",
+      era: "present",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    retro_80s: {
+      camera: "35mm",
+      palette: "neon",
+      lighting: "neon",
+      era: "1980s",
+      purpose: "music_video",
+      style: "realistic",
+      audio: "silent",
+    },
+  };
   const CINEMA_SETUP_OPTIONS = {
     look: [
       ["auto", "Auto"],
@@ -124,6 +227,9 @@
       ["music_video", "Klip"],
       ["anamorphic", "Anamorphic"],
       ["found_footage", "Found footage"],
+      ["noir", "Noir"],
+      ["golden", "Golden hour"],
+      ["retro_80s", "80s"],
     ],
     camera: [
       ["auto", "Auto"],
@@ -178,13 +284,13 @@
     ],
   };
   const CINEMA_SETUP_META = {
-    look: { label: "Film setup", icon: "🎞" },
-    camera: { label: "Camera", icon: "📷" },
-    palette: { label: "Color palette", icon: "🎨" },
-    lighting: { label: "Lighting", icon: "💡" },
-    era: { label: "Era", icon: "📅" },
-    purpose: { label: "Purpose", icon: "🎬" },
-    style: { label: "Style", icon: "✦" },
+    look: { labelKey: "cinema.setup.look", icon: "🎞" },
+    camera: { labelKey: "cinema.setup.camera", icon: "📷" },
+    palette: { labelKey: "cinema.setup.palette", icon: "🎨" },
+    lighting: { labelKey: "cinema.setup.lighting", icon: "💡" },
+    era: { labelKey: "cinema.setup.era", icon: "📅" },
+    purpose: { labelKey: "cinema.setup.purpose", icon: "🎬" },
+    style: { labelKey: "cinema.setup.style", icon: "✦" },
   };
 
   function cinemaId() {
@@ -241,7 +347,26 @@
     if (key === "style") {
       return [["auto", "Auto"]].concat(STYLE_KEYS.map((id) => [id, styleLabel(id)]));
     }
-    return CINEMA_SETUP_OPTIONS[key] || [["auto", "Auto"]];
+    const rows = CINEMA_SETUP_OPTIONS[key] || [["auto", "Auto"]];
+    if (key === "look") {
+      return rows.map(([id, fallback]) => [id, tt("cinema.look." + id) || fallback]);
+    }
+    return rows;
+  }
+
+  function applyCinemaLookPreset(lookId) {
+    const id = CINEMA_LOOK_PRESETS[lookId] ? lookId : "auto";
+    const bundle = CINEMA_LOOK_PRESETS[id];
+    const c = ensureCinema();
+    c.setup = c.setup || {};
+    c.setup.look = id;
+    c.setup.camera = bundle.camera;
+    c.setup.palette = bundle.palette;
+    c.setup.lighting = bundle.lighting;
+    c.setup.era = bundle.era;
+    c.setup.purpose = bundle.purpose;
+    c.setup.style = bundle.style;
+    if (bundle.audio) cinemaAudio().mode = bundle.audio;
   }
 
   function cinemaSetupValueLabel(key, id) {
@@ -371,68 +496,30 @@
     const dock = document.getElementById("director-dock");
     if (!dock) return;
     const root = document.documentElement;
-    // Height comes from .director.size-* / .collapsed — clear stale root overrides
     root.style.removeProperty("--director-h");
-    if (dock.classList.contains("modal-open")) {
-      // Modal floats — keep a thin strip so workspace isn't shoved
-      root.style.setProperty("--director-pad", "56px");
-      return;
-    }
-    // Pad = real dock height so Prompt Üret / gen-hint sit above the dock (not under it)
-    const apply = () => {
-      const h = Math.ceil(dock.getBoundingClientRect().height) || 56;
-      root.style.setProperty("--director-pad", `${Math.max(56, h)}px`);
-    };
-    apply();
-    requestAnimationFrame(apply);
+    // Dock is in document flow — workspace no longer needs a fake bottom pad
+    root.style.setProperty("--director-pad", "0px");
   }
 
   function setDirectorOpen(open) {
-    const dock = $("director-dock");
-    if (!dock) return;
-    if (!open) {
-      setDirectorModal(false);
-      dock.classList.add("collapsed");
-    } else {
-      dock.classList.remove("collapsed");
-      // Clear any leftover modal inline geometry
-      dock.style.removeProperty("left");
-      dock.style.removeProperty("right");
-      dock.style.removeProperty("top");
-      dock.style.removeProperty("bottom");
-      dock.style.removeProperty("height");
-      dock.style.removeProperty("width");
-    }
-    syncDirectorDockHeight();
+    setDirectorModal(!!open);
   }
 
-  const DIR_SIZES = ["size-sm", "size-md", "size-lg"];
-  function directorSizeIndex() {
-    const dock = $("director-dock");
-    return Math.max(0, DIR_SIZES.findIndex((c) => dock.classList.contains(c)));
+  function setDirectorLlmOpen(open) {
+    setDirectorModal(!!open);
   }
-  function setDirectorSize(idx) {
-    const dock = $("director-dock");
-    const i = Math.max(0, Math.min(DIR_SIZES.length - 1, idx));
-    DIR_SIZES.forEach((c) => dock.classList.remove(c));
-    dock.classList.add(DIR_SIZES[i]);
-    dock.style.height = "";
-    dock.style.removeProperty("--director-h");
-    try {
-      localStorage.setItem("h3_director_size", DIR_SIZES[i]);
-    } catch {
-      /* ignore */
-    }
-    syncDirectorDockHeight();
-  }
+
   function setDirectorModal(open) {
     const dock = $("director-dock");
     const backdrop = $("director-backdrop");
     if (!dock) return;
-    if (open) {
-      dock.classList.remove("collapsed");
-    } else {
-      // Restore bottom-dock geometry after modal
+    const on = !!open;
+    dock.classList.toggle("modal-open", on);
+    dock.setAttribute("aria-hidden", on ? "false" : "true");
+    backdrop?.classList.toggle("hidden", !on);
+    document.body.classList.toggle("director-modal-open", on);
+    $("btn-director-llm-tab")?.setAttribute("aria-expanded", on ? "true" : "false");
+    if (!on) {
       dock.style.removeProperty("left");
       dock.style.removeProperty("right");
       dock.style.removeProperty("top");
@@ -440,75 +527,28 @@
       dock.style.removeProperty("height");
       dock.style.removeProperty("width");
     }
-    dock.classList.toggle("modal-open", !!open);
-    backdrop?.classList.toggle("hidden", !open);
-    $("btn-dir-modal")?.classList.toggle("on", !!open);
-    if ($("btn-dir-modal")) {
-      $("btn-dir-modal").textContent = open ? "✕" : "⛶";
-      $("btn-dir-modal").title = open ? "Küçük panele dön" : "Sohbeti büyüt — chat burada";
-    }
-    try {
-      localStorage.setItem("h3_director_modal", open ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
     syncDirectorDockHeight();
     const log = $("director-log");
     if (log) log.scrollTop = log.scrollHeight;
-    if (open) $("director-msg")?.focus();
+    if (on) $("director-msg")?.focus();
   }
 
-  $("btn-dir-smaller").onclick = () => {
-    if ($("director-dock").classList.contains("modal-open")) setDirectorModal(false);
-    setDirectorOpen(true);
-    setDirectorSize(directorSizeIndex() - 1);
-  };
-  $("btn-dir-bigger").onclick = () => {
-    setDirectorOpen(true);
-    if ($("director-dock").classList.contains("modal-open")) return;
-    const idx = directorSizeIndex();
-    if (idx >= DIR_SIZES.length - 1) {
-      setDirectorModal(true);
-      return;
-    }
-    setDirectorSize(idx + 1);
-  };
-  $("btn-dir-modal").onclick = () => {
-    setDirectorOpen(true);
-    setDirectorModal(!$("director-dock").classList.contains("modal-open"));
-  };
-  $("btn-dir-collapse").onclick = () => setDirectorOpen(false);
-  $("director-backdrop").onclick = () => {
-    setDirectorModal(false);
-    setDirectorOpen(false);
-  };
+  $("btn-dir-collapse")?.addEventListener("click", () => setDirectorModal(false));
+  $("director-backdrop")?.addEventListener("click", () => setDirectorModal(false));
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
-    if ($("director-dock").classList.contains("modal-open")) {
+    if ($("director-dock")?.classList.contains("modal-open")) {
+      e.preventDefault();
       setDirectorModal(false);
-    } else if (!$("director-dock").classList.contains("collapsed")) {
-      setDirectorOpen(false);
     }
   });
 
-  // Drag-resize removed — it covered the studio. Use − / + / ⛶ only.
   (() => {
     const dock = $("director-dock");
     if (!dock) return;
     dock.style.height = "";
     dock.style.removeProperty("--director-h");
   })();
-
-  // restore size prefs (panel stays collapsed until user types)
-  try {
-    const saved = localStorage.getItem("h3_director_size");
-    if (saved && DIR_SIZES.includes(saved)) {
-      DIR_SIZES.forEach((c) => $("director-dock").classList.remove(c));
-      $("director-dock").classList.add(saved);
-    }
-  } catch {
-    /* ignore */
-  }
 
   function setDuration(sec) {
     const n = Number(sec);
@@ -972,7 +1012,8 @@
   }
 
   function filmPillHtml(key, value) {
-    const meta = CINEMA_SETUP_META[key] || { label: key, icon: "•" };
+    const meta = CINEMA_SETUP_META[key] || { labelKey: "", icon: "•" };
+    const label = meta.labelKey ? tt(meta.labelKey) : key;
     const opts = cinemaSetupOptions(key)
       .map((row) => {
         const on = row[0] === value ? " on" : "";
@@ -993,7 +1034,7 @@
       '" role="button" tabindex="0"><span class="film-pill-icon">' +
       htmlEsc(meta.icon) +
       '</span><span class="film-pill-copy"><span class="film-pill-label">' +
-      htmlEsc(meta.label) +
+      htmlEsc(label) +
       '</span><span class="film-pill-value">' +
       htmlEsc(cinemaSetupValueLabel(key, value)) +
       '</span></span><div class="film-pill-menu">' +
@@ -1120,13 +1161,17 @@
     const chars = $("cinema-chars");
     const locs = $("cinema-locs");
     const active = document.activeElement;
-    const typingCards =
-      active &&
-      ((chars && chars.contains(active)) || (locs && locs.contains(active)));
-    if (chars && !typingCards) {
+    const typingIn = (root) =>
+      !!(
+        root &&
+        active &&
+        root.contains(active) &&
+        active.matches("input:not([type=file]):not([type=button]), textarea, select")
+      );
+    if (chars && !typingIn(chars)) {
       chars.innerHTML = (c.characters || []).map((x) => cinemaCardHtml(x, "character")).join("");
     }
-    if (locs && !typingCards) {
+    if (locs && !typingIn(locs)) {
       locs.innerHTML = (c.locations || []).map((x) => cinemaCardHtml(x, "location")).join("");
     }
     if (
@@ -1214,10 +1259,34 @@
     return (state.cinema[key] || []).find((x) => x.id === id);
   }
 
+  async function deleteCinemaAsset(kind, id) {
+    const aid = (id || "").trim();
+    if (!aid) return;
+    if (!confirm("Bu kartı sil?")) return;
+    const key = kind === "character" ? "characters" : "locations";
+    const c = ensureCinema();
+    c[key] = (c[key] || []).filter((x) => x.id !== aid);
+    renderCinema();
+    const path =
+      kind === "character"
+        ? `/api/cinema/character/${encodeURIComponent(aid)}`
+        : `/api/cinema/location/${encodeURIComponent(aid)}`;
+    try {
+      const r = await fetch(path, { method: "DELETE" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data) || "silinemedi");
+      toast(kind === "character" ? "Karakter silindi" : "Mekan silindi");
+    } catch (e) {
+      toast(String(e.message || e));
+      await loadCinema();
+    }
+  }
+
   async function openCinemaStudio() {
     $("view-gallery")?.classList.add("hidden");
     $("view-settings")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
+    setDirectorLlmOpen(false);
     setDirectorOpen(false);
     $("view-cinema")?.classList.remove("hidden");
     if (!state.loraCatalog || !state.loraCatalog.length) {
@@ -1340,6 +1409,18 @@
         c.setup && c.setup.purpose && c.setup.purpose !== "auto"
           ? c.setup.purpose
           : "short_film";
+      if ($("cinema-lora-select") && $("lora-select")) {
+        $("lora-select").value = $("cinema-lora-select").value;
+        const spec = currentLoraSpec();
+        if (spec && spec.file && spec.ready) {
+          state.loraApplied = true;
+          state.loraId = spec.id;
+          state.loraStrength = spec.strength;
+        } else if (!spec || !spec.file) {
+          state.loraApplied = false;
+          state.loraId = "";
+        }
+      }
       const r = await fetch("/api/cinema/produce", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1352,9 +1433,12 @@
           quality: c.quality || state.quality || "720",
           steps: Number($("cinema-steps")?.value) || c.steps || 20,
           seed: numOr("seed", -1),
+          sage_attention: "disabled",
           purpose,
           silent_audio: !filmMode,
           link_continue: false,
+          seamless: !!$("cinema-seamless")?.checked,
+          ...collectLoraPayload(),
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -1365,7 +1449,9 @@
         renderCinemaAudio();
       }
       toast(
-        filmMode
+        data.seamless
+          ? `Direktör: kesintisiz zincir (${shots.length} shot, tek take)`
+          : filmMode
           ? `Direktör: ${data.count || 0} shot kuyruğa alındı — diyalog+SFX, müzik sonra karışır`
           : `Direktör: ${data.count || 0} shot (sessiz görüntü)`
       );
@@ -2547,7 +2633,7 @@
       updateMusicMetaUi();
       appendDirectorMsg(
         "assistant",
-        `Şarkı alındı → proje **müzik klibi** (sessiz görüntü). ${data.music.filename} · ${data.music.durationSec}sn → ~${data.music.suggestedShots5}×5sn. Söz/konsept yazıp **Şarkıdan brief**’e bas; finalde şarkı mux.`
+        `Şarkı alındı → proje **müzik klibi** (sessiz görüntü). ${data.music.filename} · ${data.music.durationSec}sn → ~${data.music.suggestedShots5}×5sn. Konsept/söz yazıp **Şarkıdan brief**’e bas; yönetmen enerji eğrisine göre shot yazar. Kuyruk bitince **Şarkılı final**.`
       );
       toast("Şarkı hazır — Şarkıdan brief");
     } catch (e) {
@@ -2569,7 +2655,7 @@
     setDirectorUi(true, "Şarkı analiz ediliyor…");
     $("btn-music-analyze").disabled = true;
     try {
-      toast("Şarkıdan SCENE brief üretiliyor (uzun sürebilir)…");
+      toast("Şarkı ölçülüyor + SCENE brief (uzun sürebilir)…");
       const r = await fetch("/api/music/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2986,6 +3072,20 @@
       $("sys-comfy").textContent = s.comfy_online ? "on" : "off";
       $("sys-comfy-item")?.classList.toggle("comfy-on", !!s.comfy_online);
       $("sys-comfy-item")?.classList.toggle("comfy-off", !s.comfy_online);
+      state.multishot = !!s.multishot;
+      const seam = $("cinema-seamless");
+      const seamHint = $("cinema-seamless-label");
+      if (seam) {
+        seam.disabled = !state.multishot;
+        if (state.multishot && seam.dataset.userSet !== "1") seam.checked = true;
+        if (!state.multishot) seam.checked = false;
+        seam.title = state.multishot
+          ? "H3MultishotSampler: tek take, kesiksiz ses (en fazla 8 shot)"
+          : "Paket yok — Pinokio: Download Models → H3 Multishot, sonra Stop → Start";
+      }
+      if (seamHint && !state.multishot) {
+        seamHint.title = "Önce Multishot paketini kur";
+      }
     } catch {
       /* ignore */
     }
@@ -3372,13 +3472,24 @@
   async function deleteGalleryItem(itemId) {
     if (!itemId) return;
     if (!confirm("Bu video galeriden silinsin mi?")) return;
+    if (state.selectedJobId === itemId) clearPlayer();
+    document.querySelectorAll("#gallery-grid video").forEach((v) => {
+      const src = v.getAttribute("src") || v.src || "";
+      if (!src.includes(itemId)) return;
+      try {
+        v.pause();
+      } catch {
+        /* ignore */
+      }
+      v.removeAttribute("src");
+      v.load();
+    });
     try {
       const r = await fetch(`/api/gallery/${encodeURIComponent(itemId)}`, {
         method: "DELETE",
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      if (state.selectedJobId === itemId) clearPlayer();
       toast("Galeriden silindi");
       await renderGallery();
     } catch (e) {
@@ -3662,22 +3773,27 @@
     }
   }
 
-  $("btn-generate").onclick = () => submitGenerate();
-  $("btn-fast-preset")?.addEventListener("click", () => {
-    setDuration(5);
-    setQuality("480");
-    if (!state.loraApplied) {
+  function applySpeedProfile(kind) {
+    if (kind === "draft") {
+      setDuration(5);
+      setQuality("480");
       const steps = $("steps");
       if (steps) steps.value = "12";
+      toast("Taslak: 5sn · 480p · 12 step");
+      return;
     }
-    state.projectSilent = true;
-    keepLoraApplied();
-    toast(
-      state.loraApplied
-        ? `Fast: 5sn · 480p · LoRA step/sampler duruyor · sessiz`
-        : "Fast: 5sn · 480p · 12 step · sessiz bayrağı açık"
-    );
-  });
+    if (kind === "quick") {
+      setDuration(5);
+      setQuality("720");
+      const steps = $("steps");
+      if (steps) steps.value = "15";
+      toast("Hızlı: 5sn · 720p · 15 step");
+    }
+  }
+
+  $("btn-generate").onclick = () => submitGenerate();
+  $("btn-fast-preset")?.addEventListener("click", () => applySpeedProfile("draft"));
+  $("btn-speed-quick")?.addEventListener("click", () => applySpeedProfile("quick"));
 
   function currentLoraSpec() {
     const sel = $("lora-select");
@@ -3693,19 +3809,6 @@
   function keepLoraApplied() {
     const spec = appliedLoraSpec();
     if (!spec || !spec.file) return;
-    // Do not force the dropdown — user must be able to pick "Yok" then Uygula.
-    if (spec.preset && spec.steps && $("steps")) $("steps").value = String(spec.steps);
-    if (spec.preset && spec.sampler && $("sampler")) {
-      const samp = $("sampler");
-      if (![...samp.options].some((o) => o.value === spec.sampler)) {
-        const opt = document.createElement("option");
-        opt.value = spec.sampler;
-        opt.textContent = spec.sampler;
-        samp.appendChild(opt);
-      }
-      samp.value = spec.sampler;
-    }
-    if (spec.preset && spec.scheduler && $("scheduler")) $("scheduler").value = spec.scheduler;
     updateLoraHint();
   }
 
@@ -3720,23 +3823,11 @@
   }
 
   function collectGenerateKnobs() {
-    const spec = appliedLoraSpec();
-    const steps =
-      spec && spec.preset && spec.steps
-        ? spec.steps
-        : numOr("steps", 20) || 20;
-    const sampler =
-      spec && spec.preset && spec.sampler
-        ? spec.sampler
-        : $("sampler")?.value || "res_multistep";
-    const scheduler =
-      spec && spec.preset && spec.scheduler
-        ? spec.scheduler
-        : $("scheduler")?.value || "simple";
     return {
-      steps,
-      sampler,
-      scheduler,
+      steps: numOr("steps", 20) || 20,
+      sampler: $("sampler")?.value || "res_multistep",
+      scheduler: $("scheduler")?.value || "simple",
+      sage_attention: "disabled",
       ...collectLoraPayload(),
     };
   }
@@ -3765,8 +3856,57 @@
       });
     }
     if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+    const cine = $("cinema-lora-select");
+    if (cine) {
+      const cinePrev = cine.value || prev;
+      cine.innerHTML = sel.innerHTML;
+      if ([...cine.options].some((o) => o.value === cinePrev)) cine.value = cinePrev;
+    }
     keepLoraApplied();
     updateLoraHint();
+    fillLoraShop();
+  }
+
+  function loraSizeLabel(spec) {
+    const n = Number(spec?.bytes || 0);
+    if (n > 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+    if (n > 1024 * 1024) return `${Math.round(n / (1024 * 1024))} MB`;
+    return spec?.size_hint || "";
+  }
+
+  function fillLoraShop() {
+    const box = $("lora-shop");
+    if (!box) return;
+    const catalog = (state.loraCatalog || []).filter((spec) => spec && spec.file);
+    const busyId = state.loraDownload?.busy ? state.loraDownload.id : "";
+    box.innerHTML = "";
+    catalog.forEach((spec) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "lora-shop-item";
+      btn.dataset.id = spec.id;
+      if (spec.ready) btn.classList.add("is-ready");
+      if (busyId && busyId === spec.id) btn.classList.add("is-busy");
+      const graphs = spec.graphs || [];
+      const flOnly = graphs.length && !graphs.includes("ref2va");
+      const size = loraSizeLabel(spec);
+      const bits = [size, flOnly ? "T2V" : ""].filter(Boolean);
+      let status = spec.ready ? tt("ayar.loraReady") : (spec.downloadable ? tt("ayar.loraGet") : "");
+      if (busyId && busyId === spec.id) status = tt("ayar.loraGetting");
+      const name = document.createElement("span");
+      name.className = "lora-shop-name";
+      name.textContent = spec.label || spec.file;
+      const meta = document.createElement("span");
+      meta.className = "lora-shop-meta";
+      meta.textContent = bits.join(" · ");
+      const st = document.createElement("span");
+      st.className = "lora-shop-status";
+      st.textContent = status;
+      btn.appendChild(name);
+      btn.appendChild(st);
+      btn.appendChild(meta);
+      box.appendChild(btn);
+    });
   }
 
   function updateLoraHint() {
@@ -3778,30 +3918,66 @@
       return;
     }
     const dur = state.duration || 5;
+    const uiSteps = $("steps") ? $("steps").value : "";
+    const rec = spec.steps ? `önerilen ${spec.steps} step` : "step sen ayarla";
     if (!state.loraApplied || spec.id !== state.loraId) {
-      el.textContent = `${spec.label} seçili — Uygula. Süre ${dur}sn chip’te kalır.`;
+      el.textContent = `${spec.label} seçili — Uygula. ${rec}. Süre ${dur}sn chip’te kalır.`;
       return;
     }
-    if (spec.preset === false) {
-      const graphs = spec.graphs || [];
-      const flOnly = graphs.length && !graphs.includes("ref2va");
-      const extra = flOnly ? " · Ref/yüz’de atlanır" : "";
-      el.textContent = `${spec.hint || "Klasörden"} · uygulandı · süre ${dur}sn chip’ten${extra}`;
-      return;
-    }
-    const ready = spec.ready ? "uygulandı" : "dosya yok — Uygula indirir (~2GB)";
-    const st = spec.steps ? `${spec.steps} step` : "step aynı";
-    el.textContent = `${spec.label} · ${ready} · ${st} · süre ${dur}sn (chip)`;
+    const graphs = spec.graphs || [];
+    const flOnly = graphs.length && !graphs.includes("ref2va");
+    const extra = flOnly ? " · Ref/yüz’de atlanır" : "";
+    el.textContent = `${spec.label} uygulandı · ${uiSteps || "?"} step (kutu) · ${rec}${extra} · süre ${dur}sn`;
   }
 
   async function loadLoras() {
     try {
       const data = await fetch("/api/loras").then((r) => r.json());
       state.loraCatalog = data.loras || [];
+      state.loraDownload = data.download || {};
       fillLoraSelect();
     } catch {
       /* until Studio restart */
     }
+  }
+
+  async function downloadCatalogLora(spec) {
+    if (!spec?.id || !spec.file) return spec;
+    if (spec.ready) return spec;
+    if (!spec.downloadable) {
+      throw new Error("Bu LoRA’nın indirme linki yok — dosyayı LoRA ekle ile yükle");
+    }
+    toast(`${spec.label} indiriliyor…`);
+    const r = await fetch("/api/loras/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: spec.id }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errDetail(data));
+    if (data.ready) {
+      await loadLoras();
+      return (state.loraCatalog || []).find((x) => x.id === spec.id) || spec;
+    }
+    state.loraDownload = { busy: true, id: spec.id };
+    fillLoraShop();
+    for (let i = 0; i < 600; i++) {
+      await new Promise((res) => setTimeout(res, 2000));
+      const st = await fetch("/api/loras").then((x) => x.json());
+      state.loraDownload = st.download || {};
+      if (st.download?.error) throw new Error(st.download.error);
+      const now = (st.loras || []).find((x) => x.id === spec.id);
+      if (now?.ready) {
+        state.loraCatalog = st.loras || state.loraCatalog;
+        fillLoraSelect();
+        if ($("lora-select")) $("lora-select").value = spec.id;
+        if ($("cinema-lora-select")) $("cinema-lora-select").value = spec.id;
+        return now;
+      }
+      fillLoraShop();
+      if (i % 5 === 0) toast(`${spec.label} iniyor…`);
+    }
+    throw new Error("LoRA hâlâ inmiyor — Pinokio → Download Models");
   }
 
   async function applyLora() {
@@ -3818,61 +3994,32 @@
       return;
     }
     if (!spec.ready) {
-      toast("LoRA indiriliyor (~2GB)…");
       try {
-        const r = await fetch("/api/loras/download", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: spec.id }),
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(errDetail(data));
-        if (!data.ready) {
-          let ready = false;
-          for (let i = 0; i < 600; i++) {
-            await new Promise((res) => setTimeout(res, 2000));
-            const st = await fetch("/api/loras").then((x) => x.json());
-            if (st.download?.error) throw new Error(st.download.error);
-            const now = (st.loras || []).find((x) => x.id === spec.id);
-            if (now?.ready) {
-              state.loraCatalog = st.loras || state.loraCatalog;
-              fillLoraSelect();
-              if ($("lora-select")) $("lora-select").value = spec.id;
-              ready = true;
-              break;
-            }
-            if (i % 5 === 0) toast("LoRA indiriliyor…");
-          }
-          if (!ready) {
-            toast("LoRA hâlâ inmiyor — Pinokio → Download Models");
-            return;
-          }
-        }
+        const got = await downloadCatalogLora(spec);
+        if (!got?.ready) return;
       } catch (e) {
         toast(String(e.message || e));
         return;
       }
     }
-    if (spec.preset && spec.steps) {
-      if ($("steps")) $("steps").value = String(spec.steps);
-      const samp = $("sampler");
-      if (samp && spec.sampler) {
-        if (![...samp.options].some((o) => o.value === spec.sampler)) {
-          const opt = document.createElement("option");
-          opt.value = spec.sampler;
-          opt.textContent = spec.sampler;
-          samp.appendChild(opt);
-        }
-        samp.value = spec.sampler;
-      }
-      if ($("scheduler") && spec.scheduler) $("scheduler").value = spec.scheduler;
-      toast(`LoRA uygulandı · ${spec.steps} step · ${spec.sampler} · süre ${state.duration}sn chip’ten`);
-    } else {
-      toast(`LoRA uygulandı · ${spec.label} · strength ${spec.strength} · süre ${state.duration}sn chip’ten`);
+    const samp = $("sampler");
+    if (samp && spec.sampler && ![...samp.options].some((o) => o.value === spec.sampler)) {
+      const opt = document.createElement("option");
+      opt.value = spec.sampler;
+      opt.textContent = spec.sampler;
+      samp.appendChild(opt);
     }
+    const stepsNow = $("steps") ? $("steps").value : "?";
+    const rec = spec.steps ? `önerilen ${spec.steps}` : "";
+    toast(
+      rec
+        ? `LoRA uygulandı · ${spec.label} · ${stepsNow} step (kutu) · ${rec}`
+        : `LoRA uygulandı · ${spec.label} · ${stepsNow} step`
+    );
     state.loraApplied = true;
     state.loraStrength = spec.strength;
     if ($("lora-select")) $("lora-select").value = spec.id;
+    if ($("cinema-lora-select")) $("cinema-lora-select").value = spec.id;
     updateLoraHint();
   }
 
@@ -3901,8 +4048,95 @@
     }
   }
 
-  $("lora-select")?.addEventListener("change", updateLoraHint);
+  async function importLoraFromUrl() {
+    const url = ($("lora-url")?.value || "").trim();
+    if (!url) {
+      toast("Hugging Face resolve veya doğrudan .safetensors URL’si yapıştır");
+      return;
+    }
+    try {
+      toast("LoRA indiriliyor…");
+      const r = await fetch("/api/loras/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      const want = data.id || (data.file ? `file:${data.file}` : "");
+      if (data.ready) {
+        await loadLoras();
+        if (want && $("lora-select")) $("lora-select").value = want;
+        toast("LoRA hazır — Uygula’ya bas");
+        return;
+      }
+      let ready = false;
+      for (let i = 0; i < 600; i++) {
+        await new Promise((res) => setTimeout(res, 2000));
+        const st = await fetch("/api/loras").then((x) => x.json());
+        if (st.download?.error) throw new Error(st.download.error);
+        const now = (st.loras || []).find((x) => x.id === want || x.file === data.file);
+        if (now?.ready) {
+          state.loraCatalog = st.loras || state.loraCatalog;
+          fillLoraSelect();
+          if ($("lora-select") && want) $("lora-select").value = want;
+          ready = true;
+          break;
+        }
+        if (i % 5 === 0) toast("LoRA indiriliyor…");
+      }
+      if (!ready) toast("LoRA hâlâ inmiyor — URL’yi ve dosya adını kontrol et");
+      else toast("LoRA hazır — Uygula’ya bas");
+    } catch (e) {
+      toast(String(e.message || e));
+    }
+  }
+
+  $("lora-select")?.addEventListener("change", () => {
+    if ($("cinema-lora-select") && $("lora-select")) {
+      $("cinema-lora-select").value = $("lora-select").value;
+    }
+    updateLoraHint();
+  });
+  $("cinema-lora-select")?.addEventListener("change", () => {
+    if ($("lora-select") && $("cinema-lora-select")) {
+      $("lora-select").value = $("cinema-lora-select").value;
+    }
+    updateLoraHint();
+  });
+  $("steps")?.addEventListener("input", () => updateLoraHint());
+  $("sampler")?.addEventListener("change", () => updateLoraHint());
+  $("cinema-seamless")?.addEventListener("change", () => {
+    const el = $("cinema-seamless");
+    if (el) el.dataset.userSet = "1";
+  });
+  async function pickLoraFromShop(id) {
+    if (!id) return;
+    let spec = (state.loraCatalog || []).find((x) => x.id === id);
+    if (!spec) return;
+    if ($("lora-select")) $("lora-select").value = id;
+    if ($("cinema-lora-select")) $("cinema-lora-select").value = id;
+    state.loraId = id;
+    updateLoraHint();
+    if (spec.ready) {
+      toast(`${spec.label} seçildi — üretim Ayarlar’dan Uygula`);
+      return;
+    }
+    try {
+      spec = await downloadCatalogLora(spec);
+      toast(`${spec.label} indirildi — üretim Ayarlar’dan Uygula`);
+    } catch (e) {
+      toast(String(e.message || e));
+    }
+  }
+
   $("btn-lora-apply")?.addEventListener("click", () => void applyLora());
+  $("lora-shop")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".lora-shop-item");
+    if (!btn || !$("lora-shop").contains(btn)) return;
+    void pickLoraFromShop(btn.dataset.id || "");
+  });
+  $("btn-lora-url")?.addEventListener("click", () => void importLoraFromUrl());
   $("lora-file")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     const f = e.target.files && e.target.files[0];
@@ -3923,7 +4157,6 @@
     $("director-music")?.classList.toggle("hidden", m !== "chat");
     if (m === "plan") {
       setDirectorOpen(true);
-      if (directorSizeIndex() < 2) setDirectorSize(2);
       renderDirectorPlanBoard();
     }
   }
@@ -4118,6 +4351,15 @@
       e.stopPropagation();
       const key = pill.dataset.setup;
       const id = option.dataset.id || "auto";
+      if (key === "look") {
+        applyCinemaLookPreset(id);
+        pill.classList.remove("open");
+        renderCinemaPills();
+        renderCinemaAudio();
+        toast(tt("cinema.presetApplied"));
+        void saveCinema(true);
+        return;
+      }
       ensureCinema().setup[key] = id;
       pill.classList.remove("open");
       renderCinemaPills();
@@ -4187,13 +4429,11 @@
     $(rootId)?.addEventListener("click", (e) => {
       const del = e.target.closest(".cinema-del");
       if (!del) return;
+      e.preventDefault();
+      e.stopPropagation();
       const card = del.closest(".cinema-card");
       if (!card) return;
-      const id = card.dataset.id;
-      if (!confirm("Bu kartı sil?")) return;
-      const path =
-        kind === "character" ? `/api/cinema/character/${id}` : `/api/cinema/location/${id}`;
-      void fetch(path, { method: "DELETE" }).then(() => loadCinema());
+      void deleteCinemaAsset(kind, card.dataset.id || "");
     });
   };
   cinemaDelegate("cinema-chars", "character");
@@ -4496,6 +4736,9 @@
   }
   $("btn-llm-save")?.addEventListener("click", () => saveLlmSettings());
   $("btn-llm-provider-save")?.addEventListener("click", () => saveLlmProviderOnly());
+  $("btn-director-llm-tab")?.addEventListener("click", () => {
+    setDirectorModal(!$("director-dock")?.classList.contains("modal-open"));
+  });
 
   function syncNotifyProviderUi() {
     const prov = ($("notify-provider")?.value || "telegram").toLowerCase();
@@ -4657,6 +4900,7 @@
   $("btn-music-analyze")?.addEventListener("click", () => analyzeMusic());
   $("btn-music-mux")?.addEventListener("click", () => muxMusicFinal());
   $("btn-gallery")?.addEventListener("click", () => {
+    setDirectorLlmOpen(false);
     $("view-settings")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
     $("view-cinema")?.classList.add("hidden");
@@ -4665,12 +4909,14 @@
   });
   $("btn-gallery-close")?.addEventListener("click", () => $("view-gallery")?.classList.add("hidden"));
   $("btn-settings")?.addEventListener("click", () => {
+    setDirectorLlmOpen(false);
     $("view-gallery")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
     $("view-cinema")?.classList.add("hidden");
     $("view-settings")?.classList.remove("hidden");
     void refreshDirectorStatus();
     void refreshNotifySettings();
+    void loadLoras();
   });
   $("btn-settings-close")?.addEventListener("click", () => {
     void saveNotifySettings({ quiet: true });
@@ -4678,6 +4924,7 @@
   });
   const SUPPORT_REPO = "https://github.com/erdinoral/minimax-h3-studio";
   $("btn-support")?.addEventListener("click", () => {
+    setDirectorLlmOpen(false);
     $("view-gallery")?.classList.add("hidden");
     $("view-settings")?.classList.add("hidden");
     $("view-cinema")?.classList.add("hidden");
@@ -4689,245 +4936,6 @@
   });
   $("btn-support-idea")?.addEventListener("click", () => {
     window.open(SUPPORT_REPO + "/issues/new?template=feature.md", "_blank", "noopener");
-  });
-
-  /* —— Layout edit (handles only; never stops production) —— */
-  const LAYOUT_KEY = "h3_layout_v8";
-  /* scene|player / prompt|ayar|prod */
-  const LAYOUT_DEFAULTS = {
-    colLeft: 28,
-    drawerAyar: 22,
-    gap: 10,
-    fontScale: 100,
-    promptH: 64,
-    sceneH: 420,
-    batchH: 100,
-    batchListH: 120,
-    queueH: 120,
-    playerH: 280,
-    prodH: 400,
-    ayarH: 400,
-  };
-  const LAYOUT_BOUNDS = {
-    colLeft: [20, 40],
-    drawerAyar: [16, 36],
-    gap: [6, 16],
-    fontScale: [90, 120],
-    promptH: [48, 140],
-    sceneH: [200, 900],
-    batchH: [72, 240],
-    batchListH: [72, 280],
-    queueH: [80, 240],
-    playerH: [180, 520],
-    prodH: [240, 720],
-    ayarH: [240, 720],
-  };
-  let layoutState = { ...LAYOUT_DEFAULTS };
-  let layoutEditOn = false;
-
-  function clamp(n, lo, hi) {
-    return Math.max(lo, Math.min(hi, Number(n) || lo));
-  }
-
-  function applyLayout(prefs) {
-    const merged = { ...LAYOUT_DEFAULTS, ...(prefs || {}) };
-    if (!merged.prodH || merged.prodH < 280) merged.prodH = LAYOUT_DEFAULTS.prodH;
-    // Ayarlar + Üretim aynı satır yüksekliği (çakışma/kesilme olmasın)
-    merged.ayarH = merged.prodH;
-    if (!merged.promptH || merged.promptH < 56 || merged.promptH > 160) {
-      merged.promptH = LAYOUT_DEFAULTS.promptH;
-    }
-    const b = LAYOUT_BOUNDS;
-    const n = (k) => clamp(merged[k], b[k][0], b[k][1]);
-    const rowH = n("prodH");
-    layoutState = {
-      colLeft: n("colLeft"),
-      drawerAyar: n("drawerAyar"),
-      gap: n("gap"),
-      fontScale: n("fontScale"),
-      promptH: n("promptH"),
-      sceneH: n("sceneH"),
-      batchH: n("batchH"),
-      batchListH: n("batchListH"),
-      queueH: n("queueH"),
-      playerH: n("playerH"),
-      prodH: rowH,
-      ayarH: rowH,
-    };
-    const root = document.documentElement;
-    root.style.setProperty("--layout-col-left", `${layoutState.colLeft}%`);
-    root.style.setProperty("--layout-ayar-w", `${layoutState.drawerAyar}%`);
-    root.style.setProperty("--layout-gap", `${layoutState.gap}px`);
-    root.style.setProperty("--layout-font-scale", String(layoutState.fontScale / 100));
-    root.style.setProperty("--layout-prompt-h", `${layoutState.promptH}px`);
-    root.style.setProperty("--layout-scene-h", "auto");
-    root.style.setProperty("--layout-batch-h", `${layoutState.batchH}px`);
-    root.style.setProperty("--layout-batch-list-h", `${layoutState.batchListH}px`);
-    root.style.setProperty("--layout-queue-h", `${layoutState.queueH}px`);
-    root.style.setProperty("--layout-player-h", `${layoutState.playerH}px`);
-    const map = {
-      "layout-col-left": "colLeft",
-      "layout-drawer-ayar": "drawerAyar",
-      "layout-gap": "gap",
-      "layout-font": "fontScale",
-      "layout-prompt-h": "promptH",
-      "layout-scene-h": "sceneH",
-      "layout-batch-h": "batchH",
-      "layout-batch-list-h": "batchListH",
-      "layout-queue-h": "queueH",
-      "layout-player-h": "playerH",
-      "layout-prod-h": "prodH",
-      "layout-ayar-h": "ayarH",
-    };
-    for (const [id, key] of Object.entries(map)) {
-      const el = $(id);
-      if (el && document.activeElement !== el) el.value = String(Math.round(layoutState[key]));
-    }
-  }
-
-  function loadLayoutPrefs() {
-    try {
-      // Prefer clean v3; ignore broken nested v1/v2 if values look insane
-      const raw = localStorage.getItem(LAYOUT_KEY);
-      if (raw) {
-        applyLayout(JSON.parse(raw));
-        return;
-      }
-      applyLayout(LAYOUT_DEFAULTS);
-    } catch {
-      applyLayout(LAYOUT_DEFAULTS);
-    }
-  }
-
-  function saveLayoutPrefs(quiet) {
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutState));
-      localStorage.removeItem("h3_layout_v1");
-      localStorage.removeItem("h3_layout_v2");
-      localStorage.removeItem("h3_layout_v3");
-      localStorage.removeItem("h3_layout_v4");
-      localStorage.removeItem("h3_layout_v5");
-      localStorage.removeItem("h3_layout_v6");
-      localStorage.removeItem("h3_layout_v7");
-      if (!quiet) toast("Arayüz kaydedildi · üretim devam ediyor");
-    } catch (e) {
-      if (!quiet) toast(String(e.message || e));
-    }
-  }
-
-  function setLayoutEditMode(on) {
-    layoutEditOn = !!on;
-    document.body.classList.toggle("layout-editing", layoutEditOn);
-    $("layout-edit-bar")?.classList.toggle("hidden", !layoutEditOn);
-    const btn = $("btn-layout-edit");
-    if (btn) btn.textContent = layoutEditOn ? "Düzenle · açık" : "Düzenle";
-    if (layoutEditOn) applyLayout(layoutState);
-  }
-
-  function readLayoutInputs() {
-    const num = (id, fallback) => {
-      const v = Number($(id)?.value);
-      return Number.isFinite(v) ? v : fallback;
-    };
-    applyLayout({
-      colLeft: num("layout-col-left", layoutState.colLeft),
-      drawerAyar: num("layout-drawer-ayar", layoutState.drawerAyar),
-      gap: num("layout-gap", layoutState.gap),
-      fontScale: num("layout-font", layoutState.fontScale),
-      promptH: num("layout-prompt-h", layoutState.promptH),
-      sceneH: num("layout-scene-h", layoutState.sceneH),
-      batchH: num("layout-batch-h", layoutState.batchH),
-      batchListH: num("layout-batch-list-h", layoutState.batchListH),
-      queueH: num("layout-queue-h", layoutState.queueH),
-      playerH: num("layout-player-h", layoutState.playerH),
-      prodH: num("layout-prod-h", layoutState.prodH),
-      ayarH: num("layout-ayar-h", layoutState.ayarH),
-    });
-  }
-
-  document.querySelectorAll("#layout-edit-bar input").forEach((el) => {
-    el.addEventListener("input", () => {
-      if (!layoutEditOn) return;
-      readLayoutInputs();
-    });
-  });
-
-  $("btn-layout-edit")?.addEventListener("click", () => setLayoutEditMode(!layoutEditOn));
-  $("btn-layout-done")?.addEventListener("click", () => {
-    saveLayoutPrefs(true);
-    setLayoutEditMode(false);
-    toast("Düzenleme kapandı · kaydedildi");
-  });
-  $("btn-layout-save")?.addEventListener("click", () => {
-    readLayoutInputs();
-    saveLayoutPrefs(false);
-  });
-  $("btn-layout-reset")?.addEventListener("click", () => {
-    try {
-      localStorage.removeItem(LAYOUT_KEY);
-      localStorage.removeItem("h3_layout_v1");
-      localStorage.removeItem("h3_layout_v2");
-      localStorage.removeItem("h3_layout_v3");
-      localStorage.removeItem("h3_layout_v4");
-      localStorage.removeItem("h3_layout_v5");
-      localStorage.removeItem("h3_layout_v6");
-      localStorage.removeItem("h3_layout_v7");
-    } catch {
-      /* ignore */
-    }
-    applyLayout(LAYOUT_DEFAULTS);
-    saveLayoutPrefs(true);
-    toast("Varsayılan düzen — bozulmuş kayıt temizlendi");
-  });
-
-  const HANDLE_MAP = {
-    "col-left": { key: "colLeft", axis: "x", unit: "pct", ref: () => $("view-studio")?.clientWidth || window.innerWidth },
-    "drawer-ayar": { key: "drawerAyar", axis: "x", unit: "pct", ref: () => $("view-studio")?.clientWidth || window.innerWidth },
-    prompt: { key: "promptH", axis: "y" },
-    scene: { key: "sceneH", axis: "y" },
-    player: { key: "playerH", axis: "y" },
-    "batch-add": { key: "batchH", axis: "y" },
-    "batch-list": { key: "batchListH", axis: "y" },
-    "job-queue": { key: "queueH", axis: "y" },
-    "prod-h": { key: "prodH", axis: "y" },
-    "ayar-h": { key: "prodH", axis: "y" }, // aynı satır yüksekliği
-  };
-
-  let drag = null;
-  document.querySelectorAll(".layout-handle").forEach((handle) => {
-    handle.addEventListener("mousedown", (e) => {
-      if (!layoutEditOn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const conf = HANDLE_MAP[handle.dataset.handle];
-      if (!conf) return;
-      drag = {
-        conf,
-        startX: e.clientX,
-        startY: e.clientY,
-        start: { ...layoutState },
-      };
-      document.body.classList.add("layout-dragging");
-    });
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!drag) return;
-    const { conf, start, startX, startY } = drag;
-    const next = { ...start };
-    const [lo, hi] = LAYOUT_BOUNDS[conf.key];
-    if (conf.axis === "x") {
-      const refW = typeof conf.ref === "function" ? conf.ref() : 400;
-      next[conf.key] = clamp(start[conf.key] + ((e.clientX - startX) / Math.max(refW, 1)) * 100, lo, hi);
-    } else {
-      next[conf.key] = clamp(start[conf.key] + (e.clientY - startY), lo, hi);
-    }
-    applyLayout(next);
-  });
-  window.addEventListener("mouseup", () => {
-    if (!drag) return;
-    drag = null;
-    document.body.classList.remove("layout-dragging");
-    saveLayoutPrefs(true);
   });
 
   // Director tabs: per-session chat state and tab UI
@@ -5188,6 +5196,8 @@
   document.addEventListener("h3-lang", () => {
     syncProjectChips();
     refreshModeHints();
+    fillLoraShop();
+    updateLoraHint();
     if (state.directorTab === "plan") renderDirectorPlanBoard();
     document.querySelectorAll("#director-log .dir-msg").forEach((el) => {
       const who = el.querySelector(".who");
@@ -5199,7 +5209,13 @@
     }
   });
 
-  loadLayoutPrefs();
+  try {
+    ["h3_layout_v1", "h3_layout_v2", "h3_layout_v3", "h3_layout_v4", "h3_layout_v5", "h3_layout_v6", "h3_layout_v7", "h3_layout_v8"].forEach((k) => {
+      localStorage.removeItem(k);
+    });
+  } catch {
+    /* ignore */
+  }
 
   setQuality(state.quality);
   setProduceMode("t2v");

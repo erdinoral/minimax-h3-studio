@@ -51,6 +51,8 @@
     directorSessions: [], // { id, title, messages: [ {role, content} ] }
     directorSessionCounter: 0,
     directorTab: "chat",
+    llmPub: null,
+    ollamaModels: [],
   };
 
   function purposeLabel(k) {
@@ -302,8 +304,10 @@
 
   function emptyCinema() {
     return {
+      film_id: "",
       title: "",
       script: "",
+      role_script: "",
       shots: [],
       setup: {
         look: "auto",
@@ -317,6 +321,8 @@
       duration: 5,
       quality: "720",
       steps: 20,
+      seed: -1,
+      seed_lock: false,
       audio: {
         mode: "film",
         score_id: "",
@@ -335,6 +341,7 @@
     state.cinema.setup = { ...base.setup, ...(state.cinema.setup || {}) };
     state.cinema.audio = { ...base.audio, ...(state.cinema.audio || {}) };
     if (!Array.isArray(state.cinema.shots)) state.cinema.shots = [];
+    if (state.cinema.role_script == null) state.cinema.role_script = "";
     if (!Array.isArray(state.cinema.characters)) state.cinema.characters = [];
     if (!Array.isArray(state.cinema.locations)) state.cinema.locations = [];
     return state.cinema;
@@ -342,16 +349,22 @@
 
   function cinemaSetupOptions(key) {
     if (key === "purpose") {
-      return [["auto", "Auto"]].concat(PURPOSE_KEYS.map((id) => [id, purposeLabel(id)]));
+      return [["auto", tt("cinema.auto")]].concat(PURPOSE_KEYS.map((id) => [id, purposeLabel(id)]));
     }
     if (key === "style") {
-      return [["auto", "Auto"]].concat(STYLE_KEYS.map((id) => [id, styleLabel(id)]));
+      return [["auto", tt("cinema.auto")]].concat(STYLE_KEYS.map((id) => [id, styleLabel(id)]));
     }
     const rows = CINEMA_SETUP_OPTIONS[key] || [["auto", "Auto"]];
-    if (key === "look") {
-      return rows.map(([id, fallback]) => [id, tt("cinema.look." + id) || fallback]);
-    }
-    return rows;
+    return rows.map(([id, fallback]) => {
+      if (id === "auto") return [id, tt("cinema.auto")];
+      if (key === "look") return [id, tt("cinema.look." + id) || fallback];
+      if (key === "era") {
+        const k = "cinema.era." + id;
+        const v = tt(k);
+        return [id, v !== k ? v : fallback];
+      }
+      return [id, fallback];
+    });
   }
 
   function applyCinemaLookPreset(lookId) {
@@ -371,7 +384,7 @@
 
   function cinemaSetupValueLabel(key, id) {
     const found = cinemaSetupOptions(key).find((row) => row[0] === id);
-    return (found && found[1]) || "Auto";
+    return (found && found[1]) || tt("cinema.auto");
   }
 
   function withStyleLock(prompt) {
@@ -392,7 +405,7 @@
   async function copyText(text, okMsg) {
     const t = (text == null ? "" : String(text)).trim();
     if (!t) {
-      toast("Prompt yok");
+      toast(tt("toast.noPrompt"));
       return false;
     }
     try {
@@ -411,7 +424,7 @@
         ta.remove();
       }
     }
-    toast(okMsg || "Prompt kopyalandı");
+    toast(okMsg || tt("toast.copied"));
     return true;
   }
 
@@ -419,7 +432,7 @@
     state.clipPrompt = text == null ? "" : String(text);
     const has = !!state.clipPrompt.trim();
     const pre = $("clip-prompt-text");
-    if (pre) pre.textContent = has ? state.clipPrompt : "(prompt yok)";
+    if (pre) pre.textContent = has ? state.clipPrompt : tt("clip.empty");
     const metaEl = $("clip-prompt-meta");
     if (metaEl) metaEl.textContent = meta || "";
     $("btn-open-prompt")?.classList.toggle("hidden", !has);
@@ -429,7 +442,7 @@
     if (text !== undefined) setClipPrompt(text, meta);
     const t = (state.clipPrompt || "").trim();
     if (!t) {
-      toast("Bu videonun prompt’u yok");
+      toast(tt("toast.noClipPrompt"));
       return;
     }
     const pre = $("clip-prompt-text");
@@ -686,7 +699,7 @@
     list.forEach((item, i) => {
       const card = document.createElement("div");
       card.className = "ref-thumb";
-      card.innerHTML = `<span class="ref-ord">&lt;Picture ${i + 1}&gt;</span><img src="${item.url}" alt="ref ${i + 1}" /><button type="button" title="Kaldır">×</button>`;
+      card.innerHTML = `<span class="ref-ord">&lt;Picture ${i + 1}&gt;</span><img src="${item.url}" alt="ref ${i + 1}" /><button type="button" title="${tt("pick.remove")}">×</button>`;
       card.querySelector("button").onclick = () => {
         list.splice(i, 1);
         renderRefThumbs(kind);
@@ -733,7 +746,7 @@
       const media = item.kind === "video"
         ? `<video src="${item.url}" muted preload="metadata"></video>`
         : `<img src="${item.url}" alt="${label}" />`;
-      card.innerHTML = `<span class="ref-ord">${label}</span>${media}<button type="button" title="Kaldır">×</button>`;
+      card.innerHTML = `<span class="ref-ord">${label}</span>${media}<button type="button" title="${tt("pick.remove")}">×</button>`;
       card.querySelector("button").onclick = () => {
         list.splice(i, 1);
         renderNamedThumbs(list, gridId, labelFn);
@@ -827,14 +840,18 @@
       const base = emptyCinema();
       state.cinema = {
         ...base,
+        film_id: data.film_id || "",
         title: data.title || "",
         script: data.script || "",
+        role_script: data.role_script || "",
         shots: Array.isArray(data.shots) ? data.shots : [],
         setup: { ...base.setup, ...(data.setup || {}) },
         audio: { ...base.audio, ...(data.audio || {}) },
         duration: data.duration || 5,
         quality: String(data.quality || "720"),
         steps: data.steps || 20,
+        seed: data.seed != null ? data.seed : -1,
+        seed_lock: !!data.seed_lock,
         characters: Array.isArray(data.characters) ? data.characters : [],
         locations: Array.isArray(data.locations) ? data.locations : [],
       };
@@ -842,6 +859,8 @@
       state.cinema = ensureCinema();
     }
     renderCinema();
+    void fillCinemaFilms();
+    void refreshCinemaPreview();
   }
 
   function flushCinemaFields() {
@@ -869,8 +888,11 @@
         if (shot && ta) shot.text = ta.value;
       });
     if ($("cinema-title")) c.title = $("cinema-title").value || c.title || "";
+    if ($("cinema-role-script")) c.role_script = $("cinema-role-script").value || "";
     if ($("cinema-duration")) c.duration = Number($("cinema-duration").value) || 5;
     if ($("cinema-steps")) c.steps = Number($("cinema-steps").value) || 20;
+    if ($("cinema-seed")) c.seed = Number($("cinema-seed").value);
+    if ($("cinema-seed-lock")) c.seed_lock = !!$("cinema-seed-lock").checked;
     return c;
   }
 
@@ -885,18 +907,25 @@
         .map((s) => (s.text || "").trim())
         .filter(Boolean)
         .join("\n\n---\n\n"),
+      role_script: $("cinema-role-script")?.value || c.role_script || "",
       shots: c.shots || [],
       setup: c.setup || {},
       audio: c.audio || {},
       duration: c.duration || 5,
       quality: c.quality || "720",
       steps: c.steps || 20,
+      film_id: c.film_id || "",
+      seed: Number.isFinite(Number(c.seed)) ? Number(c.seed) : -1,
+      seed_lock: !!c.seed_lock,
       characters: c.characters || [],
       locations: c.locations || [],
     };
   }
 
+  let cinemaSaveGen = 0;
+
   async function saveCinema(quiet) {
+    const gen = ++cinemaSaveGen;
     const payload = cinemaPayload();
     try {
       const r = await fetch("/api/cinema", {
@@ -904,19 +933,27 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (gen !== cinemaSaveGen) return;
       const data = await r.json().catch(() => payload);
       if (!r.ok) throw new Error(errDetail(data));
+      if (gen !== cinemaSaveGen) return;
       const base = emptyCinema();
       state.cinema = {
         ...base,
+        film_id: data.film_id || payload.film_id,
         title: data.title || payload.title,
         script: data.script || payload.script,
-        shots: data.shots || payload.shots,
+        role_script: cinemaTypingIn("cinema-role-script")
+          ? ensureCinema().role_script
+          : data.role_script || payload.role_script,
+        shots: cinemaTypingShots() ? ensureCinema().shots : data.shots || payload.shots,
         setup: { ...base.setup, ...(data.setup || payload.setup || {}) },
         audio: { ...base.audio, ...(data.audio || payload.audio || {}) },
         duration: data.duration || payload.duration,
         quality: String(data.quality || payload.quality),
         steps: data.steps || payload.steps,
+        seed: data.seed != null ? data.seed : payload.seed,
+        seed_lock: !!(data.seed_lock != null ? data.seed_lock : payload.seed_lock),
         characters: data.characters || payload.characters,
         locations: data.locations || payload.locations,
       };
@@ -928,7 +965,7 @@
 
   function cinemaLoraOptions(selected) {
     const catalog = state.loraCatalog || [];
-    const opts = ['<option value="">LoRA yok</option>'];
+    const opts = ['<option value="">' + htmlEsc(tt("ayar.loraNoneOpt")) + "</option>"];
     catalog.forEach((spec) => {
       if (!spec.id || !spec.file) return;
       if (spec.ready === false) return;
@@ -957,19 +994,85 @@
       .replace(/'/g, "&#39;");
   }
 
+  function cinemaAssetImages(item) {
+    const imgs = Array.isArray(item?.images) ? item.images.filter((x) => x && (x.file || x.url)) : [];
+    if (imgs.length) return imgs.slice(0, 5);
+    if (item?.image) {
+      return [{ name: "", file: item.image, url: item.url || "/api/refs/" + item.image }];
+    }
+    return [];
+  }
+
+  function cinemaCallSlug(name) {
+    return String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/ç/g, "c")
+      .replace(/ğ/g, "g")
+      .replace(/ı/g, "i")
+      .replace(/ö/g, "o")
+      .replace(/ş/g, "s")
+      .replace(/ü/g, "u")
+      .replace(/[^a-z0-9]+/g, "") || "asset";
+  }
+
+  function cinemaFolderHtml(item) {
+    const imgs = cinemaAssetImages(item);
+    const slug = cinemaCallSlug(item?.name);
+    const n = imgs.length;
+    const tab =
+      '<div class="cinema-folder-tab"><span>📁</span><b>' +
+      htmlEsc((item?.name || "").trim() || tt("cinema.untitled")) +
+      "</b><span>" +
+      n +
+      "/5</span></div>";
+    const body = !imgs.length
+      ? '<div class="cinema-folder is-empty"><span class="empty">' +
+        htmlEsc(tt("cinema.noImg")) +
+        "</span></div>"
+      : '<div class="cinema-folder">' +
+        imgs
+          .map((im, i) => {
+            const call = im.name || slug + (i + 1);
+            const src = htmlEsc(im.url || "/api/refs/" + im.file);
+            const file = htmlEsc(im.file || "");
+            return (
+              '<figure class="cinema-asset">' +
+              '<img src="' +
+              src +
+              '" alt="' +
+              htmlEsc(call) +
+              '" />' +
+              '<figcaption class="cinema-call" data-call="' +
+              htmlEsc(call) +
+              '" title="' +
+              htmlEsc(tt("cinema.copyCallHint")) +
+              '">' +
+              htmlEsc(call) +
+              "</figcaption>" +
+              '<button type="button" class="cinema-img-del" data-file="' +
+              file +
+              '" title="' +
+              htmlEsc(tt("cinema.del")) +
+              '">×</button>' +
+              "</figure>"
+            );
+          })
+          .join("") +
+        "</div>";
+    return '<div class="cinema-folder-wrap">' + tab + body + "</div>";
+  }
+
   function cinemaCardHtml(item, kind) {
-    const img = item.image
-      ? '<img src="' + htmlEsc(item.url || "/api/refs/" + item.image) + '" alt="" />'
-      : '<span class="empty">görsel yok</span>';
     const isChar = kind === "character";
-    const nameLabel = isChar ? "Karakter adı" : "Bölge adı";
-    const descLabel = isChar ? "Karakter tanımı" : "Tanım";
+    const nameLabel = isChar ? tt("cinema.charName") : tt("cinema.locName");
+    const descLabel = tt("cinema.desc");
     const namePh = isChar ? "Ada" : "Rooftop";
-    const descPh = isChar
-      ? "Yaş, görünüm, giyim, kişilik…"
-      : "Mekân, saat, atmosfer…";
+    const descPh = isChar ? tt("cinema.charDescPh") : tt("cinema.locDescPh");
     const lora = isChar
-      ? '<label class="cinema-field-label">Karakter LoRA (isteğe bağlı)</label><select data-field="lora_id">' +
+      ? '<label class="cinema-field-label">' +
+        htmlEsc(tt("cinema.charLora")) +
+        '</label><select data-field="lora_id">' +
         cinemaLoraOptions(item.lora_id || "") +
         "</select>"
       : "";
@@ -978,9 +1081,9 @@
       htmlEsc(item.id) +
       '" data-kind="' +
       kind +
-      '"><div class="thumb">' +
-      img +
-      '</div><div class="fields">' +
+      '">' +
+      cinemaFolderHtml(item) +
+      '<div class="fields">' +
       '<label class="cinema-field-label">' +
       nameLabel +
       "</label>" +
@@ -998,16 +1101,29 @@
       htmlEsc(item.notes) +
       "</textarea>" +
       (isChar
-        ? '<label class="cinema-field-label">Ses tarifi (her shot aynı)</label>' +
-          '<textarea data-field="voice" rows="2" placeholder="ör. 28 yaş, düşük sıcak alto, İstanbul aksanı, asla fısıldamaz">' +
+        ? '<label class="cinema-field-label">' +
+          htmlEsc(tt("cinema.voice")) +
+          "</label>" +
+          '<textarea data-field="voice" rows="2" placeholder="' +
+          htmlEsc(tt("cinema.voicePh")) +
+          '">' +
           htmlEsc(item.voice) +
           "</textarea>"
         : "") +
       lora +
       '<div class="row-btns"><label class="file-pick file-pick-inline">' +
-      '<input type="file" class="file-pick-input cinema-img" accept="image/*" />' +
-      '<span class="file-pick-btn">Görsel yükle</span></label>' +
-      '<button type="button" class="btn-ghost cinema-del">Sil</button></div></div></div>'
+      '<input type="file" class="file-pick-input cinema-img" accept="image/*" multiple' +
+      (cinemaAssetImages(item).length >= 5 ? " disabled" : "") +
+      " />" +
+      '<span class="file-pick-btn">' +
+      htmlEsc(tt("cinema.uploadImg")) +
+      "</span></label>" +
+      '<span class="muted cinema-img-cap">' +
+      htmlEsc(tf("cinema.imgMax", { slug: cinemaCallSlug(item.name) })) +
+      "</span>" +
+      '<button type="button" class="btn-ghost cinema-del">' +
+      htmlEsc(tt("cinema.del")) +
+      "</button></div></div></div>"
     );
   }
 
@@ -1043,8 +1159,80 @@
     );
   }
 
+  function cinemaShotCalls(text) {
+    const raw = String(text || "");
+    const low = raw.toLowerCase();
+    const out = [];
+    const seen = new Set();
+    const c = ensureCinema();
+    const push = (n) => {
+      const s = String(n || "").trim();
+      if (!s || seen.has(s.toLowerCase())) return;
+      seen.add(s.toLowerCase());
+      out.push(s);
+    };
+    (c.characters || []).concat(c.locations || []).forEach((item) => {
+      cinemaAssetImages(item).forEach((im) => {
+        if (im.name && low.includes(String(im.name).toLowerCase())) push(im.name);
+      });
+      const name = (item.name || "").trim();
+      if (name.length >= 2) {
+        const re = new RegExp("(?:^|[^\\w])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:$|[^\\w])", "i");
+        if (re.test(raw)) push(name);
+      }
+    });
+    return out;
+  }
+
+  function cinemaJobForShot(shotId, index) {
+    const batch = (ensureCinema().audio || {}).last_batch || "";
+    const jobs = state.jobs || [];
+    const byId = jobs.find((j) => j.shot_id && j.shot_id === shotId);
+    if (byId) return byId;
+    if (!batch) return null;
+    const multi = jobs.find(
+      (j) => String(j.cinema_batch || "") === String(batch) && j.mode === "multishot"
+    );
+    if (multi) return multi;
+    return jobs.find(
+      (j) =>
+        String(j.cinema_batch || "") === String(batch) &&
+        Number(j.shot_index || j.batch_index) === index + 1
+    ) || null;
+  }
+
+  function cinemaTypingIn(id) {
+    const el = document.activeElement;
+    const host = $(id);
+    if (!el || !host) return false;
+    return host === el || host.contains(el);
+  }
+
+  function cinemaTypingShots() {
+    return cinemaTypingIn("cinema-shots") || cinemaTypingIn("cinema-shot-draft");
+  }
+
+  function cinemaShotJobMeta(shotId, index) {
+    const job = cinemaJobForShot(shotId, index);
+    const st = job ? job.status : "";
+    return {
+      cls: st === "done" ? " is-ok" : st === "error" ? " is-err" : st ? " is-run" : "",
+      label: job
+        ? st === "done"
+          ? tt("cinema.shotDone")
+          : st === "error"
+            ? tt("cinema.shotErr")
+            : tt("cinema.shotRun")
+        : "",
+    };
+  }
+
   function cinemaShotHtml(shot, index) {
     const mode = shot.mode === "continue" ? "continue" : "t2v";
+    const calls = cinemaShotCalls(shot.text);
+    const jobMeta = cinemaShotJobMeta(shot.id, index);
+    const jobCls = jobMeta.cls;
+    const jobLabel = jobMeta.label;
     return (
       '<article class="cinema-shot" data-id="' +
       htmlEsc(shot.id) +
@@ -1053,14 +1241,31 @@
       '</span><div class="cinema-shot-mode">' +
       '<button type="button" class="t2v' +
       (mode === "t2v" ? " on" : "") +
-      '" data-mode="t2v">Yeni video</button>' +
+      '" data-mode="t2v">' +
+      tt("mode.t2v") +
+      "</button>" +
       '<button type="button" class="continue' +
       (mode === "continue" ? " on" : "") +
-      '" data-mode="continue">Continue</button></div>' +
-      '<button type="button" class="btn-ghost cinema-shot-del">Sil</button></div>' +
-      '<textarea data-field="text" rows="3" placeholder="Bu shot’ta ne olur?">' +
+      '" data-mode="continue">' +
+      tt("plan.cont") +
+      "</button></div>" +
+      (jobLabel
+        ? '<span class="cinema-shot-job' + jobCls + '">' + htmlEsc(jobLabel) + "</span>"
+        : "") +
+      '<button type="button" class="btn-ghost cinema-shot-del">' +
+      tt("cinema.del") +
+      "</button></div>" +
+      '<textarea data-field="text" rows="3" placeholder="' +
+      htmlEsc(tt("cinema.shotWhat")) +
+      '">' +
       htmlEsc(shot.text) +
-      "</textarea></article>"
+      "</textarea>" +
+      (calls.length
+        ? '<div class="cinema-shot-binds">' +
+          calls.map((n) => '<span class="cinema-bind">' + htmlEsc(n) + "</span>").join("") +
+          "</div>"
+        : "") +
+      "</article>"
     );
   }
 
@@ -1092,6 +1297,35 @@
     if (dur && document.activeElement !== dur) dur.value = String(c.duration || 5);
     const steps = $("cinema-steps");
     if (steps && document.activeElement !== steps) steps.value = String(c.steps || 20);
+    const seed = $("cinema-seed");
+    const lock = $("cinema-seed-lock");
+    if (lock) lock.checked = !!c.seed_lock;
+    if (seed && document.activeElement !== seed && !lock?.checked) {
+      seed.value = String(c.seed != null && c.seed !== "" ? c.seed : -1);
+    }
+    const speed = $("cinema-speed-chips");
+    if (speed) {
+      const q = String(c.quality || "720");
+      const st = Number(c.steps || 20);
+      speed.querySelectorAll("button").forEach((btn) => {
+        const on =
+          btn.dataset.speed === "draft"
+            ? q === "480" && st <= 12
+            : q === "720" && st >= 18;
+        btn.classList.toggle("on", on);
+      });
+    }
+    const hint = $("cinema-prod-hint");
+    if (hint) {
+      const spec = ($("cinema-lora-select") ? state.loraCatalog || [] : []).find(
+        (x) => x.id === $("cinema-lora-select")?.value
+      );
+      const graphs = spec && spec.file ? (spec.graphs || ["fl2va", "ref2va"]).join("+") : "";
+      const vram = q === "1080" ? "~yüksek VRAM" : q === "480" ? "~düşük VRAM" : "~orta VRAM";
+      hint.textContent = graphs
+        ? tf("cinema.prodHintLora", { graphs, vram, q, st })
+        : tf("cinema.prodHint", { vram, q, st });
+    }
     const chips = $("cinema-quality-chips");
     if (chips) {
       chips.querySelectorAll("button").forEach((btn) => {
@@ -1119,7 +1353,12 @@
     if (name) {
       name.textContent = audio.score_name
         ? audio.score_name
-        : "yok — H3 her klipte yeni şarkı uydurur; bir kez yükle";
+        : tt("cinema.scoreNone");
+    }
+    const concat = $("btn-cinema-concat");
+    if (concat) {
+      concat.classList.toggle("hidden", !audio.last_batch);
+      concat.disabled = !audio.last_batch;
     }
     const mux = $("btn-cinema-mux");
     if (mux) {
@@ -1127,10 +1366,10 @@
       mux.classList.toggle("hidden", !audio.score_id);
       mux.disabled = !ready;
       mux.textContent = ready
-        ? "Aynı müziği filme karıştır"
+        ? tt("cinema.mux")
         : audio.score_id
-          ? "Önce filmi üret, sonra karıştır"
-          : "Aynı müziği filme karıştır";
+          ? tt("cinema.muxWait")
+          : tt("cinema.mux");
     }
     const final = $("cinema-final-link");
     if (final) {
@@ -1150,10 +1389,39 @@
     host.innerHTML = shots.map((s, i) => cinemaShotHtml(s, i)).join("");
   }
 
+  function syncCinemaShotJobs() {
+    const host = $("cinema-shots");
+    if (!host) return;
+    if (!cinemaTypingShots()) {
+      renderCinemaShots();
+      return;
+    }
+    host.querySelectorAll(".cinema-shot").forEach((card, i) => {
+      const meta = cinemaShotJobMeta(card.dataset.id, i);
+      let badge = card.querySelector(".cinema-shot-job");
+      if (!meta.label) {
+        if (badge) badge.remove();
+        return;
+      }
+      if (!badge) {
+        badge = document.createElement("span");
+        const head = card.querySelector(".cinema-shot-head");
+        const del = card.querySelector(".cinema-shot-del");
+        if (head && del) head.insertBefore(badge, del);
+        else if (head) head.appendChild(badge);
+      }
+      badge.className = "cinema-shot-job" + meta.cls;
+      badge.textContent = meta.label;
+    });
+  }
+
   function renderCinema() {
     const c = ensureCinema();
     if ($("cinema-title") && document.activeElement !== $("cinema-title")) {
       $("cinema-title").value = c.title || "";
+    }
+    if ($("cinema-role-script") && document.activeElement !== $("cinema-role-script")) {
+      $("cinema-role-script").value = c.role_script || "";
     }
     renderCinemaPills();
     renderCinemaKnobs();
@@ -1168,10 +1436,18 @@
         root.contains(active) &&
         active.matches("input:not([type=file]):not([type=button]), textarea, select")
       );
-    if (chars && !typingIn(chars)) {
+    if (
+      chars &&
+      (!typingIn(chars) ||
+        chars.querySelectorAll(".cinema-card").length !== (c.characters || []).length)
+    ) {
       chars.innerHTML = (c.characters || []).map((x) => cinemaCardHtml(x, "character")).join("");
     }
-    if (locs && !typingIn(locs)) {
+    if (
+      locs &&
+      (!typingIn(locs) ||
+        locs.querySelectorAll(".cinema-card").length !== (c.locations || []).length)
+    ) {
       locs.innerHTML = (c.locations || []).map((x) => cinemaCardHtml(x, "location")).join("");
     }
     if (
@@ -1187,10 +1463,113 @@
     const nL = (c.locations || []).length;
     const nS = (c.shots || []).filter((s) => (s.text || "").trim()).length;
     if ($("cinema-hint")) {
-      $("cinema-hint").textContent =
-        `${nC} karakter · ${nL} mekan · ${nS} shot — ses tarifi kilitlenir, müzik bir kez yüklenir.`;
+      $("cinema-hint").textContent = tf("cinema.hintCounts", { c: nC, l: nL, s: nS });
     }
     syncCinemaFold();
+    scheduleCinemaPreview();
+  }
+
+  let cinemaPreviewTimer = 0;
+  function scheduleCinemaPreview() {
+    clearTimeout(cinemaPreviewTimer);
+    cinemaPreviewTimer = setTimeout(() => void refreshCinemaPreview(), 450);
+  }
+
+  async function fillCinemaFilms() {
+    const sel = $("cinema-film-select");
+    if (!sel) return;
+    try {
+      const data = await fetch("/api/cinema/films").then((r) => r.json());
+      const films = data.films || [];
+      const active = ensureCinema().film_id || data.active || "";
+      sel.innerHTML = films
+        .map((f) => {
+          const on = f.id === active ? " selected" : "";
+          return (
+            '<option value="' +
+            htmlEsc(f.id) +
+            '"' +
+            on +
+            ">" +
+            htmlEsc(f.title || f.id) +
+            "</option>"
+          );
+        })
+        .join("");
+      if (!films.length) {
+        sel.innerHTML = '<option value="">—</option>';
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function refreshCinemaPreview() {
+    const pre = $("cinema-preview-text");
+    if (!pre) return;
+    if (cinemaTypingShots() || cinemaTypingIn("cinema-role-script")) return;
+    try {
+      await saveCinema(true);
+      const data = await fetch("/api/cinema/preview").then((r) => r.json());
+      const shots = data.shots || [];
+      if (!shots.length) {
+        pre.textContent = tt("cinema.previewEmpty");
+        return;
+      }
+      const bits = [];
+      if (data.look) bits.push("LOOK\n" + data.look);
+      shots.forEach((s, i) => {
+        const calls = (s.calls || []).join(", ");
+        bits.push(
+          "SHOT " +
+            (i + 1) +
+            (calls ? " · " + calls : "") +
+            (s.refs ? " · " + s.refs + " still" : "") +
+            "\n" +
+            (s.prompt || "")
+        );
+      });
+      pre.textContent = bits.join("\n\n---\n\n");
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function applyCinemaSpeed(kind) {
+    const c = ensureCinema();
+    if (kind === "draft") {
+      c.quality = "480";
+      c.steps = 10;
+      c.duration = Number($("cinema-duration")?.value) || c.duration || 5;
+    } else {
+      c.quality = "720";
+      c.steps = 20;
+    }
+    if ($("steps")) $("steps").value = String(c.steps);
+    setQuality(c.quality);
+    renderCinemaKnobs();
+    void saveCinema(true);
+    toast(kind === "draft" ? tt("cinema.draftToast") : tt("cinema.finalToast"));
+  }
+
+  async function cinemaFilmAction(action, id) {
+    const r = await fetch("/api/cinema/films", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, id: id || "" }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errDetail(data));
+    const base = emptyCinema();
+    state.cinema = {
+      ...base,
+      ...data,
+      setup: { ...base.setup, ...(data.setup || {}) },
+      audio: { ...base.audio, ...(data.audio || {}) },
+    };
+    renderCinema();
+    await fillCinemaFilms();
+    void refreshCinemaPreview();
   }
 
   const CINEMA_FOLD_KEY = "h3-cinema-fold";
@@ -1221,7 +1600,7 @@
 
   function cinemaFoldSummaryHtml(items, emptyLabel) {
     const chips = (items || [])
-      .map((x) => (x.name || "").trim() || "isimsiz")
+      .map((x) => (x.name || "").trim() || tt("cinema.untitled"))
       .map((name) => '<span class="cinema-fold-chip">' + htmlEsc(name) + "</span>");
     if (!chips.length) {
       return '<span class="muted">' + htmlEsc(emptyLabel) + "</span>";
@@ -1239,11 +1618,11 @@
     if ($("cinema-char-summary")) {
       $("cinema-char-summary").innerHTML = cinemaFoldSummaryHtml(
         c.characters,
-        "karakter yok"
+        tt("cinema.noChars")
       );
     }
     if ($("cinema-loc-summary")) {
-      $("cinema-loc-summary").innerHTML = cinemaFoldSummaryHtml(c.locations, "mekan yok");
+      $("cinema-loc-summary").innerHTML = cinemaFoldSummaryHtml(c.locations, tt("cinema.noLocs"));
     }
     document.querySelectorAll(".cinema-stack[data-fold]").forEach((stack) => {
       const key = stack.dataset.fold;
@@ -1306,7 +1685,10 @@
 
   async function addCinemaAsset(kind) {
     const path = kind === "character" ? "/api/cinema/character" : "/api/cinema/location";
-    setCinemaFold(kind === "character" ? "characters" : "locations", true);
+    const key = kind === "character" ? "characters" : "locations";
+    const fold = kind === "character" ? "characters" : "locations";
+    setCinemaFold(fold, true);
+    cinemaSaveGen += 1;
     try {
       const r = await fetch(path, {
         method: "POST",
@@ -1315,9 +1697,28 @@
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      await loadCinema();
+      const c = ensureCinema();
+      const list = Array.isArray(c[key]) ? c[key].slice() : [];
+      if (data && data.id) {
+        const i = list.findIndex((x) => x.id === data.id);
+        if (i >= 0) list[i] = data;
+        else list.push(data);
+        c[key] = list;
+      }
+      setCinemaFold(fold, true);
+      renderCinema();
+      const card = document.querySelector(
+        (kind === "character" ? "#cinema-chars" : "#cinema-locs") +
+          ' .cinema-card[data-id="' +
+          (data.id || "") +
+          '"]'
+      );
+      const name = card?.querySelector("[data-field=name]");
+      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      name?.focus();
     } catch (e) {
       toast(String(e.message || e));
+      await loadCinema();
     }
   }
 
@@ -1362,21 +1763,73 @@
     }
   }
 
-  async function uploadCinemaImage(kind, id, file) {
-    if (!file) return;
-    const fd = new FormData();
-    fd.append("file", file);
-    toast(`Yükleniyor · ${file.name}`);
-    try {
-      const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(errDetail(data));
-      await patchCinemaAsset(kind, id, { image: data.name, url: data.url });
-      renderCinema();
-      toast("Görsel bağlandı");
-    } catch (e) {
-      toast(String(e.message || e));
+  async function uploadCinemaImage(kind, id, files) {
+    const list = files ? [...files].filter(Boolean) : [];
+    if (!list.length) return;
+    const item = cinemaItem(kind, id);
+    const have = cinemaAssetImages(item).length;
+    const room = Math.max(0, 5 - have);
+    if (!room) {
+      toast(tt("cinema.imgFull"));
+      return;
     }
+    const take = list.slice(0, room);
+    const images = cinemaAssetImages(item).map((x) => ({
+      name: x.name || "",
+      file: x.file,
+      url: x.url,
+    }));
+    for (const file of take) {
+      toast(`Yükleniyor · ${file.name}`);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(errDetail(data));
+        images.push({ name: "", file: data.name, url: data.url });
+      } catch (e) {
+        toast(String(e.message || e));
+        return;
+      }
+    }
+    await patchCinemaAsset(kind, id, { images });
+    renderCinema();
+    toast(tt("cinema.imgBound"));
+  }
+
+  async function removeCinemaImage(kind, id, file) {
+    const item = cinemaItem(kind, id);
+    if (!item) return;
+    const images = cinemaAssetImages(item).filter((x) => x.file !== file);
+    await patchCinemaAsset(kind, id, { images, image: images[0]?.file || "", url: images[0]?.url || "" });
+    renderCinema();
+  }
+
+  async function ingestCinemaRole() {
+    const text = ($("cinema-role-script")?.value || "").trim();
+    ensureCinema().role_script = text;
+    const c = ensureCinema();
+    if (c.duration) setDuration(Number(c.duration) || state.duration || 5);
+    const purpose = c.setup && c.setup.purpose && c.setup.purpose !== "auto" ? c.setup.purpose : "";
+    if (purpose) {
+      state.projectPurpose = purpose;
+      state.projectSilent = purpose === "music_video" || cinemaAudio().mode === "silent";
+    }
+    const style = c.setup && c.setup.style && c.setup.style !== "auto" ? c.setup.style : "";
+    if (style) state.projectStyle = style;
+    syncProjectChips();
+    state.cinemaDirector = true;
+    await saveCinema(true);
+    setDirectorModal(true);
+    appendDirectorMsg(
+      "assistant",
+      tt("cinema.directorOpen")
+    );
+    const msg = text
+      ? tt("cinema.directorBuild") + "\n\n" + text
+      : tt("cinema.directorAsk");
+    await directorSend(msg);
   }
 
   async function produceCinema() {
@@ -1395,6 +1848,7 @@
       await saveCinema(true);
       const shots = (ensureCinema().shots || [])
         .map((s) => ({
+          id: s.id,
           text: (s.text || "").trim(),
           mode: s.mode === "continue" ? "continue" : "t2v",
         }))
@@ -1421,18 +1875,28 @@
           state.loraId = "";
         }
       }
+      let seed = Number($("cinema-seed")?.value);
+      if (!Number.isFinite(seed)) seed = numOr("seed", -1);
+      if ($("cinema-seed-lock")?.checked) {
+        const prev = (state.jobs || [])
+          .filter((j) => j.cinema_batch && Number(j.seed) >= 0)
+          .slice(-1)[0];
+        if (prev) seed = Number(prev.seed);
+      }
+      const cine = ensureCinema();
+      cine.seed = seed;
       const r = await fetch("/api/cinema/produce", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           shots,
-          setup: c.setup || {},
+          setup: cine.setup || {},
           audio,
-          duration: Number($("cinema-duration")?.value) || c.duration || 5,
+          duration: Number($("cinema-duration")?.value) || cine.duration || 5,
           aspect: state.aspect || "16:9",
-          quality: c.quality || state.quality || "720",
-          steps: Number($("cinema-steps")?.value) || c.steps || 20,
-          seed: numOr("seed", -1),
+          quality: cine.quality || state.quality || "720",
+          steps: Number($("cinema-steps")?.value) || cine.steps || 20,
+          seed,
           sage_attention: "disabled",
           purpose,
           silent_audio: !filmMode,
@@ -1449,13 +1913,15 @@
         renderCinemaAudio();
       }
       toast(
-        data.seamless
+        data.still_lock && $("cinema-seamless")?.checked
+          ? tt("cinema.stillOverSeamless")
+          : data.seamless
           ? `Direktör: kesintisiz zincir (${shots.length} shot, tek take)`
           : filmMode
-          ? `Direktör: ${data.count || 0} shot kuyruğa alındı — diyalog+SFX, müzik sonra karışır`
+          ? `Direktör: ${data.count || 0} shot kuyruğa alındı — diyalog+SFX`
           : `Direktör: ${data.count || 0} shot (sessiz görüntü)`
       );
-      closeCinemaStudio();
+      renderCinemaShots();
       await refreshJobs();
     } catch (e) {
       toast(String(e.message || e));
@@ -1510,6 +1976,60 @@
       toast(String(e.message || e));
     } finally {
       renderCinemaAudio();
+    }
+  }
+
+  async function concatCinemaFilm() {
+    const audio = cinemaAudio();
+    const btn = $("btn-cinema-concat");
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch("/api/cinema/concat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batch_id: audio.last_batch || "" }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      if (data.batch_id) audio.last_batch = data.batch_id;
+      renderCinemaAudio();
+      toast(tf("cinema.concatOk", { n: data.clips || 0 }));
+      if (data.final_url) window.open(data.final_url, "_blank");
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (btn) btn.disabled = false;
+      renderCinemaAudio();
+    }
+  }
+
+  async function stillFromGalleryClip(job) {
+    const chars = ensureCinema().characters || [];
+    if (!chars.length) {
+      toast(tt("cinema.needChar"));
+      void openCinemaStudio();
+      return;
+    }
+    const lines = chars.map((c, i) => i + 1 + ") " + (c.name || tt("cinema.untitled")));
+    const pick = window.prompt(tt("cinema.stillPick") + "\n" + lines.join("\n"), "1");
+    const idx = Number(pick) - 1;
+    const asset = chars[idx];
+    if (!asset) return;
+    try {
+      const r = await fetch("/api/cinema/still-from-clip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: job.id, asset_id: asset.id, kind: "character" }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      const list = ensureCinema().characters || [];
+      const i = list.findIndex((x) => x.id === asset.id);
+      if (i >= 0) list[i] = data;
+      renderCinema();
+      toast(tf("cinema.stillSaved", { name: asset.name || "asset" }));
+    } catch (e) {
+      toast(String(e.message || e));
     }
   }
 
@@ -1698,7 +2218,7 @@
       _dirThinkFull = (_dirThinkFull + (ev.text || "")).slice(-2000);
       body.textContent = _dirThinkFull;
       const dots = el.querySelector(".think-dots");
-      if (dots) dots.textContent = "yazıyor";
+      if (dots) dots.textContent = tt("dir.writing");
     } else if (type === "status" && ev.text) {
       if (!_dirThinkFull) body.textContent = ev.text;
     }
@@ -1838,7 +2358,28 @@
     log.scrollTop = log.scrollHeight;
   }
 
+  function applyCinemaFromDirector(data) {
+    const cine = data && data.cinema;
+    if (!cine || typeof cine !== "object") return;
+    const base = emptyCinema();
+    state.cinema = {
+      ...base,
+      ...cine,
+      setup: { ...base.setup, ...(cine.setup || {}) },
+      audio: { ...base.audio, ...(cine.audio || {}) },
+    };
+    renderCinema();
+    toast(
+      tf("cinema.roleDone", {
+        c: (state.cinema.characters || []).length,
+        l: (state.cinema.locations || []).length,
+        s: (state.cinema.shots || []).length,
+      })
+    );
+  }
+
   function syncDirectorBriefFromResponse(data) {
+    applyCinemaFromDirector(data);
     const brief = data && data.brief;
     const shots = brief && Array.isArray(brief.shots) ? brief.shots : [];
     if (shots.length) {
@@ -2035,21 +2576,121 @@
     { id: "llm-claude-key", set: "claude_api_key_set", mask: "claude_api_key_masked", body: "claude_api_key" },
   ];
 
-  function _fillModelSelect(sel, models, preferred) {
+  const FALLBACK_LLM_MODELS = {
+    openai: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "o4-mini"],
+    gemini: [
+      "gemini-3.6-flash",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-3-flash-preview",
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+    ],
+    grok: ["grok-3-mini", "grok-3", "grok-2-latest"],
+    claude: [
+      "claude-sonnet-4-20250514",
+      "claude-3-5-haiku-latest",
+      "claude-3-5-sonnet-latest",
+      "claude-opus-4-20250514",
+    ],
+  };
+
+  function _fillModelSelect(sel, models, preferred, opts) {
     if (!sel) return;
-    const prev = sel.value;
+    const reset = !!(opts && opts.reset);
+    const prev = reset ? "" : sel.value;
     sel.innerHTML = "";
     if (!models.length) {
-      sel.innerHTML = `<option value="">model yok</option>`;
+      sel.innerHTML = `<option value="">${tt("llm.noModel")}</option>`;
       return;
     }
+    const want = prev || preferred || models[0];
+    let picked = false;
     for (const name of models) {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
-      if (name === (prev || preferred)) opt.selected = true;
+      if (name === want) {
+        opt.selected = true;
+        picked = true;
+      }
       sel.appendChild(opt);
     }
+    if (!picked && sel.options.length) sel.options[0].selected = true;
+  }
+
+  function _selectedLlmProvider() {
+    return (
+      ($("llm-provider") && $("llm-provider").value) ||
+      ($("llm-provider-settings") && $("llm-provider-settings").value) ||
+      "ollama"
+    ).toLowerCase();
+  }
+
+  function _llmUserPickingProvider() {
+    return !!(
+      ($("llm-provider") && $("llm-provider").dataset.userTouched) ||
+      ($("llm-provider-settings") && $("llm-provider-settings").dataset.userTouched)
+    );
+  }
+
+  function _catalogForProvider(prov, pub) {
+    const p = (prov || "ollama").toLowerCase();
+    const cfg = pub || state.llmPub || {};
+    if (p === "openai") {
+      return {
+        models: cfg.openai_models || FALLBACK_LLM_MODELS.openai,
+        preferred: cfg.openai_model,
+      };
+    }
+    if (p === "gemini") {
+      return {
+        models: cfg.gemini_models || FALLBACK_LLM_MODELS.gemini,
+        preferred: cfg.gemini_model,
+      };
+    }
+    if (p === "grok") {
+      return {
+        models: cfg.grok_models || FALLBACK_LLM_MODELS.grok,
+        preferred: cfg.grok_model,
+      };
+    }
+    if (p === "claude") {
+      return {
+        models: cfg.claude_models || FALLBACK_LLM_MODELS.claude,
+        preferred: cfg.claude_model,
+      };
+    }
+    return { models: state.ollamaModels || [], preferred: cfg.ollama_model };
+  }
+
+  function fillDirectorModelsForProvider(prov, pub, opts) {
+    const p = (prov || "ollama").toLowerCase();
+    const useLive = opts && opts.liveModels && opts.liveModels.length;
+    const cat = _catalogForProvider(p, pub);
+    const models = useLive ? opts.liveModels : cat.models;
+    const preferred = (opts && opts.preferred) || cat.preferred;
+    _fillModelSelect($("director-model"), models, preferred, { reset: true });
+    _fillModelSelect($("director-model-settings"), models, preferred, { reset: true });
+  }
+
+  async function ensureLlmPub() {
+    if (state.llmPub && (state.llmPub.gemini_models || state.llmPub.openai_models)) {
+      return state.llmPub;
+    }
+    try {
+      const d = await fetch("/api/llm/settings").then((r) => r.json());
+      state.llmPub = d;
+      return d;
+    } catch {
+      return state.llmPub || {};
+    }
+  }
+
+  async function onLlmProviderChanged(prov) {
+    const pub = await ensureLlmPub();
+    syncLlmSettingsUi({ ...pub, provider: prov }, { provider: prov });
+    fillDirectorModelsForProvider(prov, pub);
   }
 
   function syncLlmSettingsUi(pub, probe) {
@@ -2071,7 +2712,7 @@
       const el = $(f.id);
       if (!el || !pub) continue;
       if (pub[f.set] && !el.dataset.dirty) {
-        el.placeholder = pub[f.mask] || "•••• kaydedildi";
+        el.placeholder = pub[f.mask] || tt("llm.keySaved");
       }
     }
     const ready = {
@@ -2081,18 +2722,17 @@
       claude: pub && pub.claude_api_key_set,
     };
     const tips = {
-      ollama: "Ollama yerel — `ollama serve` + model. Key gerekmez.",
-      openai: ready.openai ? "OpenAI key kayıtlı." : "platform.openai.com → API key yapıştır → Kaydet.",
-      gemini: ready.gemini ? "Gemini key kayıtlı." : "aistudio.google.com/apikey → Kaydet.",
-      grok: ready.grok ? "Grok key kayıtlı." : "console.x.ai → Kaydet.",
-      claude: ready.claude ? "Claude key kayıtlı." : "console.anthropic.com → Kaydet.",
+      ollama: tt("llm.tip.ollama"),
+      openai: ready.openai ? tt("llm.tip.openaiReady") : tt("llm.tip.openai"),
+      gemini: ready.gemini ? tt("llm.tip.geminiReady") : tt("llm.tip.gemini"),
+      grok: ready.grok ? tt("llm.tip.grokReady") : tt("llm.tip.grok"),
+      claude: ready.claude ? tt("llm.tip.claudeReady") : tt("llm.tip.claude"),
     };
     const hint = $("llm-settings-hint");
-    if (hint) hint.textContent = tips[prov] || "Key doldur → Kaydet.";
+    if (hint) hint.textContent = tips[prov] || tt("llm.tipFallback");
     const prodHint = $("llm-prod-hint");
     if (prodHint) {
-      prodHint.innerHTML =
-        `Şu an: <strong>${prov}</strong>. API anahtarları sağ üst <strong>Ayarlar</strong>’da. Üretim (Comfy/H3) bundan etkilenmez.`;
+      prodHint.textContent = tf("llm.prodNow", { provider: prov });
     }
   }
 
@@ -2132,8 +2772,8 @@
       }
       toast(
         data.online
-          ? `Yönetmen: ${data.provider} · ${data.default_model || "ok"}`
-          : `Seçildi ama online değil (${data.detail || "?"}) — sağ üst Ayarlar’dan key kontrol et`
+          ? tf("toast.llmOn", { provider: data.provider, model: data.default_model || "ok" })
+          : tf("toast.llmOff", { detail: data.detail || "?" })
       );
       await refreshDirectorStatus();
     } catch (e) {
@@ -2175,8 +2815,8 @@
       }
       toast(
         data.online
-          ? `LLM: ${data.provider} · ${data.default_model || "ok"}`
-          : `Kaydedildi ama online değil (${data.detail || "?"})`
+          ? tf("toast.llmSavedOn", { provider: data.provider, model: data.default_model || "ok" })
+          : tf("toast.llmSavedOff", { detail: data.detail || "?" })
       );
       await refreshDirectorStatus();
     } catch (e) {
@@ -2188,10 +2828,20 @@
     try {
       const s = await fetch("/api/director/status?lang=" + encodeURIComponent(uiLang())).then((r) => r.json());
       const provider = s.provider || (s.llm && s.llm.provider) || "ollama";
-      syncLlmSettingsUi(s.llm || {}, s);
+      if (s.llm) state.llmPub = s.llm;
       const models = s.models || [];
-      _fillModelSelect($("director-model"), models, s.default_model);
-      _fillModelSelect($("director-model-settings"), models, s.default_model);
+      if (provider === "ollama") state.ollamaModels = models;
+      syncLlmSettingsUi(s.llm || {}, s);
+      const selected = _selectedLlmProvider();
+      const picking = _llmUserPickingProvider();
+      if (!picking || selected === provider) {
+        fillDirectorModelsForProvider(provider, s.llm || state.llmPub, {
+          liveModels: models,
+          preferred: s.default_model,
+        });
+      } else {
+        fillDirectorModelsForProvider(selected, s.llm || state.llmPub);
+      }
       if (s.online) {
         const label = state.directorReady
           ? tt("dir.briefReady")
@@ -2205,19 +2855,13 @@
       } else {
         const why = s.detail || "";
         let msg = tf("dir.offline", { provider });
-        let help = "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan API key ekle.";
+        let help = tt("llm.helpOff");
         if (why === "api_key_missing") {
-          const links = {
-            openai: "OpenAI key yok — sağ üst Ayarlar → platform.openai.com",
-            gemini: "Gemini key yok — sağ üst Ayarlar → aistudio.google.com/apikey",
-            grok: "Grok key yok — sağ üst Ayarlar → console.x.ai",
-            claude: "Claude key yok — sağ üst Ayarlar → console.anthropic.com",
-          };
-          help = links[provider] || help;
+          help = tt("llm.help." + provider) || help;
         } else if (provider === "ollama" && why === "connect_refused") {
-          help = "Ollama 11434 kapalı — `ollama serve` veya sağ üst Ayarlar’dan bulut LLM.";
+          help = tt("llm.help.ollamaRefused");
         } else if (provider === "ollama" && why === "timeout") {
-          help = "Ollama timeout — sağ üst Ayarlar’dan OpenAI/Gemini/Claude key ekle.";
+          help = tt("llm.help.ollamaTimeout");
         } else if (why && why !== "offline") {
           help = `${provider}: ${why}`;
         }
@@ -2227,7 +2871,7 @@
         }
       }
     } catch {
-      setDirectorUi(false, "Yönetmen API yok");
+      setDirectorUi(false, tt("llm.help.noApi"));
     }
   }
 
@@ -2368,8 +3012,8 @@
       visual_style: state.projectStyle,
       silent_audio: state.projectSilent || state.projectPurpose === "music_video",
       clip_duration: state.duration || 5,
-      plan_mode: state.directorTab === "plan",
-      ui_lang: uiLang(),
+      cinema_studio:
+        !!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden"),
     };
     // Prefer SSE stream so thinking shows in the same assistant row
     try {
@@ -2773,7 +3417,7 @@
       const rm = document.createElement("button");
       rm.type = "button";
       rm.className = "btn-ghost";
-      rm.textContent = "Sil";
+      rm.textContent = tt("job.del");
       rm.onclick = () => {
         state.queueItems = state.queueItems.filter((x) => x.id !== item.id);
         renderQueue();
@@ -3028,11 +3672,11 @@
     try {
       const h = await fetch("/api/health").then((r) => r.json());
       const pill = $("comfy-pill");
-      pill.textContent = h.comfy ? "Comfy online" : "Comfy offline";
+      pill.textContent = h.comfy ? tt("comfy.online") : tt("comfy.offline");
       pill.classList.toggle("on", !!h.comfy);
       pill.classList.toggle("off", !h.comfy);
     } catch {
-      $("comfy-pill").textContent = "Studio?";
+      $("comfy-pill").textContent = tt("comfy.unknown");
     }
   }
 
@@ -3137,10 +3781,10 @@
       const qn = active.filter((j) => j.status === "queued").length;
       const rn = active.some((j) => j.status === "running");
       head.textContent = rn
-        ? `Kuyruk · üretiliyor + ${qn} sırada`
+        ? tf("prod.queueRun", { n: qn })
         : qn
-          ? `Kuyruk · ${qn} sırada`
-          : "Kuyruk";
+          ? tf("prod.queueN", { n: qn })
+          : tt("prod.queue");
     }
     const activeOrder = new Map(active.map((j, i) => [j.id, i + 1]));
     for (const j of jobs) {
@@ -3159,7 +3803,9 @@
       const sira = activeOrder.has(j.id)
         ? `<span class="job-sira">#${activeOrder.get(j.id)}</span> `
         : "";
-      left.innerHTML = `${sira}<span class="${st}">${j.status}</span>${pct} · ${(j.prompt || "").slice(0, 36)}${err}`;
+      const stName = tt("job." + j.status);
+      const stText = stName.indexOf("job.") === 0 ? j.status : stName;
+      left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${(j.prompt || "").slice(0, 36)}${err}`;
       left.title = j.error || j.prompt || "";
       left.style.cursor = j.prompt ? "pointer" : "";
       if (j.prompt) {
@@ -3174,9 +3820,9 @@
       const right = document.createElement("div");
       if (j.prompt) {
         const cp = document.createElement("button");
-        cp.textContent = "Prompt";
+        cp.textContent = tt("job.prompt");
         cp.className = "btn-ghost";
-        cp.title = "Promptu gör";
+        cp.title = tt("job.promptTitle");
         cp.onclick = (e) => {
           e.stopPropagation();
           openPromptView(
@@ -3188,11 +3834,11 @@
       }
       if (j.status === "done") {
         const b = document.createElement("button");
-        b.textContent = "Oynat";
+        b.textContent = tt("job.play");
         b.onclick = () => selectJob(j);
         right.appendChild(b);
         const rm = document.createElement("button");
-        rm.textContent = "Sil";
+        rm.textContent = tt("job.del");
         rm.className = "btn-ghost";
         rm.onclick = (e) => {
           e.stopPropagation();
@@ -3201,7 +3847,7 @@
         right.appendChild(rm);
       } else if (j.status === "error" || j.status === "cancelled") {
         const b = document.createElement("button");
-        b.textContent = "Tekrar dene";
+        b.textContent = tt("job.retry");
         b.onclick = async (e) => {
           e.stopPropagation();
           b.disabled = true;
@@ -3209,7 +3855,7 @@
             const r = await fetch(`/api/jobs/${j.id}/retry`, { method: "POST" });
             const data = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(errDetail(data));
-            toast("Tekrar kuyruğa alındı");
+            toast(tt("toast.retryQueued"));
             await refreshJobs();
           } catch (err) {
             toast(String(err.message || err));
@@ -3218,7 +3864,7 @@
         };
         right.appendChild(b);
         const rm = document.createElement("button");
-        rm.textContent = "Sil";
+        rm.textContent = tt("job.del");
         rm.className = "btn-ghost";
         rm.onclick = (e) => {
           e.stopPropagation();
@@ -3423,6 +4069,7 @@
           <video src="${url}" muted preload="metadata"></video>
           ${j.prompt ? `<button type="button" class="gallery-prompt" title="Promptu aç">P</button>` : ""}
           <button type="button" class="gallery-cont" title="Bu videodan devam">Devam</button>
+          <button type="button" class="gallery-still btn-ghost" title="Son kareyi karaktere still">Still</button>
         </div>
         <div class="meta">${j.duration != null ? j.duration + "sn · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
       const delBtn = card.querySelector(".gallery-del");
@@ -3450,6 +4097,14 @@
           e.preventDefault();
           e.stopPropagation();
           void useClipAsContinue(j);
+        };
+      }
+      const stillBtn = card.querySelector(".gallery-still");
+      if (stillBtn) {
+        stillBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          void stillFromGalleryClip(j);
         };
       }
       card.onclick = () => {
@@ -3503,6 +4158,10 @@
       state.jobs = data.jobs || [];
       renderJobs();
       fillContinueSource();
+      if (!$("view-cinema")?.classList.contains("hidden")) {
+        syncCinemaShotJobs();
+        if (!cinemaTypingShots()) renderCinemaAudio();
+      }
       if (!state.playerCleared && state.selectedJobId) {
         const j = state.jobs.find((x) => x.id === state.selectedJobId);
         if (j?.status === "done" && j.output?.url) {
@@ -3591,7 +4250,6 @@
     state.selectedJobId = jobId;
     state.continueFrom = jobId;
     $("view-gallery")?.classList.add("hidden");
-    $("view-cinema")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
     const url =
       job.url ||
@@ -3779,7 +4437,7 @@
       setQuality("480");
       const steps = $("steps");
       if (steps) steps.value = "12";
-      toast("Taslak: 5sn · 480p · 12 step");
+      applyCinemaSpeed("draft");
       return;
     }
     if (kind === "quick") {
@@ -3841,7 +4499,7 @@
     if (!catalog.length) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "Yok (varsayılan)";
+      opt.textContent = tt("ayar.loraNoneOpt");
       sel.appendChild(opt);
     } else {
       catalog.forEach((spec) => {
@@ -3849,7 +4507,7 @@
         opt.value = spec.id;
         const graphs = spec.graphs || [];
         const flOnly = graphs.length && !graphs.includes("ref2va");
-        const miss = spec.file && !spec.ready ? " — indirilecek" : "";
+        const miss = spec.file && !spec.ready ? tt("ayar.loraNeed") : "";
         const tag = flOnly ? " · T2V" : "";
         opt.textContent = `${spec.label}${tag}${miss}`;
         sel.appendChild(opt);
@@ -3914,20 +4572,27 @@
     const el = $("lora-hint");
     if (!el) return;
     if (!spec || !spec.file) {
-      el.textContent = "Varsayılan: 20 step · res_multistep · süre chip’ten";
+      el.textContent = tt("ayar.loraHintEmpty");
       return;
     }
     const dur = state.duration || 5;
     const uiSteps = $("steps") ? $("steps").value : "";
-    const rec = spec.steps ? `önerilen ${spec.steps} step` : "step sen ayarla";
+    const rec = spec.steps ? tf("ayar.loraRec", { n: spec.steps }) : tt("ayar.loraRecYou");
     if (!state.loraApplied || spec.id !== state.loraId) {
-      el.textContent = `${spec.label} seçili — Uygula. ${rec}. Süre ${dur}sn chip’te kalır.`;
+      el.textContent = tf("ayar.loraHintPick", { label: spec.label, rec, dur, sec: tt("sec") });
       return;
     }
     const graphs = spec.graphs || [];
     const flOnly = graphs.length && !graphs.includes("ref2va");
-    const extra = flOnly ? " · Ref/yüz’de atlanır" : "";
-    el.textContent = `${spec.label} uygulandı · ${uiSteps || "?"} step (kutu) · ${rec}${extra} · süre ${dur}sn`;
+    const extra = flOnly ? tt("ayar.loraSkipRef") : "";
+    el.textContent = tf("ayar.loraHintOn", {
+      label: spec.label,
+      steps: uiSteps || "?",
+      rec,
+      extra,
+      dur,
+      sec: tt("sec"),
+    });
   }
 
   async function loadLoras() {
@@ -4295,8 +4960,10 @@
     void openCinemaStudio();
   });
   $("btn-cinema-close")?.addEventListener("click", () => closeCinemaStudio());
-  $("view-cinema")?.addEventListener("click", (e) => {
-    if (e.target === $("view-cinema")) closeCinemaStudio();
+  $("btn-cinema-ingest")?.addEventListener("click", () => void ingestCinemaRole());
+  $("cinema-role-script")?.addEventListener("change", () => {
+    ensureCinema().role_script = $("cinema-role-script").value || "";
+    void saveCinema(true);
   });
   $("btn-cinema-add-char")?.addEventListener("click", () => void addCinemaAsset("character"));
   $("btn-cinema-add-loc")?.addEventListener("click", () => void addCinemaAsset("location"));
@@ -4344,6 +5011,59 @@
     void uploadCinemaScore(f);
   });
   $("btn-cinema-mux")?.addEventListener("click", () => void muxCinemaScore());
+  $("btn-cinema-concat")?.addEventListener("click", () => void concatCinemaFilm());
+  $("btn-gallery-concat")?.addEventListener("click", () => void concatCinemaFilm());
+  $("btn-cinema-film-new")?.addEventListener("click", () => {
+    void cinemaFilmAction("new")
+      .then(() => toast(tt("cinema.filmNew")))
+      .catch((err) => toast(String(err.message || err)));
+  });
+  $("cinema-film-select")?.addEventListener("change", (e) => {
+    const id = e.target.value;
+    if (!id || id === ensureCinema().film_id) return;
+    void cinemaFilmAction("switch", id)
+      .then(() => toast(tt("cinema.filmSwitched")))
+      .catch((err) => toast(String(err.message || err)));
+  });
+  $("btn-cinema-export")?.addEventListener("click", () => {
+    window.location.href = "/api/cinema/export";
+  });
+  $("cinema-import-file")?.addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    const fd = new FormData();
+    fd.append("file", f);
+    void fetch("/api/cinema/import", { method: "POST", body: fd })
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(errDetail(data));
+        const base = emptyCinema();
+        state.cinema = {
+          ...base,
+          ...data,
+          setup: { ...base.setup, ...(data.setup || {}) },
+          audio: { ...base.audio, ...(data.audio || {}) },
+        };
+        renderCinema();
+        await fillCinemaFilms();
+        toast(tt("cinema.filmImported"));
+      })
+      .catch((err) => toast(String(err.message || err)));
+  });
+  $("cinema-speed-chips")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-speed]");
+    if (!btn) return;
+    applyCinemaSpeed(btn.dataset.speed);
+  });
+  $("cinema-seed")?.addEventListener("change", () => {
+    ensureCinema().seed = Number($("cinema-seed").value);
+    void saveCinema(true);
+  });
+  $("cinema-seed-lock")?.addEventListener("change", () => {
+    ensureCinema().seed_lock = !!$("cinema-seed-lock").checked;
+    void saveCinema(true);
+  });
   $("cinema-pills")?.addEventListener("click", (e) => {
     const option = e.target.closest(".film-pill-option");
     const pill = e.target.closest(".film-pill");
@@ -4389,6 +5109,7 @@
     if (e.target.dataset.field === "text") {
       shot.text = e.target.value;
       void saveCinema(true);
+      scheduleCinemaPreview();
     }
   });
   $("cinema-shots")?.addEventListener("click", (e) => {
@@ -4417,16 +5138,34 @@
       if (!card) return;
       const id = card.dataset.id;
       if (e.target.classList.contains("cinema-img")) {
-        const f = e.target.files && e.target.files[0];
+        void uploadCinemaImage(kind, id, e.target.files);
         e.target.value = "";
-        void uploadCinemaImage(kind, id, f);
         return;
       }
       const field = e.target.dataset.field;
       if (!field) return;
-      void patchCinemaAsset(kind, id, { [field]: e.target.value });
+      void patchCinemaAsset(kind, id, { [field]: e.target.value }).then(() => {
+        if (field === "name") renderCinema();
+      });
     });
     $(rootId)?.addEventListener("click", (e) => {
+      const callEl = e.target.closest(".cinema-call");
+      if (callEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        const call = callEl.dataset.call || callEl.textContent || "";
+        if (call) void copyText(call, tf("cinema.copiedCall", { call }));
+        return;
+      }
+      const imgDel = e.target.closest(".cinema-img-del");
+      if (imgDel) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = imgDel.closest(".cinema-card");
+        if (!card) return;
+        void removeCinemaImage(kind, card.dataset.id || "", imgDel.dataset.file || "");
+        return;
+      }
       const del = e.target.closest(".cinema-del");
       if (!del) return;
       e.preventDefault();
@@ -4465,7 +5204,7 @@
   $("btn-use-prompt")?.addEventListener("click", () => {
     const t = (state.clipPrompt || "").trim();
     if (!t) {
-      toast("Prompt yok");
+      toast(tt("toast.noPrompt"));
       return;
     }
     const ta = $("prompt");
@@ -4696,14 +5435,14 @@
     if ($("llm-provider")) $("llm-provider").dataset.userTouched = "1";
     const prov = $("llm-provider").value;
     if ($("llm-provider-settings")) $("llm-provider-settings").value = prov;
-    syncLlmSettingsUi({ provider: prov }, { provider: prov });
+    void onLlmProviderChanged(prov);
   });
   $("llm-provider-settings")?.addEventListener("change", () => {
     if ($("llm-provider-settings")) $("llm-provider-settings").dataset.userTouched = "1";
     const prov = $("llm-provider-settings").value;
     if ($("llm-provider")) $("llm-provider").value = prov;
     $("llm-ollama-url-wrap")?.classList.toggle("hidden", prov !== "ollama");
-    syncLlmSettingsUi({ provider: prov }, { provider: prov });
+    void onLlmProviderChanged(prov);
   });
   $("llm-ollama-url")?.addEventListener("input", () => {
     if ($("llm-ollama-url")) $("llm-ollama-url").dataset.dirty = "1";
@@ -4730,7 +5469,7 @@
           $("llm-provider").dataset.userTouched = "1";
         }
         $("llm-ollama-url-wrap")?.classList.toggle("hidden", true);
-        syncLlmSettingsUi({ provider: prov }, { provider: prov });
+        void onLlmProviderChanged(prov);
       }
     });
   }
@@ -4903,7 +5642,6 @@
     setDirectorLlmOpen(false);
     $("view-settings")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
-    $("view-cinema")?.classList.add("hidden");
     $("view-gallery")?.classList.remove("hidden");
     void renderGallery();
   });
@@ -4912,7 +5650,6 @@
     setDirectorLlmOpen(false);
     $("view-gallery")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
-    $("view-cinema")?.classList.add("hidden");
     $("view-settings")?.classList.remove("hidden");
     void refreshDirectorStatus();
     void refreshNotifySettings();
@@ -4927,7 +5664,6 @@
     setDirectorLlmOpen(false);
     $("view-gallery")?.classList.add("hidden");
     $("view-settings")?.classList.add("hidden");
-    $("view-cinema")?.classList.add("hidden");
     $("view-support")?.classList.remove("hidden");
   });
   $("btn-support-close")?.addEventListener("click", () => $("view-support")?.classList.add("hidden"));
@@ -5196,17 +5932,36 @@
   document.addEventListener("h3-lang", () => {
     syncProjectChips();
     refreshModeHints();
+    updateProjectAudioHint();
+    fillLoraSelect();
     fillLoraShop();
     updateLoraHint();
+    renderJobs();
+    renderQueue();
+    if (typeof syncLlmSettingsUi === "function") {
+      const prov = _selectedLlmProvider();
+      syncLlmSettingsUi({ ...(state.llmPub || {}), provider: prov }, { provider: prov });
+    }
     if (state.directorTab === "plan") renderDirectorPlanBoard();
     document.querySelectorAll("#director-log .dir-msg").forEach((el) => {
       const who = el.querySelector(".who");
       if (!who) return;
       who.textContent = el.classList.contains("user") ? tt("dir.you") : tt("dir.who");
     });
-    if ($("view-cinema") && !$("view-cinema").classList.contains("hidden") && typeof renderCinema === "function") {
-      renderCinema();
-    }
+    if (typeof renderCinema === "function") renderCinema();
+    const ph = [
+      ["bible-logline", "dir.bibleLogPh"],
+      ["bible-characters", "dir.bibleCharPh"],
+      ["bible-locations", "dir.bibleLocPh"],
+      ["bible-tone", "dir.tonePh"],
+      ["bible-forbidden", "dir.forbidPh"],
+      ["music-concept", "dir.musicPh"],
+      ["music-lyrics", "dir.lyricsPh"],
+    ];
+    ph.forEach(([id, key]) => {
+      const el = $(id);
+      if (el) el.placeholder = tt(key);
+    });
   });
 
   try {

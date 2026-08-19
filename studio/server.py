@@ -18,7 +18,7 @@ from typing import Any, Optional
 import httpx
 import psutil  # Moved from _acquire_single_instance for consistency
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
@@ -59,6 +59,7 @@ from lib.director import (
     infer_duration_and_shots,
     opening_message,
     PLAN_MODE_ADDENDUM,
+    CINEMA_STUDIO_ADDENDUM,
     ready_shots_reply,
     skeleton_brief_from_text,
     system_prompt,
@@ -73,6 +74,7 @@ from lib.frames import duration_to_length, extract_last_frame, resize_image, str
 from lib.music import (
     build_song_director_seed,
     concat_and_mux,
+    concat_keep_audio,
     concat_keep_audio_mix_score,
     load_meta,
     probe_energy_timeline,
@@ -875,8 +877,7 @@ class DirectorChatBody(BaseModel):
     visual_style: Optional[str] = None
     silent_audio: Optional[bool] = None
     clip_duration: Optional[int] = None
-    plan_mode: bool = False
-    ui_lang: Optional[str] = None
+    cinema_studio: Optional[bool] = None
 
 
 class DirectorCommitBody(BaseModel):
@@ -1526,9 +1527,7 @@ async def generate(body: GenerateBody):
         lora_src, steps, sampler, scheduler, graph=graph
     )
     purpose = (body.purpose or "").strip() or None
-    silent = bool(body.silent_audio) or (
-        (purpose or "").lower() in ("music_video", "music-video", "muzik_klibi")
-    )
+    silent = bool(body.silent_audio)
     prompt_txt = cinema_bound["prompt"] if cinema_bound.get("hits") else body.prompt
     if mode == "face":
         prompt_txt = enhance_ref_prompt(
@@ -1613,9 +1612,7 @@ async def batch(body: BatchBody):
         raise HTTPException(503, "ComfyUI kapalı")
     await _free_llm_for_production()
     purpose = (body.purpose or "").strip() or None
-    silent = bool(body.silent_audio) or bool(body.music_id) or (
-        (purpose or "").lower() in ("music_video", "music-video", "muzik_klibi")
-    )
+    silent = bool(body.silent_audio) or bool(body.music_id)
     prompts = [p.strip() for p in body.prompts if p.strip()]
     if not prompts:
         raise HTTPException(400, "prompt yok")
@@ -2056,6 +2053,70 @@ async def cinema_put(body: dict[str, Any]):
     return cinema.save(body or {})
 
 
+class CinemaIngestBody(BaseModel):
+    text: str = ""
+    model: Optional[str] = None
+    duration: Optional[int] = None
+
+
+@app.post("/api/cinema/ingest")
+async def cinema_ingest(body: CinemaIngestBody):
+    """Paste a role/screenplay → LLM fills cinema characters, locations, shots."""
+    raw = (body.text or "").strip()
+    if len(raw) < 40:
+        raise HTTPException(400, "Rol metni çok kısa — sahne / karakter içeren senaryo yapıştır")
+    if not await llm.healthy():
+        raise HTTPException(503, "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan key ekle")
+    model = await llm.resolve_model(body.model or _director_model)
+    clip = int(body.duration or cinema.load().get("duration") or 5)
+    if clip not in (4, 5, 6, 8, 10, 15):
+        clip = 5
+    sys_msg = (
+        "You turn a pasted screenplay / role text into a production bible for MiniMax H3. "
+        "Reply with JSON only. Schema:\n"
+        '{"title":"","logline":"","characters":[{"name":"","notes":"look/wardrobe","voice":"speaking voice"}],'
+        '"locations":[{"name":"","notes":"set/time/light"}],'
+        '"shots":[{"text":"cinematic SCENE paragraph naming characters and locations","mode":"t2v"|"continue"}]}\n'
+        "Rules: keep character names short and unique (Arthur, not The Young Knight). "
+        f"Each shot is one {clip}s H3 clip. First shot mode t2v, later shots continue. "
+        "Shot text must mention character and location names exactly as in characters[]. "
+        "20–40 shots max. No markdown."
+    )
+    user_msg = f"Rol metni / senaryo:\n\n{raw[:24000]}"
+    try:
+        reply = await llm.chat(
+            model,
+            [
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.4,
+            format_json=True,
+            num_predict=8192,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Yönetmen LLM hata ({llm.provider()}): {e}") from e
+    parsed = extract_json_object(reply) or {}
+    brief = parsed.get("brief") if isinstance(parsed.get("brief"), dict) else parsed
+    if not isinstance(brief, dict):
+        brief = {}
+    if not brief.get("shots") and not brief.get("characters"):
+        brief = {
+            "title": "",
+            "characters": [],
+            "locations": [],
+            "shots": [{"text": t, "mode": "t2v" if i == 0 else "continue"} for i, t in enumerate(cinema.split_shots(raw))],
+        }
+    out = cinema.apply_ingest(brief, raw)
+    slog.info(
+        "cinema ingest",
+        chars=len(out.get("characters") or []),
+        locs=len(out.get("locations") or []),
+        shots=len(out.get("shots") or []),
+    )
+    return {"ok": True, "cinema": out}
+
+
 @app.post("/api/cinema/character")
 async def cinema_add_character(body: dict[str, Any]):
     return cinema.upsert_asset("character", body or {})
@@ -2130,6 +2191,83 @@ def _cinema_batch_items(batch_id: str) -> list[dict]:
         )
     )
     return items
+
+
+async def _cinema_clip_paths(batch_id: str) -> list[Path]:
+    items = _cinema_batch_items(batch_id)
+    if not items:
+        raise HTTPException(404, "bu filme ait klip yok")
+    pending = [j for j in items if j.get("status") in ("queued", "running")]
+    if pending:
+        raise HTTPException(
+            400, f"{len(pending)} shot hâlâ üretiliyor — bitince birleştir"
+        )
+    paths: list[Path] = []
+    for j in items:
+        if j.get("status") in ("error", "cancelled", "queued", "running"):
+            continue
+        jid = str(j.get("id") or "")
+        rec = _clip_record(jid) or dict(j)
+        rec["id"] = jid
+        try:
+            paths.append(await _ensure_job_video(rec))
+        except Exception:
+            gal = GALLERY / f"{jid}.mp4"
+            if not gal.exists():
+                raise HTTPException(400, f"klip videosu yok: {jid[:8]}")
+            paths.append(gal)
+    if not paths:
+        raise HTTPException(400, "birleştirilecek bitmiş klip yok")
+    return paths
+
+
+async def _mix_cinema_batch(batch_id: str, score_id: str, score_volume: float = 0.16) -> dict:
+    try:
+        meta = load_meta(MUSIC, score_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "film müziği dosyası yok — yeniden yükle")
+    audio_path = Path(meta.get("path") or "")
+    if not audio_path.exists():
+        raise HTTPException(404, "film müziği dosyası yok — yeniden yükle")
+    paths = await _cinema_clip_paths(batch_id)
+    CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
+    out = CINEMA_FINALS / f"{batch_id}_final.mp4"
+    concat_keep_audio_mix_score(
+        video_paths=paths,
+        audio_path=audio_path,
+        out_path=out,
+        score_volume=score_volume,
+    )
+    return {
+        "ok": True,
+        "batch_id": batch_id,
+        "clips": len(paths),
+        "final_url": f"/api/cinema/final/{batch_id}",
+    }
+
+
+async def _maybe_auto_mux_cinema(job: dict) -> None:
+    bid = str(job.get("cinema_batch") or "").strip()
+    if not bid:
+        return
+    items = _cinema_batch_items(bid)
+    if not items or any(j.get("status") in ("queued", "running") for j in items):
+        return
+    if not any(j.get("status") == "done" for j in items):
+        return
+    lib = cinema.load()
+    audio = cinema._clean_audio(lib.get("audio"))
+    if str(audio.get("auto_muxed") or "") == bid:
+        return
+    score = str(audio.get("score_id") or job.get("score_id") or "").strip()
+    if not score:
+        return
+    result = await _mix_cinema_batch(bid, score)
+    audio["auto_muxed"] = bid
+    audio["last_batch"] = bid
+    lib["audio"] = audio
+    cinema.save(lib)
+    slog.info("cinema auto mux", batch=bid, clips=result.get("clips"))
 
 
 async def _queue_cinema_seamless(
@@ -2252,8 +2390,8 @@ async def cinema_produce(body: CinemaProduceBody):
     silent = audio.get("mode") == "silent" or bool(body.silent_audio)
     if audio.get("mode") == "film":
         silent = False
-        if (purpose or "").lower() in ("music_video", "music-video", "muzik_klibi"):
-            purpose = "short_film"
+    elif audio.get("mode") == "silent":
+        silent = True
     cinema_batch = str(uuid.uuid4())[:8]
     lib["audio"] = audio
     cinema.save(lib)
@@ -2268,7 +2406,13 @@ async def cinema_produce(body: CinemaProduceBody):
     )
     prompts = [cinema.apply_look(s["text"], head) for s in parsed]
     modes = [s["mode"] for s in parsed]
-    if body.seamless:
+    still_lock = any(
+        (cinema.bind_prompt(p, lib=lib).get("ref_images") or []) for p in prompts
+    )
+    want_seamless = bool(body.seamless)
+    if want_seamless and still_lock:
+        want_seamless = False
+    if want_seamless:
         queued = await _queue_cinema_seamless(
             body=body,
             parsed=parsed,
@@ -2303,18 +2447,27 @@ async def cinema_produce(body: CinemaProduceBody):
             score_id=audio.get("score_id") or None,
         )
         queued = await batch(bb)
+    for i, job in enumerate(queued.get("jobs") or []):
+        if i < len(parsed):
+            job["shot_id"] = parsed[i].get("id")
+            job["shot_index"] = i + 1
+    if queued.get("jobs"):
+        _save_jobs()
     audio["last_batch"] = cinema_batch
     lib["audio"] = audio
     cinema.save(lib)
     queued["cinema_batch"] = cinema_batch
     queued["score_id"] = audio.get("score_id") or ""
-    queued["seamless"] = bool(body.seamless)
+    queued["seamless"] = bool(want_seamless)
+    queued["still_lock"] = still_lock
+    queued["preview"] = cinema.produce_preview(lib)
     slog.info(
         "cinema produce",
         shots=len(parsed),
         count=queued.get("count"),
         batch=cinema_batch,
-        seamless=bool(body.seamless),
+        seamless=bool(want_seamless),
+        still_lock=still_lock,
     )
     return queued
 
@@ -2330,60 +2483,140 @@ async def cinema_mux(body: CinemaMuxBody):
     score_id = (body.score_id or audio.get("score_id") or "").strip()
     if not score_id:
         raise HTTPException(400, "film müziği yok — bir kez yükle")
-    try:
-        meta = load_meta(MUSIC, score_id)
-    except FileNotFoundError:
-        raise HTTPException(404, "film müziği dosyası yok — yeniden yükle")
-    audio_path = Path(meta.get("path") or "")
-    if not audio_path.exists():
-        raise HTTPException(404, "film müziği dosyası yok — yeniden yükle")
-    items = _cinema_batch_items(batch_id)
-    if not items:
-        raise HTTPException(404, "bu filme ait klip yok")
-    pending = [j for j in items if j.get("status") in ("queued", "running")]
-    if pending:
-        raise HTTPException(
-            400, f"{len(pending)} shot hâlâ üretiliyor — bitince aynı müziği karıştır"
-        )
-    paths: list[Path] = []
-    for j in items:
-        if j.get("status") in ("error", "cancelled", "queued", "running"):
-            continue
-        jid = str(j.get("id") or "")
-        rec = _clip_record(jid) or dict(j)
-        rec["id"] = jid
-        try:
-            paths.append(await _ensure_job_video(rec))
-        except Exception:
-            gal = GALLERY / f"{jid}.mp4"
-            if not gal.exists():
-                raise HTTPException(400, f"klip videosu yok: {jid[:8]}")
-            paths.append(gal)
-    if not paths:
-        raise HTTPException(400, "birleştirilecek bitmiş klip yok")
-    CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
-    out = CINEMA_FINALS / f"{batch_id}_final.mp4"
     vol = 0.16 if body.score_volume is None else float(body.score_volume)
     try:
-        concat_keep_audio_mix_score(
-            video_paths=paths,
-            audio_path=audio_path,
-            out_path=out,
-            score_volume=vol,
-        )
+        result = await _mix_cinema_batch(batch_id, score_id, vol)
+    except HTTPException:
+        raise
     except Exception as e:
         slog.error("cinema mux failed", err=e, batch=batch_id)
         raise HTTPException(500, str(e)[-400:])
     audio["last_batch"] = batch_id
     lib["audio"] = audio
     cinema.save(lib)
-    slog.info("cinema mux ok", batch=batch_id, clips=len(paths), out=str(out))
+    slog.info("cinema mux ok", batch=batch_id, clips=result.get("clips"))
+    return result
+
+
+@app.post("/api/cinema/concat")
+async def cinema_concat(body: CinemaMuxBody):
+    """Join cinema-batch clips in shot order (keep dialogue)."""
+    lib = cinema.load()
+    audio = cinema._clean_audio(lib.get("audio"))
+    batch_id = (body.batch_id or audio.get("last_batch") or "").strip()
+    if not batch_id:
+        raise HTTPException(400, "film serisi yok — önce kuyruğa al")
+    paths = await _cinema_clip_paths(batch_id)
+    CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
+    out = CINEMA_FINALS / f"{batch_id}_final.mp4"
+    try:
+        concat_keep_audio(video_paths=paths, out_path=out)
+    except Exception as e:
+        raise HTTPException(500, str(e)[-400:])
+    audio["last_batch"] = batch_id
+    lib["audio"] = audio
+    cinema.save(lib)
     return {
         "ok": True,
         "batch_id": batch_id,
         "clips": len(paths),
         "final_url": f"/api/cinema/final/{batch_id}",
     }
+
+
+@app.get("/api/cinema/films")
+async def cinema_films():
+    return {"films": cinema.list_films(), "active": cinema.load().get("film_id")}
+
+
+class CinemaFilmBody(BaseModel):
+    action: str = "new"
+    id: Optional[str] = None
+
+
+@app.post("/api/cinema/films")
+async def cinema_films_post(body: CinemaFilmBody):
+    act = (body.action or "").strip().lower()
+    if act == "new":
+        return cinema.new_film()
+    if act == "switch":
+        try:
+            return cinema.switch_film(body.id or "")
+        except FileNotFoundError:
+            raise HTTPException(404, "film yok")
+    if act == "delete":
+        return cinema.delete_film(body.id or "")
+    raise HTTPException(400, "action: new | switch | delete")
+
+
+@app.get("/api/cinema/export")
+async def cinema_export():
+    data = cinema.export_zip()
+    title = (cinema.load().get("title") or "film").strip() or "film"
+    safe = re.sub(r"[^\w\-]+", "_", title)[:40] or "film"
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.h3film.zip"'},
+    )
+
+
+@app.post("/api/cinema/import")
+async def cinema_import(file: UploadFile = File(...)):
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "boş zip")
+    try:
+        return cinema.import_zip(raw)
+    except Exception as e:
+        raise HTTPException(400, str(e)[:300])
+
+
+@app.get("/api/cinema/preview")
+async def cinema_preview():
+    return cinema.produce_preview()
+
+
+class CinemaStillBody(BaseModel):
+    job_id: str
+    asset_id: str
+    kind: str = "character"
+
+
+@app.post("/api/cinema/still-from-clip")
+async def cinema_still_from_clip(body: CinemaStillBody):
+    job = _clip_record(body.job_id) or next(
+        (j for j in _gallery if str(j.get("id")) == body.job_id), None
+    )
+    if not job:
+        raise HTTPException(404, "klip yok")
+    try:
+        await _prepare_last_frame(job, upload=True)
+    except Exception as e:
+        raise HTTPException(400, f"son kare yok: {e}")
+    src = Path(job.get("last_frame_path") or "")
+    if not src.is_file():
+        raise HTTPException(400, "son kare dosyası yok")
+    kind = "character" if (body.kind or "character") != "location" else "location"
+    lib = cinema.load()
+    key = "characters" if kind == "character" else "locations"
+    found = next((x for x in lib.get(key) or [] if x.get("id") == body.asset_id), None)
+    if not found:
+        raise HTTPException(404, "kart yok")
+    images = list(found.get("images") or [])
+    if len(images) >= cinema.MAX_ASSET_IMAGES:
+        raise HTTPException(400, "Bu kartta en fazla 5 görsel")
+    rid = str(uuid.uuid4())[:12]
+    dest = REFS / f"h3_ref_{rid}.png"
+    REFS.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    try:
+        comfy_name = await comfy.upload_image(dest, dest.name)
+    except Exception as e:
+        raise HTTPException(502, f"Comfy upload hata: {e}") from e
+    images.append({"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
+    found["images"] = images
+    return cinema.upsert_asset(kind, found)
 
 
 @app.get("/api/cinema/final/{batch_id}")
@@ -2411,9 +2644,7 @@ async def storyboard(body: StoryboardBody):
         raise HTTPException(400, "En fazla 40 keyframe")
     await _free_llm_for_production()
     purpose = (body.purpose or "").strip() or None
-    silent = bool(body.silent_audio) or (
-        (purpose or "").lower() in ("music_video", "music-video", "muzik_klibi")
-    )
+    silent = bool(body.silent_audio)
     w, h = resolve_size(body.aspect, body.quality)
     seed_base = body.seed if body.seed >= 0 else int(time.time() * 1000) % (2**53)
     steps = body.steps if body.steps and body.steps > 0 else 20
@@ -3191,6 +3422,8 @@ async def _director_chat_impl(body: DirectorChatBody):
         sess["silent_audio"] = True
     if body.clip_duration in ALLOWED_DURATIONS:
         sess["clip_duration"] = int(body.clip_duration)
+    if body.cinema_studio is not None:
+        sess["cinema_studio"] = bool(body.cinema_studio)
 
     user_msg = (body.message or "").strip()
     if user_msg:
@@ -3215,6 +3448,8 @@ async def _director_chat_impl(body: DirectorChatBody):
             )
         if prefix_bits and not user_msg.startswith("[proje:"):
             user_msg = f"[proje: {', '.join(prefix_bits)}]\n{user_msg}"
+        if sess.get("cinema_studio") and "[sinema stüdyosu]" not in user_msg.lower():
+            user_msg = "[sinema stüdyosu] " + user_msg
         sess["messages"].append({"role": "user", "content": user_msg})
 
     # Short confirm after a finished plan → finalize previous assistant text (no new LLM wait)
@@ -3247,6 +3482,13 @@ async def _director_chat_impl(body: DirectorChatBody):
                 sess["messages"].append({"role": "assistant", "content": reply})
                 _sessions[sid] = sess
                 _save_sessions()
+                cinema_out = None
+                if sess.get("cinema_studio"):
+                    try:
+                        role = str((cinema.load() or {}).get("role_script") or "")
+                        cinema_out = cinema.ingest_from_director_brief(brief, role)
+                    except Exception:
+                        cinema_out = None
                 return {
                     "session_id": sid,
                     "reply": reply,
@@ -3255,6 +3497,7 @@ async def _director_chat_impl(body: DirectorChatBody):
                     "shot_count": n,
                     "model": model,
                     "messages": sess["messages"],
+                    "cinema": cinema_out,
                 }
 
     # Ask model; empty answers are retried inside llm.chat, then local fallback
@@ -3264,6 +3507,8 @@ async def _director_chat_impl(body: DirectorChatBody):
         sys = (sys or "") + "\n\n" + PLAN_MODE_ADDENDUM
         if ui_lang == "en":
             sys += "\nPlan-mode `reply` must be English (not Turkish)."
+    if sess.get("cinema_studio"):
+        sys = (sys or "") + "\n\n" + CINEMA_STUDIO_ADDENDUM
     board = format_brief_board(sess.get("brief"), full=plan_mode)
     try:
         cinema_board = format_cinema_board(cinema.load(), full=plan_mode)
@@ -3440,6 +3685,13 @@ async def _director_chat_impl(body: DirectorChatBody):
     # Keep ready sticky after a finished brief so UI can show shot panel + Üretime al
     # while the user keeps chatting / revising.
     out_ready = bool(ready or (sess.get("ready") and out_shots))
+    cinema_out = None
+    if sess.get("cinema_studio") and out_ready and out_brief:
+        try:
+            role = str((cinema.load() or {}).get("role_script") or "")
+            cinema_out = cinema.ingest_from_director_brief(out_brief, role)
+        except Exception as e:
+            slog.error("cinema studio ingest from director failed", err=e)
     return {
         "session_id": sid,
         "reply": reply,
@@ -3448,6 +3700,7 @@ async def _director_chat_impl(body: DirectorChatBody):
         "shot_count": len(out_shots),
         "model": model,
         "messages": sess["messages"],
+        "cinema": cinema_out,
     }
 
 
@@ -4400,6 +4653,10 @@ async def _run_job(job: dict):
                     slog.warn_job(job, "gallery archive failed", err=e)
                 slog.info_job(job, "done", file=video_meta.get("filename"))
                 await _notify_job(job, "done")
+                try:
+                    await _maybe_auto_mux_cinema(job)
+                except Exception as e:
+                    slog.warn("cinema auto mux skip", err=e)
                 return
 
             # Not in history yet — soft progress by elapsed time

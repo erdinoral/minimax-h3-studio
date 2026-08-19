@@ -163,8 +163,10 @@ _BARE_LANG_LINE = re.compile(
 
 
 def _is_silent_brief(brief: dict[str, Any]) -> bool:
+    if "silentAudio" in (brief or {}):
+        return bool(brief.get("silentAudio"))
     purpose = (brief.get("purpose") or "").lower().strip()
-    return bool(brief.get("silentAudio")) or purpose in (
+    return purpose in (
         "music_video",
         "music-video",
         "muzik_klibi",
@@ -327,6 +329,18 @@ Türkçe `reply` ile ne değiştiğini söyle. Üretime alma, kuyruk yok.
 """
 
 
+CINEMA_STUDIO_ADDENDUM = """
+## SİNEMA STÜDYOSU (şu an açık)
+Kullanıcı Direktör sinema panelinden geldi. Çıktın oraya yazılır.
+
+Hedef: karakter kartları, mekan kartları, shot listesi.
+Shot metninde karakter/mekan adlarını birebir kullan (Arthur, arthur2, Rooftop).
+Mevcut still / görselleri silme; kartları isimle birleştir.
+Brief hazır olunca JSON'da characters[], locations[], shots[] (h3Prompt + linkToPrev) ver.
+Üretime alma — sadece stüdyo altyapısını kur.
+"""
+
+
 def _clip_text(value: Any, limit: int) -> str:
     t = str(value or "").strip()
     if limit > 0 and len(t) > limit:
@@ -410,14 +424,26 @@ def format_cinema_board(data: Optional[dict[str, Any]], *, full: bool = False) -
         if not isinstance(c, dict):
             continue
         lines.append(
-            f"character {c.get('name') or '?'}: {_clip_text(c.get('description'), 220)}"
+            f"character {c.get('name') or '?'}: stills="
+            + ",".join(
+                str(im.get("name") or "")
+                for im in (c.get("images") or [])
+                if isinstance(im, dict) and im.get("name")
+            )
+            + f" notes={_clip_text(c.get('notes') or c.get('description'), 220)}"
             + (f" voice={_clip_text(c.get('voice'), 80)}" if c.get("voice") else "")
         )
     for loc in locs:
         if not isinstance(loc, dict):
             continue
         lines.append(
-            f"location {loc.get('name') or '?'}: {_clip_text(loc.get('description'), 220)}"
+            f"location {loc.get('name') or '?'}: stills="
+            + ",".join(
+                str(im.get("name") or "")
+                for im in (loc.get("images") or [])
+                if isinstance(im, dict) and im.get("name")
+            )
+            + f" notes={_clip_text(loc.get('notes') or loc.get('description'), 220)}"
         )
     for i, shot in enumerate(shots):
         if isinstance(shot, dict):
@@ -427,6 +453,10 @@ def format_cinema_board(data: Optional[dict[str, Any]], *, full: bool = False) -
             mode = "t2v"
             text = str(shot)
         lines.append(f"\n## Studio shot {i + 1} · {mode}\n{_clip_text(text, cap)}")
+    lines.append(
+        "When writing shots, name stills by call id (arthur1, arthur2) or the character name "
+        "(Arthur binds every still). Do not invent extra characters that are not on this board."
+    )
     return "\n".join(lines).strip()
 
 

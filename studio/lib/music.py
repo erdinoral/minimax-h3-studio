@@ -459,6 +459,49 @@ def _normalize_clip_keep_audio(src: Path, dest: Path) -> None:
         raise RuntimeError(f"klip normalize başarısız: {(r.stderr or '')[-600:]}")
 
 
+def concat_keep_audio(*, video_paths: list[Path], out_path: Path) -> Path:
+    """Join clips in order, keep each clip's dialogue/SFX."""
+    if not video_paths:
+        raise ValueError("birleştirilecek video yok")
+    for p in video_paths:
+        if not p.exists():
+            raise FileNotFoundError(f"video yok: {p}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    work = out_path.parent / f"_cinema_cat_{out_path.stem}"
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        normalized: list[Path] = []
+        for i, p in enumerate(video_paths):
+            dest = work / f"clip_{i:03d}.mp4"
+            _normalize_clip_keep_audio(p, dest)
+            normalized.append(dest)
+        list_file = work / "concat.txt"
+        lines = []
+        for p in normalized:
+            esc = str(p.resolve()).replace("'", r"'\''")
+            lines.append(f"file '{esc}'")
+        list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        cmd = [
+            _ffmpeg(),
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(list_file),
+            "-c",
+            "copy",
+            str(out_path),
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0 or not out_path.exists():
+            raise RuntimeError(f"video birleştirme başarısız: {(r.stderr or '')[-600:]}")
+        return out_path
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def concat_keep_audio_mix_score(
     *,
     video_paths: list[Path],

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>H3 Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=cinema33" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema44" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -57,7 +57,7 @@
             <button type="button" class="chip" data-group="purpose" data-purpose="intro" aria-pressed="false">intro</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="outro" aria-pressed="false">outro</button>
           </div>
-          <label>Görsel tarz</label>
+          <label id="scene-style-label">Görsel tarz</label>
           <div class="chips wrap" id="scene-style-chips" role="group" aria-label="Görsel tarz">
             <button type="button" class="chip" data-group="style" data-style="realistic" aria-pressed="false">gerçekçi</button>
             <button type="button" class="chip" data-group="style" data-style="anime" aria-pressed="false">anime</button>
@@ -75,7 +75,7 @@
 
         <div id="panel-mode-new">
           <p class="muted mode-hint" id="mode-hint-new">Sıfırdan T2V — ilk kare yüklersen I2V (bu kareden başlar). Referans modu I2V değildir.</p>
-          <label>Süre</label>
+        <label id="scene-duration-label">Süre</label>
           <div class="chips" id="dur-chips">
             <button type="button" data-dur="4" class="chip">4 sn</button>
             <button type="button" data-dur="5" class="chip on">5 sn</button>
@@ -85,22 +85,22 @@
             <button type="button" data-dur="15" class="chip warn">15 sn</button>
           </div>
           <div id="fl2va-frames">
-            <label>İlk kare — I2V (opsiyonel)</label>
+            <label id="first-frame-label">İlk kare — I2V (opsiyonel)</label>
             <label class="file-pick">
               <input type="file" id="first-frame-file" class="file-pick-input" accept="image/*" />
-              <span class="file-pick-btn">Görsel seç</span>
-              <span class="file-pick-name">Seçilmedi</span>
+              <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
+              <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
             </label>
             <div class="ref-thumbs" id="first-frame-thumb"></div>
-            <label>Son kare (opsiyonel)</label>
+            <label id="last-frame-label">Son kare (opsiyonel)</label>
             <label class="file-pick">
               <input type="file" id="last-frame-file" class="file-pick-input" accept="image/*" />
-              <span class="file-pick-btn">Görsel seç</span>
-              <span class="file-pick-name">Seçilmedi</span>
+              <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
+              <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
             </label>
             <div class="ref-thumbs" id="last-frame-thumb"></div>
           </div>
-          <label>Oran</label>
+          <label id="scene-aspect-label">Oran</label>
           <div class="chips wrap" id="aspect-chips" role="group" aria-label="Oran">
             <button type="button" class="chip on" data-aspect="16:9">16:9</button>
             <button type="button" class="chip" data-aspect="9:16">9:16</button>
@@ -108,7 +108,7 @@
             <button type="button" class="chip" data-aspect="21:9">21:9</button>
             <button type="button" class="chip" data-aspect="4:3">4:3</button>
           </div>
-          <label>Kalite / çözünürlük (H3 ×32)</label>
+          <label id="scene-quality-label">Kalite / çözünürlük (H3 ×32)</label>
           <div class="chips" id="quality-chips">
             <button type="button" data-q="480" class="chip">480p</button>
             <button type="button" data-q="720" class="chip on">736p</button>
@@ -119,14 +119,14 @@
 
         <div id="panel-mode-ref" class="hidden">
           <p class="muted mode-hint">Genel referans (Ref2VA): stil, sahne, obje, kıyafet… Video bu kareden <em>başlamaz</em> — I2V için Yeni video + İlk kare. Prompt’ta <code>&lt;Picture 1&gt;</code>.</p>
-          <label>Referans görseller (1–9)</label>
+          <label id="ref-images-label">Referans görseller (1–9)</label>
           <label class="file-pick">
             <input type="file" id="ref-files" class="file-pick-input" accept="image/*" multiple />
-            <span class="file-pick-btn">Görseller seç</span>
-            <span class="file-pick-name">Seçilmedi</span>
+            <span class="file-pick-btn" data-i18n="pick.images">Görseller seç</span>
+            <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="ref-thumbs"></div>
-          <label>Referans boyutu</label>
+          <label id="ref-size-label">Referans boyutu</label>
           <div class="chips" id="ref-size-chips">
             <button type="button" class="chip on" data-refsize="match">match (hızlı)</button>
             <button type="button" class="chip" data-refsize="max">max (daha sadık)</button>
@@ -135,21 +135,21 @@
 
         <div id="panel-mode-v2v" class="hidden">
           <p class="muted mode-hint">Video-to-video (Ref2VA): senin kliğin motion; hedef karakter için foto ekle. Prompt: Video 1 = hareket, Picture = görünüm.</p>
-          <label>Motion video (1–3)</label>
+          <label id="v2v-motion-label">Motion video (1–3)</label>
           <label class="file-pick">
             <input type="file" id="v2v-video-files" class="file-pick-input" accept="video/*" multiple />
-            <span class="file-pick-btn">Video seç</span>
-            <span class="file-pick-name">Seçilmedi</span>
+            <span class="file-pick-btn" data-i18n="pick.video">Video seç</span>
+            <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="v2v-video-thumbs"></div>
-          <label>Hedef görünüm / karakter foto (0–9)</label>
+          <label id="v2v-look-label">Hedef görünüm / karakter foto (0–9)</label>
           <label class="file-pick">
             <input type="file" id="v2v-image-files" class="file-pick-input" accept="image/*" multiple />
-            <span class="file-pick-btn">Görseller seç</span>
-            <span class="file-pick-name">Seçilmedi</span>
+            <span class="file-pick-btn" data-i18n="pick.images">Görseller seç</span>
+            <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="v2v-image-thumbs"></div>
-          <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span>Video’daki sesi de referans al</span></label>
+          <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span id="v2v-audio-label">Video’daki sesi de referans al</span></label>
         </div>
 
         <div id="panel-mode-cinema" class="hidden">
@@ -159,19 +159,19 @@
 
         <div id="panel-mode-face" class="hidden">
           <p class="muted mode-hint">Net portre yükle (1–3). İlk klip Ref2VA yüz kilidi; devam / batch’te aynı portreler + son kare ile yüz korunur.</p>
-          <label>Yüz fotoğrafları (1–3 önerilir)</label>
+          <label id="face-photos-label">Yüz fotoğrafları (1–3 önerilir)</label>
           <label class="file-pick">
             <input type="file" id="face-files" class="file-pick-input" accept="image/*" multiple />
-            <span class="file-pick-btn">Portre seç</span>
-            <span class="file-pick-name">Seçilmedi</span>
+            <span class="file-pick-btn" data-i18n="pick.portrait">Portre seç</span>
+            <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="face-thumbs"></div>
-          <label class="check"><input type="checkbox" id="face-lock-chain" checked /> <span>Yüz kilidini sonraki videolarda da koru</span></label>
+          <label class="check"><input type="checkbox" id="face-lock-chain" checked /> <span id="face-lock-label">Yüz kilidini sonraki videolarda da koru</span></label>
         </div>
 
         <div id="panel-mode-continue" class="hidden">
           <p class="muted mode-hint">Önceki videonun <strong>son karesinden</strong> devam (zincir). I2V değil — fotoğraftan başlamak için <strong>Yeni video + İlk kare</strong>.</p>
-          <label>Devam süresi</label>
+          <label id="cont-dur-label">Devam süresi</label>
           <div class="chips" id="dur-chips-cont">
             <button type="button" data-dur="4" class="chip">4 sn</button>
             <button type="button" data-dur="5" class="chip on">5 sn</button>
@@ -180,14 +180,14 @@
             <button type="button" data-dur="10" class="chip">10 sn</button>
             <button type="button" data-dur="15" class="chip warn">15 sn</button>
           </div>
-          <label>Kalite (H3 ×32)</label>
+          <label id="cont-quality-label">Kalite (H3 ×32)</label>
           <div class="chips" id="quality-chips-cont">
             <button type="button" data-q="480" class="chip">480p</button>
             <button type="button" data-q="720" class="chip on">736p</button>
             <button type="button" data-q="1080" class="chip warn">1088p</button>
           </div>
           <div class="muted" id="quality-hint-cont">1280×736</div>
-          <label>Hangi videodan devam?</label>
+          <label id="cont-which-label">Hangi videodan devam?</label>
           <select id="continue-source">
             <option value="">— bitmiş video seç —</option>
           </select>
@@ -239,26 +239,26 @@
     <section class="zone zone-ayar panel drawer-ayar-panel">
       <h2>Ayarlar</h2>
       <div class="drawer-body">
-        <label>Seed <input type="number" id="seed" value="-1" /> <small>(-1 = random)</small></label>
-        <label>Steps <input type="number" id="steps" value="20" min="1" max="50" /></label>
+        <label><span id="ayar-seed-label">Seed</span> <input type="number" id="seed" value="-1" /> <small id="ayar-seed-rand">(-1 = random)</small></label>
+        <label><span id="ayar-steps-label">Steps</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
         <label id="ayar-speed-label">Hız</label>
         <div class="chips wrap" id="speed-chips" role="group" aria-label="Hız">
           <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 12 step">Taslak</button>
           <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step">Hızlı</button>
         </div>
         <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Step sayısı Ayarlar’daki kutudan gelir — LoRA zorlamaz.</p>
-        <label>Sampler
+        <label><span id="ayar-sampler-label">Sampler</span>
           <select id="sampler">
             <option value="res_multistep">res_multistep</option>
             <option value="er_sde">er_sde</option>
             <option value="sa_solver">sa_solver</option>
           </select>
         </label>
-        <label>Scheduler
+        <label><span id="ayar-scheduler-label">Scheduler</span>
           <select id="scheduler"><option>simple</option></select>
         </label>
         <div class="lora-prod-pick" id="lora-prod-pick">
-          <label>LoRA
+          <label><span id="lora-prod-label">LoRA</span>
             <select id="lora-select">
               <option value="">Yok (varsayılan)</option>
             </select>
@@ -356,14 +356,14 @@
       </div>
       <div class="director-bible hidden" id="director-bible">
         <p class="muted">Yapılandırılmış brief — karakter / sahne / tür / süre. Brief üret sohbete JSON basar.</p>
-        <label>Logline <textarea id="bible-logline" rows="2" placeholder="Kim ne ister, engel ne…"></textarea></label>
-        <label>Karakterler (her satır: rol | isim | betim)
+        <label><span id="bible-logline-label">Logline</span> <textarea id="bible-logline" rows="2" placeholder="Kim ne ister, engel ne…"></textarea></label>
+        <label><span id="bible-chars-label">Karakterler (her satır: rol | isim | betim)</span>
           <textarea id="bible-characters" rows="4" placeholder="protagonist | Ada | 28, short black hair…"></textarea>
         </label>
-        <label>Sahne / lokasyonlar (her satır bir yer)
+        <label><span id="bible-locs-label">Sahne / lokasyonlar (her satır bir yer)</span>
           <textarea id="bible-locations" rows="3" placeholder="rain alley at night&#10;neon rooftop"></textarea>
         </label>
-        <label>Tür
+        <label><span id="bible-genre-label">Tür</span>
           <select id="bible-genre">
             <option value="short_film">kısa film</option>
             <option value="music_video">müzik klibi</option>
@@ -375,7 +375,7 @@
             <option value="outro">outro</option>
           </select>
         </label>
-        <label>Görsel tarz
+        <label><span id="bible-style-label">Görsel tarz</span>
           <select id="bible-style">
             <option value="realistic">gerçekçi</option>
             <option value="anime">anime</option>
@@ -389,8 +389,8 @@
             <option value="found_footage">found footage</option>
           </select>
         </label>
-        <label>Toplam süre (sn) <input type="number" id="bible-total" value="30" min="4" max="600" /></label>
-        <label>Klip (sn)
+        <label><span id="bible-total-label">Toplam süre (sn)</span> <input type="number" id="bible-total" value="30" min="4" max="600" /></label>
+        <label><span id="bible-clip-label">Klip (sn)</span>
           <select id="bible-clip">
             <option value="4">4</option>
             <option value="5" selected>5</option>
@@ -400,15 +400,15 @@
             <option value="15">15</option>
           </select>
         </label>
-        <label>Ton <input type="text" id="bible-tone" placeholder="karanlık, gergin" /></label>
-        <label>Yasaklar <input type="text" id="bible-forbidden" placeholder="on-screen text, face morph" /></label>
+        <label><span id="bible-tone-label">Ton</span> <input type="text" id="bible-tone" placeholder="karanlık, gergin" /></label>
+        <label><span id="bible-forbidden-label">Yasaklar</span> <input type="text" id="bible-forbidden" placeholder="on-screen text, face morph" /></label>
         <button type="button" class="cta" id="btn-bible-generate">Brief üret</button>
       </div>
       <div class="director-music" id="director-music">
         <label class="file-pick file-pick-inline music-file">
           <input type="file" id="music-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
-          <span class="file-pick-btn">Şarkı seç</span>
-          <span class="file-pick-name">Seçilmedi</span>
+          <span class="file-pick-btn" id="music-pick-btn">Şarkı seç</span>
+          <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
         </label>
         <span class="muted" id="music-meta">yok</span>
         <input type="text" id="music-concept" placeholder="Konsept (örn. dark phonk otopark)" autocomplete="off" />
@@ -424,7 +424,7 @@
       <div class="director-actions" id="director-actions">
         <label style="display:inline-flex;align-items:center;gap:8px;margin-right:12px;">
           <input type="checkbox" id="link-continue" checked />
-          <span style="font-size:12px">Devam zincirine ekle</span>
+          <span id="link-continue-label" style="font-size:12px">Devam zincirine ekle</span>
         </label>
         <button type="button" class="cta hidden" id="btn-queue-brief" title="Hazır shot’ları Comfy kuyruğuna bas ve üretimi başlat">Üretime al</button>
         <button type="button" class="btn-ghost" id="btn-director-new-session" title="Yeni sohbet başlat">Yeni sohbet</button>
@@ -454,13 +454,20 @@
     <div class="gallery-panel cinema-panel">
       <header>
         <h2>Direktör · Sinema stüdyosu</h2>
+        <select id="cinema-film-select" title="Film"></select>
+        <button type="button" class="btn-ghost" id="btn-cinema-film-new">Yeni film</button>
         <input type="text" id="cinema-title" placeholder="Film adı" />
+        <button type="button" class="btn-ghost" id="btn-cinema-export">Zip</button>
+        <label class="file-pick file-pick-inline">
+          <input type="file" id="cinema-import-file" class="file-pick-input" accept=".zip,application/zip" />
+          <span class="file-pick-btn" id="cinema-import-btn">İçe aktar</span>
+        </label>
         <button type="button" class="menu-btn" id="btn-cinema-close">← Studio</button>
       </header>
       <div class="cinema-setup-bar">
         <div class="film-pills" id="cinema-pills"></div>
         <div class="cinema-knobs">
-          <label>Süre
+          <label><span id="cinema-dur-label">Süre</span>
             <select id="cinema-duration">
               <option value="4">4 sn</option>
               <option value="5" selected>5 sn</option>
@@ -470,15 +477,26 @@
               <option value="15">15 sn</option>
             </select>
           </label>
+          <div class="chips cinema-quality-chips" id="cinema-speed-chips">
+            <button type="button" class="chip" data-speed="draft" id="cinema-speed-draft">Taslak</button>
+            <button type="button" class="chip" data-speed="final" id="cinema-speed-final">Final</button>
+          </div>
           <div class="chips cinema-quality-chips" id="cinema-quality-chips">
             <button type="button" class="chip" data-quality="480">480p</button>
             <button type="button" class="chip" data-quality="720">720p</button>
             <button type="button" class="chip" data-quality="1080">1080p</button>
           </div>
-          <label>Adım
+          <label><span id="cinema-steps-label">Adım</span>
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
           </label>
-          <label>LoRA
+          <label><span id="cinema-seed-label">Seed</span>
+            <input type="number" id="cinema-seed" value="-1" />
+          </label>
+          <label class="cinema-seamless-label" title="Aynı seed ile look kıyasla">
+            <input type="checkbox" id="cinema-seed-lock" />
+            <span id="cinema-seed-lock-label">Seed kilidi</span>
+          </label>
+          <label><span id="cinema-lora-label">LoRA</span>
             <select id="cinema-lora-select">
               <option value="">Yok (varsayılan)</option>
             </select>
@@ -487,20 +505,22 @@
             <input type="checkbox" id="cinema-seamless" />
             <span id="cinema-seamless-label">Kesintisiz zincir</span>
           </label>
+          <p class="muted mode-hint" id="cinema-prod-hint"></p>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
           <button type="button" class="cta" id="btn-cinema-produce">Filmi kuyruğa al</button>
         </div>
         <div class="cinema-audio-bar">
           <div class="chips" id="cinema-audio-mode">
-            <button type="button" class="chip on" data-audio="film">Diyalog + SFX (tek müzik)</button>
-            <button type="button" class="chip" data-audio="silent">Sessiz görüntü</button>
+            <button type="button" class="chip on" data-audio="film" id="cinema-audio-film">H3 konuşsun (diyalog+SFX)</button>
+            <button type="button" class="chip" data-audio="silent" id="cinema-audio-silent">Sessiz görüntü + senin şarkın</button>
           </div>
           <label class="file-pick file-pick-inline">
             <input type="file" id="cinema-score-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
-            <span class="file-pick-btn">Film müziği</span>
+            <span class="file-pick-btn" id="cinema-score-btn">Film müziği</span>
           </label>
           <span class="muted" id="cinema-score-name">yok — H3 her klipte yeni şarkı uydurur</span>
-          <button type="button" class="btn-secondary hidden" id="btn-cinema-mux">Aynı müziği filme karıştır</button>
+          <button type="button" class="btn-secondary hidden" id="btn-cinema-concat">Filmi birleştir</button>
+          <button type="button" class="btn-secondary hidden" id="btn-cinema-mux">Müziği karıştır</button>
           <a class="muted hidden" id="cinema-final-link" href="#" target="_blank" rel="noopener">Son filmi aç</a>
         </div>
       </div>
@@ -508,24 +528,24 @@
         <div class="cinema-col cinema-col-stack">
           <section class="cinema-stack" data-fold="characters">
             <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="characters" aria-expanded="true">
-              <span class="cinema-fold-title">Karakterler</span>
+              <span class="cinema-fold-title" id="cinema-char-title">Karakterler</span>
               <span class="cinema-fold-meta"><span id="cinema-char-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▾</span></span>
             </button>
             <div class="cinema-fold-summary" id="cinema-char-summary"></div>
             <div class="cinema-fold-body">
-              <p class="muted mode-hint">Karakter ekle+ ile kart açılır. Shot metninde isim geçince referans görsel bağlanır. Ses tarifi her klipte aynı konuşmacıyı kilitler.</p>
+              <p class="muted mode-hint" id="cinema-char-hint">Karakter ekle+ ile kart açılır. Shot metninde isim geçince referans görsel bağlanır. Ses tarifi her klipte aynı konuşmacıyı kilitler.</p>
               <div id="cinema-chars" class="cinema-cards"></div>
             </div>
             <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-char">Karakter ekle+</button>
           </section>
           <section class="cinema-stack" data-fold="locations">
             <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="locations" aria-expanded="true">
-              <span class="cinema-fold-title">Mekanlar</span>
+              <span class="cinema-fold-title" id="cinema-loc-title">Mekanlar</span>
               <span class="cinema-fold-meta"><span id="cinema-loc-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▾</span></span>
             </button>
             <div class="cinema-fold-summary" id="cinema-loc-summary"></div>
             <div class="cinema-fold-body">
-              <p class="muted mode-hint">Bölge adı + tanım + referans görsel. Shot’ta isim geçince set kilidi olur.</p>
+              <p class="muted mode-hint" id="cinema-loc-hint">Bölge adı + tanım + referans görsel. Shot’ta isim geçince set kilidi olur.</p>
               <div id="cinema-locs" class="cinema-cards"></div>
             </div>
             <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-loc">Mekan ekle+</button>
@@ -535,7 +555,13 @@
           <div class="cinema-col-head">
             <h3>Senaryo / shot listesi</h3>
           </div>
-          <p class="muted mode-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder.</p>
+          <label class="cinema-role-block">
+            <span id="cinema-role-label">Rol metni / senaryo</span>
+            <textarea id="cinema-role-script" rows="6" placeholder="Tüm rol metnini / senaryoyu buraya yapıştır…"></textarea>
+          </label>
+          <button type="button" class="cta" id="btn-cinema-ingest">LLM ile film altyapısı kur</button>
+          <p class="muted mode-hint" id="cinema-role-hint">Yönetmen metni okur; karakter, mekan ve shot listesini doldurur. Mevcut görseller silinmez.</p>
+          <p class="muted mode-hint" id="cinema-script-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder.</p>
           <textarea id="cinema-shot-draft" rows="4" placeholder="Shot metnini yaz… örn. Ada walks into Rooftop at dusk, coat catching wind."></textarea>
           <div class="cinema-shot-add">
             <button type="button" class="btn-secondary" id="btn-cinema-add-t2v">+ Yeni video</button>
@@ -543,6 +569,10 @@
           </div>
           <div id="cinema-shots" class="cinema-shots"></div>
           <p class="muted" id="cinema-hint">Karakter / mekan ekle → shot’lara isimlerini yaz → kuyruğa al.</p>
+          <details class="cinema-preview-fold" id="cinema-preview-fold">
+            <summary id="cinema-preview-sum">Kuyruğa gidecek prompt</summary>
+            <pre id="cinema-preview-text" class="cinema-preview-text"></pre>
+          </details>
         </section>
       </div>
     </div>
@@ -552,7 +582,8 @@
     <div class="gallery-panel">
       <header>
         <h2>Galeri</h2>
-        <span class="muted gallery-order-hint">Tüm üretilenler · yeni → üst sol · 5 / satır</span>
+        <span class="muted gallery-order-hint" id="gallery-order-hint">Tüm üretilenler · yeni → üst sol</span>
+        <button type="button" class="btn-secondary" id="btn-gallery-concat">Seçili filmi birleştir</button>
         <button type="button" class="menu-btn" id="btn-gallery-close">← Studio</button>
       </header>
       <div class="gallery-grid" id="gallery-grid"></div>
@@ -597,8 +628,8 @@
       </header>
       <div class="llm-settings" id="llm-settings">
         <h3 class="llm-settings-title">Yönetmen LLM / API anahtarları</h3>
-        <p class="muted mode-hint">1) Aktif sağlayıcıyı seç (Gemini) · 2) Key yapıştır · 3) <strong>API ayarlarını kaydet</strong>. Sadece key kaydetmek yetmez — sağlayıcı da Gemini olmalı. Video üretimi (Comfy/H3) değişmez.</p>
-        <label>Aktif sağlayıcı
+        <p class="muted mode-hint" id="llm-settings-intro">1) Aktif sağlayıcıyı seç (Gemini) · 2) Key yapıştır · 3) <strong>API ayarlarını kaydet</strong>. Sadece key kaydetmek yetmez — sağlayıcı da Gemini olmalı. Video üretimi (Comfy/H3) değişmez.</p>
+        <label><span id="llm-active-label">Aktif sağlayıcı</span>
           <select id="llm-provider-settings">
             <option value="ollama">Ollama (yerel)</option>
             <option value="openai">OpenAI</option>
@@ -607,63 +638,63 @@
             <option value="claude">Claude (Anthropic)</option>
           </select>
         </label>
-        <label id="llm-ollama-url-wrap">Ollama URL
+        <label id="llm-ollama-url-wrap"><span id="settings-ollama-url-label">Ollama URL</span>
           <input type="text" id="llm-ollama-url" placeholder="http://127.0.0.1:11434" autocomplete="off" />
-          <small class="muted">Boş = varsayılan localhost · API key gerekmez</small>
+          <small class="muted" id="settings-ollama-url-hint">Boş = varsayılan localhost · API key gerekmez</small>
         </label>
-        <label>OpenAI API key
+        <label><span id="settings-openai-key-label">OpenAI API key</span>
           <input type="password" id="llm-openai-key" placeholder="sk-… (platform.openai.com)" autocomplete="off" />
         </label>
-        <label>Gemini API key
+        <label><span id="settings-gemini-key-label">Gemini API key</span>
           <input type="password" id="llm-gemini-key" placeholder="AIza… (aistudio.google.com/apikey)" autocomplete="off" />
-          <small class="muted">AI Studio key — Gemini Ultra üyeliği otomatik vermez</small>
+          <small class="muted" id="settings-gemini-hint">AI Studio key — Gemini Ultra üyeliği otomatik vermez</small>
         </label>
-        <label>Grok (xAI) API key
+        <label><span id="settings-grok-key-label">Grok (xAI) API key</span>
           <input type="password" id="llm-grok-key" placeholder="xai-… (console.x.ai)" autocomplete="off" />
         </label>
-        <label>Claude (Anthropic) API key
+        <label><span id="settings-claude-key-label">Claude (Anthropic) API key</span>
           <input type="password" id="llm-claude-key" placeholder="sk-ant-… (console.anthropic.com)" autocomplete="off" />
         </label>
-        <label>Varsayılan model
+        <label><span id="llm-default-model-label">Varsayılan model</span>
           <select id="director-model-settings"><option value="">—</option></select>
         </label>
         <button type="button" class="btn-secondary" id="btn-llm-save">API ayarlarını kaydet</button>
         <p class="muted mode-hint" id="llm-settings-hint">Sağlayıcı + key → Kaydet. Bulut LLM VRAM kullanmaz.</p>
 
-        <h3 class="llm-settings-title" style="margin-top:1.25rem">Telefon bildirimi (Telegram)</h3>
-        <p class="muted mode-hint">
+        <h3 class="llm-settings-title" id="notify-enable-title" style="margin-top:1.25rem">Telefon bildirimi (Telegram)</h3>
+        <p class="muted mode-hint" id="notify-intro">
           AkiFactory’deki bot ile aynı kanal. Üretim / seri bitince veya hata olunca Telegram’a mesaj düşer.
           Bot’a bir kez <code>/start</code> yazmış olman gerekir.
         </p>
-        <label class="check"><input type="checkbox" id="notify-enabled" /> <span>Bildirimleri aç</span></label>
-        <label>Kanal
+        <label class="check"><input type="checkbox" id="notify-enabled" /> <span id="notify-enable-label">Bildirimleri aç</span></label>
+        <label><span id="notify-channel-label">Kanal</span>
           <select id="notify-provider">
             <option value="telegram">Telegram (AkiFactory bot)</option>
             <option value="ntfy">ntfy (opsiyonel)</option>
           </select>
         </label>
         <div id="notify-telegram-wrap">
-          <label>Bot token
+          <label><span id="notify-bot-token-label">Bot token</span>
             <input type="password" id="notify-tg-token" placeholder="AkiFactory’den aktar veya yapıştır" autocomplete="off" />
             <small class="muted" id="notify-tg-token-hint">Boş bırakırsan kayıtlı token korunur</small>
           </label>
-          <label>Chat ID
+          <label><span id="notify-chat-label">Chat ID</span>
             <input type="text" id="notify-tg-chat" placeholder="8196…" autocomplete="off" />
           </label>
           <button type="button" class="btn-ghost" id="btn-notify-import-aki">AkiFactory’den aktar</button>
         </div>
         <div id="notify-ntfy-wrap" class="hidden">
-          <label>ntfy sunucu
+          <label><span id="notify-ntfy-server-label">ntfy sunucu</span>
             <input type="text" id="notify-server" placeholder="https://ntfy.sh" autocomplete="off" />
           </label>
-          <label>Konu (topic)
+          <label><span id="notify-topic-label">Konu (topic)</span>
             <input type="text" id="notify-topic" placeholder="h3-xxxxx" autocomplete="off" />
             <small class="muted" id="notify-subscribe-hint">Abone URL kayıttan sonra</small>
           </label>
         </div>
-        <label class="check"><input type="checkbox" id="notify-batch-done" checked /> <span>Seri / kuyruk bitince bildir</span></label>
-        <label class="check"><input type="checkbox" id="notify-each-clip" /> <span>Her klip bitince bildir (30 shot = 30 bildirim)</span></label>
-        <label class="check"><input type="checkbox" id="notify-error" checked /> <span>Hata olunca bildir</span></label>
+        <label class="check"><input type="checkbox" id="notify-batch-done" checked /> <span id="notify-on-batch-label">Seri / kuyruk bitince bildir</span></label>
+        <label class="check"><input type="checkbox" id="notify-each-clip" /> <span id="notify-on-each-label">Her klip bitince bildir (30 shot = 30 bildirim)</span></label>
+        <label class="check"><input type="checkbox" id="notify-error" checked /> <span id="notify-on-error-label">Hata olunca bildir</span></label>
         <div class="batch-add-row">
           <button type="button" class="btn-secondary" id="btn-notify-save">Bildirim ayarlarını kaydet</button>
           <button type="button" class="btn-ghost" id="btn-notify-test">Test mesajı gönder</button>
@@ -675,11 +706,11 @@
         <div class="lora-shop" id="lora-shop"></div>
         <label class="file-pick">
           <input type="file" id="lora-file" class="file-pick-input" accept=".safetensors" />
-          <span class="file-pick-btn">LoRA ekle</span>
+          <span class="file-pick-btn" id="lora-file-btn">LoRA ekle</span>
           <span class="file-pick-name">.safetensors</span>
         </label>
         <label class="lora-url-row">
-          <span class="muted">URL</span>
+          <span class="muted" id="lora-url-span">URL</span>
           <input type="url" id="lora-url" placeholder="https://huggingface.co/.../foo.safetensors" />
           <button type="button" class="btn-ghost" id="btn-lora-url">URL’den al</button>
         </label>
@@ -688,7 +719,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema33"></script>
-  <script src="/static/app.js?v=cinema33"></script>
+  <script src="/static/i18n.js?v=cinema44"></script>
+  <script src="/static/app.js?v=cinema44"></script>
 </body>
 </html>

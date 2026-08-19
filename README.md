@@ -1,5 +1,9 @@
 # MiniMax H3 Studio
 
+<p align="center">
+  <img src="github-preview.png" alt="MiniMax H3 Studio" width="640" />
+</p>
+
 Pinokio 1-click launcher: [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) in ComfyUI, plus **H3 Studio** (Director, Plan, cinema studio, TR/EN). NVIDIA GPU.
 
 H3 is an omni-modal generative system: it takes text, images, video and audio as context and generates **video with native stereo audio** — 4–15 seconds, 24 FPS, 32 kHz stereo, in a wide range of aspect ratios (21:9 through 9:16). It handles 11 languages of spoken dialogue.

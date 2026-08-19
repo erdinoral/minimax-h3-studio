@@ -1,6 +1,6 @@
-# MiniMax H3 — Pinokio launcher
+# MiniMax H3 Studio
 
-1-click local install of [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) running inside ComfyUI.
+Pinokio 1-click launcher: [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) in ComfyUI, plus **H3 Studio** (Director, Plan, cinema studio, TR/EN). NVIDIA GPU.
 
 H3 is an omni-modal generative system: it takes text, images, video and audio as context and generates **video with native stereo audio** — 4–15 seconds, 24 FPS, 32 kHz stereo, in a wide range of aspect ratios (21:9 through 9:16). It handles 11 languages of spoken dialogue.
 
@@ -52,11 +52,42 @@ The local `torch.js` also exists because the **stock** `system/examples/torch.js
 
 ---
 
+## H3 Studio (custom UI)
+
+Start opens **ComfyUI** (backend) and **H3 Studio** (simple front end). Top bar **TR | EN** switches the Studio UI and Director chat language (`h3Prompt` / SCENE stays English). Pinokio menu:
+
+| Menu | Opens |
+|---|---|
+| **Open H3 Studio** (default) | Custom UI — prompt, 5/10/15s, continue, batch queue, Director, system bar |
+| **Open ComfyUI** | Unmodified Comfy node graph (always available) |
+
+Studio never replaces Comfy. If Studio fails, use **Open ComfyUI** as before.
+
+### Support
+
+Bugs and ideas: Studio top bar **Destek / Support**, or [GitHub Issues](https://github.com/erdinoral/minimax-h3-studio/issues). Use **Bug** for breakage and **Idea** for improvements.
+
+### H3 Yönetmen (Director persona)
+
+Bottom chat uses the local **H3 Yönetmen** persona (`studio/prompts/director_system.md`) over **Ollama** (`http://127.0.0.1:11434`). It interviews for purpose / style / 5·10·15s clips, then returns a FilmBrief + shot list with H3-ready prompts. Every chat turn injects the current shot board (and Direktör studio cards) so the model can see shot text. **Plan** mode is for reading/editing those SCENE prompts without queuing; say “shot 3’ü değiştir” and save, then **Üretime al**. Production still runs on Comfy; on generate the LLM is unloaded to free VRAM. When the last clip in the queue finishes (or you reset production), Studio asks ComfyUI to unload H3 models (`POST /free`) so VRAM is released. Continue / cinema shots in the same batch keep the models loaded between clips.
+
+1. Start Ollama (`ollama serve`) with a chat model (e.g. `qwen3:8b` or smaller during production days).
+2. Pick the model under **Ayarlar → Yönetmen modeli**.
+3. Chat or tap chips → when brief is ready: **Sahneye aktar** or **Aktar + kuyruğa al**.
+
+One-time after update (if Studio deps missing):
+
+```text
+Pinokio → Install   (or: uv pip install -r studio/requirements.txt inside app/env)
+```
+
+Studio talks to Comfy at the URL captured on start (`COMFY_URL`). Bottom bar shows CPU / RAM / GPU / VRAM / disk (ACE-Step–style, horizontal).
+
 ## Usage
 
-1. **Install** — clones ComfyUI, installs deps + cu130 torch, downloads all weights, and installs ready-to-run workflows.
-2. **Start** — launches ComfyUI; the menu switches to **Open Web UI** once the server is up.
-3. Open the **Workflows** tab in the sidebar and pick one — models are already selected, nothing to wire up:
+1. **Install** — clones ComfyUI, installs deps + cu130 torch, downloads all weights, installs workflows, and Studio Python deps.
+2. **Start** — launches ComfyUI + H3 Studio; menu switches to **Open H3 Studio** (and **Open ComfyUI**).
+3. In Comfy: open the **Workflows** tab and pick one — models are already selected, nothing to wire up:
 
 | Workflow | Mode | Transformer |
 |---|---|---|
@@ -77,6 +108,87 @@ These are the official Comfy-Org templates, unmodified except that the two `(sag
 H3's quality depends heavily on prompt structure — the hosted pipeline runs a preprocessing model (H3-Context-IR) that expands your prompt into a long structured description with `integrated_multimodal_description`, `overall_soundscape` and `non_diegetic_music` sections. That module is **not open source**. To get comparable results locally, write prompts in that same structured style; see the prompting guides linked in the sidebar.
 
 Spoken dialogue uses `<d>` tags, e.g. `<d>[English] Follow the wind, live free.</d>`
+
+### LoRA (H3 Studio)
+
+Production **Ayarlar** (bottom): pick a LoRA → **Uygula**. That fills steps / sampler / strength and uses the file on the next generate.
+
+| LoRA | What it does |
+|---|---|
+| **Yok** | Default 20 step · `res_multistep` |
+| **LightX2V Turbo** | FL2VA 4-step distill · `er_sde` · strength 0.75. New video / first-last only — skipped on Ref / V2V / face. ~2 GB. |
+| **ErosMax Turbo** | FL2VA 4-step · same skip on Ref / face. |
+| **H3 Turbo 6-step EMA** | FL2VA 6-step · same skip on Ref / face. |
+| **H3 Turbo v4 EMA** | FL2VA turbo (`step600` is training, not 4 inference steps) — set steps yourself. |
+| **H3 Realism People** | T2V / I2V / Ref · keeps your step/sampler. |
+| **PinkFluffyBunny** | Character LoRA · works on new video and Ref/face. |
+
+If LightX2V is missing, **Uygula** downloads it into `app/models/loras`, or use Pinokio **Download Models → LightX2V Turbo LoRA**.
+
+Drop extra H3 `.safetensors` via **LoRA ekle** (or copy into `app/models/loras`) — they appear in the list. Studio hides SDXL / Pony / Wan / Flux / ClipProj files; those are not MiniMax H3 video LoRAs. Turbo files whose names contain `4step` / `6step` get matching step presets. For a consistent person, use **Yüz referansı** or a Direktör character card (Ref2VA).
+
+### Direktör · Sinema stüdyosu
+
+**Sahne → Direktör** opens a two-column cinema studio for long-form films.
+
+- **Sol sütun (üst/alt):** **Karakter ekle+** opens a card (name, description, reference still; optional character LoRA). **Mekan ekle+** is the same for locations (region name, description, still).
+- **Film setup:** Higgsfield-style pills (look, camera, color palette, lighting, era, purpose, style). Each opens a popover; the selected value is locked into every shot prompt. **Auto** skips that lock.
+- **Kalite:** duration, 480/720/1080, and steps live in this panel and drive the queue.
+- **Ses / müzik (Higgsfield film):** H3 cannot emit the *same* song on every shot — each clip invents a new score. **Diyalog + SFX** mode forbids generated BGM, locks each character’s **Ses tarifi** into every prompt, then you upload **one** film track and **Aynı müziği filme karıştır** after the queue finishes (dialogue stays; the score is mixed underneath). Do not use the music-video mux here — that *replaces* audio and kills speech.
+- **Sağ sütun — shot listesi:** write a shot, then **+ Yeni video** (t2v / new chain) or **+ Continue** (last frame of the previous shot). Tags on each card can flip the mode later.
+- Mention a character or location **name** in a shot — that still is attached on New Video shots (Ref2VA). Continue shots keep last-frame I2V and put identity in the prompt text.
+
+```text
+GET  /api/cinema
+PUT  /api/cinema
+POST /api/cinema/character
+POST /api/cinema/location
+POST /api/cinema/produce   # shots: [{ text, mode: "t2v"|"continue" }], audio: { mode, score_id }
+POST /api/cinema/mux       # concat clips, keep dialogue, mix one score
+GET  /api/cinema/final/{batch_id}
+POST /api/director/chat            # plan_mode: true → shot tahtasını görür, patch ile düzenler
+POST /api/director/plan            # { session_id, shots, apply_cinema } Plan kaydet / stüdyoya aktar
+POST /api/director/commit
+```
+
+```bash
+# Curl — produce a film (dialogue+SFX, no generated BGM), then mix one score
+curl -s -X POST http://127.0.0.1:8787/api/cinema/produce \
+  -H "Content-Type: application/json" \
+  -d '{"shots":[{"text":"Ada walks into Rooftop.","mode":"t2v"}],"audio":{"mode":"film","score_id":"MUSIC_ID"}}'
+
+curl -s -X POST http://127.0.0.1:8787/api/cinema/mux \
+  -H "Content-Type: application/json" \
+  -d '{"batch_id":"BATCH","score_id":"MUSIC_ID"}'
+```
+
+```javascript
+await fetch("/api/cinema/produce", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    shots: [{ text: "Ada walks into Rooftop.", mode: "t2v" }],
+    audio: { mode: "film", score_id: musicId },
+  }),
+});
+const mux = await fetch("/api/cinema/mux", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ score_id: musicId }),
+}).then((r) => r.json());
+window.open(mux.final_url);
+```
+
+```python
+import requests
+base = "http://127.0.0.1:8787"
+requests.post(f"{base}/api/cinema/produce", json={
+    "shots": [{"text": "Ada walks into Rooftop.", "mode": "t2v"}],
+    "audio": {"mode": "film", "score_id": music_id},
+})
+mux = requests.post(f"{base}/api/cinema/mux", json={"score_id": music_id}).json()
+print(mux["final_url"])
+```
 
 ### Resolution — you are not capped at 768p
 

@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>H3 Studio</title>
+  <link rel="stylesheet" href="/static/app.css?v=cinema15" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">H3 <span>Studio</span></div>
+    <div class="sysbar" id="sysbar" title="Sistem performansı">
+      <div class="sys-item"><span>CPU</span><b id="sys-cpu">—</b></div>
+      <div class="sys-item"><span>RAM</span><b id="sys-ram">—</b></div>
+      <div class="sys-item"><span>GPU</span><b id="sys-gpu">—</b></div>
+      <div class="sys-item"><span>VRAM</span><b id="sys-vram">—</b></div>
+      <div class="sys-item"><span>Disk</span><b id="sys-disk">—</b></div>
+      <div class="sys-item" id="sys-comfy-item"><span>Comfy</span><b id="sys-comfy">—</b></div>
+    </div>
+    <nav class="menu">
+      <div class="lang-switch" id="lang-switch" role="group" aria-label="Language">
+        <button type="button" class="chip" data-lang="tr">TR</button>
+        <button type="button" class="chip" data-lang="en">EN</button>
+      </div>
+      <button type="button" id="btn-layout-edit" class="menu-btn" title="Sütun / ölçü düzenle (üretimi durdurmaz)">Düzenle</button>
+      <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
+      <button type="button" id="btn-support" class="menu-btn" title="Sorun bildir / fikir yaz">Destek</button>
+      <button type="button" id="btn-settings" class="menu-btn">Ayarlar</button>
+      <span class="comfy-pill" id="comfy-pill" title="Comfy arka uç — Pinokio Stop ile kapanır">Comfy …</span>
+    </nav>
+  </header>
+
+  <div class="layout-edit-bar hidden" id="layout-edit-bar">
+    <div class="layout-edit-row">
+      <span class="layout-edit-title">Serbest düzenleme</span>
+      <span class="muted layout-edit-hint">Sarı çubukları sürükle · Üretim listesi başlığının altındaki çubuk = panel yüksekliği · kaydet iç içe bozmaz</span>
+      <button type="button" class="btn-secondary" id="btn-layout-save">Kaydet</button>
+      <button type="button" class="btn-ghost" id="btn-layout-reset">Varsayılan</button>
+      <button type="button" class="btn-ghost" id="btn-layout-done">Bitir</button>
+    </div>
+    <div class="layout-edit-row layout-edit-sliders">
+      <label class="layout-edit-field">Sol sütun %
+        <input type="number" id="layout-col-left" min="12" max="70" step="1" />
+      </label>
+      <label class="layout-edit-field">Ayarlar sütun %
+        <input type="number" id="layout-drawer-ayar" min="16" max="36" step="1" />
+      </label>
+      <label class="layout-edit-field">Boşluk
+        <input type="number" id="layout-gap" min="0" max="40" step="1" />
+      </label>
+      <label class="layout-edit-field">Yazı boyu %
+        <input type="number" id="layout-font" min="80" max="140" step="5" />
+      </label>
+      <label class="layout-edit-field">Prompt H
+        <input type="number" id="layout-prompt-h" min="56" max="160" step="4" />
+      </label>
+      <label class="layout-edit-field hidden">Sahne H
+        <input type="number" id="layout-scene-h" min="200" max="900" step="10" />
+      </label>
+      <label class="layout-edit-field">Player H
+        <input type="number" id="layout-player-h" min="160" max="480" step="10" />
+      </label>
+      <label class="layout-edit-field hidden">Yeni prompt H
+        <input type="number" id="layout-batch-h" min="80" max="280" step="10" />
+      </label>
+      <label class="layout-edit-field hidden">Liste H
+        <input type="number" id="layout-batch-list-h" min="80" max="320" step="10" />
+      </label>
+      <label class="layout-edit-field hidden">Kuyruk H
+        <input type="number" id="layout-queue-h" min="100" max="280" step="10" />
+      </label>
+      <label class="layout-edit-field">Alt paneller H
+        <input type="number" id="layout-prod-h" min="280" max="720" step="10" />
+      </label>
+      <label class="layout-edit-field hidden">Ayarlar H
+        <input type="number" id="layout-ayar-h" min="280" max="720" step="10" />
+      </label>
+    </div>
+  </div>
+
+  <main class="workspace" id="view-studio">
+    <!-- grid: scene | player | player / prompt | ayar | prod -->
+    <section class="zone zone-scene panel scene layout-zone" data-layout="scene">
+        <div class="layout-handle layout-handle-e" data-handle="col-left" title="Sürükle: sol sütun genişliği"></div>
+        <h2>Sahne / Proje</h2>
+        <label>Üretim modu</label>
+        <div class="chips" id="mode-chips">
+          <button type="button" class="chip on" data-mode="t2v" id="mode-t2v">Yeni video</button>
+          <button type="button" class="chip" data-mode="continue" id="mode-continue">Videoyu devam ettir</button>
+          <button type="button" class="chip" data-mode="ref" id="mode-ref">Referans</button>
+          <button type="button" class="chip" data-mode="v2v" id="mode-v2v">V2V / video ref</button>
+          <button type="button" class="chip" data-mode="cinema" id="mode-cinema">Direktör</button>
+          <button type="button" class="chip" data-mode="face" id="mode-face">Yüz referansı</button>
+        </div>
+
+        <div class="scene-project" id="scene-project">
+          <label>Üretim türü</label>
+          <div class="chips wrap" id="scene-purpose-chips" role="group" aria-label="Üretim türü">
+            <button type="button" class="chip" data-group="purpose" data-purpose="short_film" aria-pressed="false">kısa film</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-silent="1" aria-pressed="false" title="Sadece video — MiniMax ses üretmez">müzik klibi</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="ad" aria-pressed="false">reklam</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="trailer" aria-pressed="false">trailer</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="social" aria-pressed="false">sosyal</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="documentary" aria-pressed="false">belgesel</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="intro" aria-pressed="false">intro</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="outro" aria-pressed="false">outro</button>
+          </div>
+          <label>Görsel tarz</label>
+          <div class="chips wrap" id="scene-style-chips" role="group" aria-label="Görsel tarz">
+            <button type="button" class="chip" data-group="style" data-style="realistic" aria-pressed="false">gerçekçi</button>
+            <button type="button" class="chip" data-group="style" data-style="anime" aria-pressed="false">anime</button>
+            <button type="button" class="chip" data-group="style" data-style="disney" aria-pressed="false">disney</button>
+            <button type="button" class="chip" data-group="style" data-style="game" aria-pressed="false">oyun</button>
+            <button type="button" class="chip" data-group="style" data-style="cgi_3d" aria-pressed="false">3D CGI</button>
+            <button type="button" class="chip" data-group="style" data-style="comic" aria-pressed="false">çizgi roman</button>
+            <button type="button" class="chip" data-group="style" data-style="illustration" aria-pressed="false">illüstrasyon</button>
+            <button type="button" class="chip" data-group="style" data-style="oil_paint" aria-pressed="false">yağlı boya</button>
+            <button type="button" class="chip" data-group="style" data-style="clay" aria-pressed="false">kil</button>
+            <button type="button" class="chip" data-group="style" data-style="found_footage" aria-pressed="false">found footage</button>
+          </div>
+          <p class="muted mode-hint" id="project-audio-hint">Tür seç → müzik klibinde sessiz video; diğerlerinde video + ses</p>
+        </div>
+
+        <div id="panel-mode-new">
+          <p class="muted mode-hint" id="mode-hint-new">Sıfırdan T2V — ilk kare yüklersen I2V (bu kareden başlar). Referans modu I2V değildir.</p>
+          <label>Süre</label>
+          <div class="chips" id="dur-chips">
+            <button type="button" data-dur="4" class="chip">4 sn</button>
+            <button type="button" data-dur="5" class="chip on">5 sn</button>
+            <button type="button" data-dur="6" class="chip">6 sn</button>
+            <button type="button" data-dur="8" class="chip">8 sn</button>
+            <button type="button" data-dur="10" class="chip">10 sn</button>
+            <button type="button" data-dur="15" class="chip warn">15 sn</button>
+          </div>
+          <div id="fl2va-frames">
+            <label>İlk kare — I2V (opsiyonel)</label>
+            <label class="file-pick">
+              <input type="file" id="first-frame-file" class="file-pick-input" accept="image/*" />
+              <span class="file-pick-btn">Görsel seç</span>
+              <span class="file-pick-name">Seçilmedi</span>
+            </label>
+            <div class="ref-thumbs" id="first-frame-thumb"></div>
+            <label>Son kare (opsiyonel)</label>
+            <label class="file-pick">
+              <input type="file" id="last-frame-file" class="file-pick-input" accept="image/*" />
+              <span class="file-pick-btn">Görsel seç</span>
+              <span class="file-pick-name">Seçilmedi</span>
+            </label>
+            <div class="ref-thumbs" id="last-frame-thumb"></div>
+          </div>
+          <label>Oran</label>
+          <div class="chips wrap" id="aspect-chips" role="group" aria-label="Oran">
+            <button type="button" class="chip on" data-aspect="16:9">16:9</button>
+            <button type="button" class="chip" data-aspect="9:16">9:16</button>
+            <button type="button" class="chip" data-aspect="1:1">1:1</button>
+            <button type="button" class="chip" data-aspect="21:9">21:9</button>
+            <button type="button" class="chip" data-aspect="4:3">4:3</button>
+          </div>
+          <label>Kalite / çözünürlük (H3 ×32)</label>
+          <div class="chips" id="quality-chips">
+            <button type="button" data-q="480" class="chip">480p</button>
+            <button type="button" data-q="720" class="chip on">736p</button>
+            <button type="button" data-q="1080" class="chip warn">1088p</button>
+          </div>
+          <div class="muted" id="quality-hint">1280×736 · H3 resmi tablo</div>
+        </div>
+
+        <div id="panel-mode-ref" class="hidden">
+          <p class="muted mode-hint">Genel referans (Ref2VA): stil, sahne, obje, kıyafet… Video bu kareden <em>başlamaz</em> — I2V için Yeni video + İlk kare. Prompt’ta <code>&lt;Picture 1&gt;</code>.</p>
+          <label>Referans görseller (1–9)</label>
+          <label class="file-pick">
+            <input type="file" id="ref-files" class="file-pick-input" accept="image/*" multiple />
+            <span class="file-pick-btn">Görseller seç</span>
+            <span class="file-pick-name">Seçilmedi</span>
+          </label>
+          <div class="ref-thumbs" id="ref-thumbs"></div>
+          <label>Referans boyutu</label>
+          <div class="chips" id="ref-size-chips">
+            <button type="button" class="chip on" data-refsize="match">match (hızlı)</button>
+            <button type="button" class="chip" data-refsize="max">max (daha sadık)</button>
+          </div>
+        </div>
+
+        <div id="panel-mode-v2v" class="hidden">
+          <p class="muted mode-hint">Video-to-video (Ref2VA): senin kliğin motion; hedef karakter için foto ekle. Prompt: Video 1 = hareket, Picture = görünüm.</p>
+          <label>Motion video (1–3)</label>
+          <label class="file-pick">
+            <input type="file" id="v2v-video-files" class="file-pick-input" accept="video/*" multiple />
+            <span class="file-pick-btn">Video seç</span>
+            <span class="file-pick-name">Seçilmedi</span>
+          </label>
+          <div class="ref-thumbs" id="v2v-video-thumbs"></div>
+          <label>Hedef görünüm / karakter foto (0–9)</label>
+          <label class="file-pick">
+            <input type="file" id="v2v-image-files" class="file-pick-input" accept="image/*" multiple />
+            <span class="file-pick-btn">Görseller seç</span>
+            <span class="file-pick-name">Seçilmedi</span>
+          </label>
+          <div class="ref-thumbs" id="v2v-image-thumbs"></div>
+          <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span>Video’daki sesi de referans al</span></label>
+        </div>
+
+        <div id="panel-mode-cinema" class="hidden">
+          <p class="muted mode-hint">Higgsfield tarzı sinema stüdyosu: karakter + mekan kartları, çağırma kodu, karakter LoRA. Prompt’ta isim geçince görsel otomatik referans olur. Uzun film = shot zinciri.</p>
+          <button type="button" class="cta" id="btn-open-cinema">Sinema stüdyosunu aç</button>
+        </div>
+
+        <div id="panel-mode-face" class="hidden">
+          <p class="muted mode-hint">Net portre yükle (1–3). İlk klip Ref2VA yüz kilidi; devam / batch’te aynı portreler + son kare ile yüz korunur.</p>
+          <label>Yüz fotoğrafları (1–3 önerilir)</label>
+          <label class="file-pick">
+            <input type="file" id="face-files" class="file-pick-input" accept="image/*" multiple />
+            <span class="file-pick-btn">Portre seç</span>
+            <span class="file-pick-name">Seçilmedi</span>
+          </label>
+          <div class="ref-thumbs" id="face-thumbs"></div>
+          <label class="check"><input type="checkbox" id="face-lock-chain" checked /> <span>Yüz kilidini sonraki videolarda da koru</span></label>
+        </div>
+
+        <div id="panel-mode-continue" class="hidden">
+          <p class="muted mode-hint">Önceki videonun <strong>son karesinden</strong> devam (zincir). I2V değil — fotoğraftan başlamak için <strong>Yeni video + İlk kare</strong>.</p>
+          <label>Devam süresi</label>
+          <div class="chips" id="dur-chips-cont">
+            <button type="button" data-dur="4" class="chip">4 sn</button>
+            <button type="button" data-dur="5" class="chip on">5 sn</button>
+            <button type="button" data-dur="6" class="chip">6 sn</button>
+            <button type="button" data-dur="8" class="chip">8 sn</button>
+            <button type="button" data-dur="10" class="chip">10 sn</button>
+            <button type="button" data-dur="15" class="chip warn">15 sn</button>
+          </div>
+          <label>Kalite (H3 ×32)</label>
+          <div class="chips" id="quality-chips-cont">
+            <button type="button" data-q="480" class="chip">480p</button>
+            <button type="button" data-q="720" class="chip on">736p</button>
+            <button type="button" data-q="1080" class="chip warn">1088p</button>
+          </div>
+          <div class="muted" id="quality-hint-cont">1280×736</div>
+          <label>Hangi videodan devam?</label>
+          <select id="continue-source">
+            <option value="">— bitmiş video seç —</option>
+          </select>
+          <div class="continue-preview hidden" id="continue-box">
+            <span id="continue-label">Son kare</span>
+            <img id="continue-thumb" alt="son kare" />
+          </div>
+        </div>
+    </section>
+
+    <section class="zone zone-player panel player layout-zone" data-layout="player">
+      <div class="layout-handle layout-handle-s" data-handle="player" title="Sürükle: player yüksekliği"></div>
+      <div class="player-stage">
+        <button type="button" class="player-close hidden" id="btn-player-close" title="Aktif üretimi kapat">×</button>
+        <video id="player" controls playsinline></video>
+        <div class="player-empty muted" id="player-empty">Henüz video yok</div>
+      </div>
+      <div class="player-actions">
+        <button type="button" class="btn-secondary" id="btn-use-in-continue">Bu videodan devam</button>
+        <a class="btn-secondary" id="btn-download" href="#" download>İndir</a>
+        <button type="button" class="cta hidden" id="btn-open-prompt" title="Bu videonun üretim prompt’u">Prompt</button>
+      </div>
+      <div class="prod-info" id="prod-info">
+        <div class="prod-main">
+          <div class="prod-top">
+            <div id="prod-text">Hazır</div>
+            <button type="button" class="btn-ghost" id="btn-stop">Durdur</button>
+          </div>
+          <div class="progress-box hidden" id="progress-wrap">
+            <div class="progress-wrap">
+              <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+              <span id="progress-pct">0%</span>
+            </div>
+            <div class="muted" id="progress-label"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="zone zone-prompt panel prompt layout-zone" data-layout="prompt">
+      <div class="layout-handle layout-handle-s" data-handle="prompt" title="Sürükle: prompt yüksekliği"></div>
+      <h2>Prompt / Sahne</h2>
+      <textarea id="prompt" rows="3" placeholder="Sahneyi, kamerayı, diyalogu ve sesi anlat… (Ctrl+Enter = sıraya ekle)"></textarea>
+      <div class="gen-actions">
+        <button type="button" class="btn-secondary" id="btn-batch-add" title="Prompt / Sahne metnini üretim kuyruğuna ekle">Sıraya ekle</button>
+        <button type="button" class="cta" id="btn-generate">Üret</button>
+      </div>
+      <p class="muted gen-hint" id="gen-hint">Mod: Yeni video · Sıraya ekle = kuyruğa ekle</p>
+    </section>
+
+    <section class="zone zone-ayar panel drawer-ayar-panel layout-zone" data-layout="drawer-ayar">
+      <div class="layout-handle layout-handle-e" data-handle="drawer-ayar" title="Sürükle: Ayarlar / Üretim oranı"></div>
+      <h2>Ayarlar</h2>
+      <div class="drawer-body">
+        <label>Seed <input type="number" id="seed" value="-1" /> <small>(-1 = random)</small></label>
+        <label>Steps <input type="number" id="steps" value="20" min="1" max="50" /></label>
+        <button type="button" class="btn-secondary" id="btn-fast-preset" title="5sn · 480p · 12 step · sessiz">Fast preset</button>
+        <label>Sampler
+          <select id="sampler">
+            <option value="res_multistep">res_multistep</option>
+            <option value="er_sde">er_sde</option>
+            <option value="sa_solver">sa_solver</option>
+          </select>
+        </label>
+        <label>Scheduler
+          <select id="scheduler"><option>simple</option></select>
+        </label>
+        <div class="llm-prod-pick" id="llm-prod-pick">
+          <label>Yönetmen (hangi LLM)
+            <select id="llm-provider">
+              <option value="ollama">Ollama (yerel)</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Gemini (Google)</option>
+              <option value="grok">Grok (xAI)</option>
+              <option value="claude">Claude (Anthropic)</option>
+            </select>
+          </label>
+          <label id="llm-prod-model-wrap">Model
+            <select id="director-model"><option value="">—</option></select>
+          </label>
+          <button type="button" class="btn-secondary" id="btn-llm-provider-save">Yönetmeni uygula</button>
+          <p class="muted mode-hint" id="llm-prod-hint">API anahtarları sağ üst <strong>Ayarlar</strong>’da. Üretim (Comfy/H3) bundan etkilenmez.</p>
+        </div>
+        <div class="lora-prod-pick" id="lora-prod-pick">
+          <label>LoRA
+            <select id="lora-select">
+              <option value="">Yok (varsayılan)</option>
+            </select>
+          </label>
+          <label class="file-pick">
+            <input type="file" id="lora-file" class="file-pick-input" accept=".safetensors" />
+            <span class="file-pick-btn">LoRA ekle</span>
+            <span class="file-pick-name">.safetensors</span>
+          </label>
+          <button type="button" class="btn-secondary" id="btn-lora-apply">Uygula</button>
+          <p class="muted mode-hint" id="lora-hint">H3 LoRA seç → Uygula. Step/sampler LoRA’dan; süre chip’ten. Ayar değişince LoRA düşmez.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="zone zone-prod panel drawer-production layout-zone" data-layout="drawer-prod">
+      <div class="layout-handle layout-handle-s" data-handle="prod-h" title="Üretim listesi yüksekliği — sürükle"></div>
+      <h2>Üretim listesi</h2>
+      <div class="drawer-body drawer-body-production">
+        <div class="job-queue layout-zone" data-layout="job-queue">
+          <div class="layout-handle layout-handle-s" data-handle="job-queue" title="Sürükle: kuyruk yüksekliği"></div>
+          <div class="job-queue-head">Kuyruk</div>
+          <ul id="job-list" class="job-list"></ul>
+        </div>
+        <div class="batch-add-row queue-toolbar">
+          <button type="button" class="btn-ghost" id="btn-clear-errors">Hatalıları temizle</button>
+          <button type="button" class="btn-ghost" id="btn-clear-finished">Geçmişi temizle</button>
+          <button type="button" class="btn-ghost" id="btn-reset-production" title="Kuyruk + klipler + kareler">Sıfırla (temiz başlat)</button>
+          <button type="button" class="btn-ghost" id="btn-open-logs" title="Studio log dosyası">Loglar</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="director-backdrop hidden" id="director-backdrop"></div>
+  <section class="director size-md collapsed" id="director-dock">
+    <div class="director-head">
+      <h2>H3 Yönetmen</h2>
+      <span class="muted director-project" id="director-project">Proje seç</span>
+      <div class="director-tools">
+        <span class="muted" id="director-status">Ollama …</span>
+        <button type="button" class="dir-tool" id="btn-dir-smaller" title="Küçült">−</button>
+        <button type="button" class="dir-tool" id="btn-dir-bigger" title="Büyüt">+</button>
+        <button type="button" class="dir-tool" id="btn-dir-modal" title="Büyük pencere">⛶</button>
+        <button type="button" class="dir-tool" id="btn-dir-collapse" title="Kapat">×</button>
+      </div>
+    </div>
+    <div class="director-scroll" id="director-scroll">
+      <div class="chips wrap director-chips" id="director-chips" role="group" aria-label="Proje tarzı">
+        <button type="button" class="chip" data-group="purpose" data-purpose="short_film" data-chip="kısa film" aria-pressed="false">kısa film</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-chip="müzik klibi" data-silent="1" aria-pressed="false" title="Sessiz görüntü; şarkı finalde">müzik klibi</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="ad" data-chip="reklam" aria-pressed="false">reklam</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="trailer" data-chip="trailer" aria-pressed="false">trailer</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="social" data-chip="sosyal" aria-pressed="false">sosyal</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="documentary" data-chip="belgesel" aria-pressed="false">belgesel</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
+        <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
+        <button type="button" class="chip" data-group="style" data-style="anime" data-chip="anime tarz" aria-pressed="false">anime</button>
+        <button type="button" class="chip" data-group="style" data-style="disney" data-chip="disney 3D tarz" aria-pressed="false">disney</button>
+        <button type="button" class="chip" data-group="style" data-style="game" data-chip="oyun sinematik tarz" aria-pressed="false">oyun</button>
+        <button type="button" class="chip" data-group="style" data-style="cgi_3d" data-chip="3D CGI tarz" aria-pressed="false">3D CGI</button>
+        <button type="button" class="chip" data-group="style" data-style="comic" data-chip="çizgi roman tarz" aria-pressed="false">çizgi roman</button>
+        <button type="button" class="chip" data-group="style" data-style="illustration" data-chip="illüstrasyon tarz" aria-pressed="false">illüstrasyon</button>
+        <button type="button" class="chip" data-group="style" data-style="oil_paint" data-chip="yağlı boya tarz" aria-pressed="false">yağlı boya</button>
+        <button type="button" class="chip" data-group="style" data-style="clay" data-chip="kil animasyon tarz" aria-pressed="false">kil</button>
+        <button type="button" class="chip" data-group="style" data-style="found_footage" data-chip="found footage tarz" aria-pressed="false">found footage</button>
+        <button type="button" class="chip" data-group="clip" data-clip="4" data-chip="4 sn klipler" aria-pressed="false">4 sn</button>
+        <button type="button" class="chip" data-group="clip" data-clip="5" data-chip="5 sn klipler" aria-pressed="false">5 sn</button>
+        <button type="button" class="chip" data-group="clip" data-clip="6" data-chip="6 sn klipler" aria-pressed="false">6 sn</button>
+        <button type="button" class="chip" data-group="clip" data-clip="8" data-chip="8 sn klipler" aria-pressed="false">8 sn</button>
+        <button type="button" class="chip" data-group="clip" data-clip="10" data-chip="10 sn klipler" aria-pressed="false">10 sn</button>
+      </div>
+      <div class="chips director-mode-tabs" id="director-mode-tabs">
+        <button type="button" class="chip on" data-dirmode="chat" id="dir-tab-chat">Sohbet</button>
+        <button type="button" class="chip" data-dirmode="plan" id="dir-tab-plan">Plan</button>
+        <button type="button" class="chip" data-dirmode="bible" id="dir-tab-bible">Direktör</button>
+      </div>
+      <div class="director-plan hidden" id="director-plan">
+        <p class="muted">Plan modu — shot metinlerini oku ve düzenle. Yönetmen bu tahtayı görür; üretim yok. Beğeninçe Üretime al.</p>
+        <div class="dir-plan-meta" id="director-plan-meta"></div>
+        <div class="dir-plan-shots" id="director-plan-shots"></div>
+        <div class="dir-plan-actions">
+          <button type="button" class="btn-secondary" id="btn-plan-save">Kaydet</button>
+          <button type="button" class="btn-ghost" id="btn-plan-to-cinema">Stüdyoya aktar</button>
+          <button type="button" class="cta" id="btn-plan-queue">Üretime al</button>
+        </div>
+      </div>
+      <div class="director-bible hidden" id="director-bible">
+        <p class="muted">Yapılandırılmış brief — karakter / sahne / tür / süre. Brief üret sohbete JSON basar.</p>
+        <label>Logline <textarea id="bible-logline" rows="2" placeholder="Kim ne ister, engel ne…"></textarea></label>
+        <label>Karakterler (her satır: rol | isim | betim)
+          <textarea id="bible-characters" rows="4" placeholder="protagonist | Ada | 28, short black hair…"></textarea>
+        </label>
+        <label>Sahne / lokasyonlar (her satır bir yer)
+          <textarea id="bible-locations" rows="3" placeholder="rain alley at night&#10;neon rooftop"></textarea>
+        </label>
+        <label>Tür
+          <select id="bible-genre">
+            <option value="short_film">kısa film</option>
+            <option value="music_video">müzik klibi</option>
+            <option value="ad">reklam</option>
+            <option value="trailer">trailer</option>
+            <option value="social">sosyal</option>
+            <option value="documentary">belgesel</option>
+            <option value="intro">intro</option>
+            <option value="outro">outro</option>
+          </select>
+        </label>
+        <label>Görsel tarz
+          <select id="bible-style">
+            <option value="realistic">gerçekçi</option>
+            <option value="anime">anime</option>
+            <option value="disney">disney</option>
+            <option value="game">oyun</option>
+            <option value="cgi_3d">3D CGI</option>
+            <option value="comic">çizgi roman</option>
+            <option value="illustration">illüstrasyon</option>
+            <option value="oil_paint">yağlı boya</option>
+            <option value="clay">kil</option>
+            <option value="found_footage">found footage</option>
+          </select>
+        </label>
+        <label>Toplam süre (sn) <input type="number" id="bible-total" value="30" min="4" max="600" /></label>
+        <label>Klip (sn)
+          <select id="bible-clip">
+            <option value="4">4</option>
+            <option value="5" selected>5</option>
+            <option value="6">6</option>
+            <option value="8">8</option>
+            <option value="10">10</option>
+            <option value="15">15</option>
+          </select>
+        </label>
+        <label>Ton <input type="text" id="bible-tone" placeholder="karanlık, gergin" /></label>
+        <label>Yasaklar <input type="text" id="bible-forbidden" placeholder="on-screen text, face morph" /></label>
+        <button type="button" class="cta" id="btn-bible-generate">Brief üret</button>
+      </div>
+      <div class="director-music" id="director-music">
+        <label class="file-pick file-pick-inline music-file">
+          <input type="file" id="music-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
+          <span class="file-pick-btn">Şarkı seç</span>
+          <span class="file-pick-name">Seçilmedi</span>
+        </label>
+        <span class="muted" id="music-meta">yok</span>
+        <input type="text" id="music-concept" placeholder="Konsept (örn. dark phonk otopark)" autocomplete="off" />
+        <input type="text" id="music-lyrics" placeholder="Sözler (isteğe bağlı, yapıştır)" autocomplete="off" />
+        <button type="button" class="btn-secondary" id="btn-music-analyze" disabled title="Süre + söz → SCENE brief">Şarkıdan brief</button>
+        <button type="button" class="btn-ghost hidden" id="btn-music-mux" disabled title="Bitmiş klipler + şarkı → final">Şarkılı final</button>
+        <a class="muted hidden" id="music-final-link" href="#" target="_blank" rel="noopener">Finali aç</a>
+      </div>
+      <div id="director-tabs" class="director-tabs"></div>
+      <div class="director-chat" id="director-log"></div>
+    </div>
+    <div class="director-footer" id="director-footer">
+      <div class="director-actions" id="director-actions">
+        <label style="display:inline-flex;align-items:center;gap:8px;margin-right:12px;">
+          <input type="checkbox" id="link-continue" checked />
+          <span style="font-size:12px">Devam zincirine ekle</span>
+        </label>
+        <button type="button" class="cta hidden" id="btn-queue-brief" title="Hazır shot’ları Comfy kuyruğuna bas ve üretimi başlat">Üretime al</button>
+        <button type="button" class="btn-ghost" id="btn-director-new-session" title="Yeni sohbet başlat">Yeni sohbet</button>
+        <button type="button" class="btn-ghost" id="btn-director-reset" title="Sohbeti sıfırla (yeni session)">Sıfırla</button>
+      </div>
+      <div class="director-input" id="director-input">
+        <textarea id="director-msg" rows="2" placeholder="Örn: 2:45 müzik klibi…  (Enter = gönder · Shift+Enter = yeni satır)" autocomplete="off"></textarea>
+        <button type="button" class="btn-secondary" id="btn-director-send">Gönder</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="overlay hidden" id="view-clip-prompt">
+    <div class="gallery-panel clip-prompt-panel">
+      <header>
+        <h2>Videonun prompt’u</h2>
+        <span class="muted gallery-order-hint" id="clip-prompt-meta"></span>
+        <button type="button" class="btn-secondary" id="btn-copy-prompt">Kopyala</button>
+        <button type="button" class="btn-secondary" id="btn-use-prompt">Prompt’a al</button>
+        <button type="button" class="menu-btn" id="btn-clip-prompt-close">Kapat</button>
+      </header>
+      <pre id="clip-prompt-text" class="clip-prompt-full"></pre>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="view-cinema">
+    <div class="gallery-panel cinema-panel">
+      <header>
+        <h2>Direktör · Sinema stüdyosu</h2>
+        <input type="text" id="cinema-title" placeholder="Film adı" />
+        <button type="button" class="menu-btn" id="btn-cinema-close">← Studio</button>
+      </header>
+      <div class="cinema-setup-bar">
+        <div class="film-pills" id="cinema-pills"></div>
+        <div class="cinema-knobs">
+          <label>Süre
+            <select id="cinema-duration">
+              <option value="4">4 sn</option>
+              <option value="5" selected>5 sn</option>
+              <option value="6">6 sn</option>
+              <option value="8">8 sn</option>
+              <option value="10">10 sn</option>
+              <option value="15">15 sn</option>
+            </select>
+          </label>
+          <div class="chips cinema-quality-chips" id="cinema-quality-chips">
+            <button type="button" class="chip" data-quality="480">480p</button>
+            <button type="button" class="chip" data-quality="720">720p</button>
+            <button type="button" class="chip" data-quality="1080">1080p</button>
+          </div>
+          <label>Adım
+            <input type="number" id="cinema-steps" min="1" max="50" value="20" />
+          </label>
+          <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
+          <button type="button" class="cta" id="btn-cinema-produce">Filmi kuyruğa al</button>
+        </div>
+        <div class="cinema-audio-bar">
+          <div class="chips" id="cinema-audio-mode">
+            <button type="button" class="chip on" data-audio="film">Diyalog + SFX (tek müzik)</button>
+            <button type="button" class="chip" data-audio="silent">Sessiz görüntü</button>
+          </div>
+          <label class="file-pick file-pick-inline">
+            <input type="file" id="cinema-score-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
+            <span class="file-pick-btn">Film müziği</span>
+          </label>
+          <span class="muted" id="cinema-score-name">yok — H3 her klipte yeni şarkı uydurur</span>
+          <button type="button" class="btn-secondary hidden" id="btn-cinema-mux">Aynı müziği filme karıştır</button>
+          <a class="muted hidden" id="cinema-final-link" href="#" target="_blank" rel="noopener">Son filmi aç</a>
+        </div>
+      </div>
+      <div class="cinema-grid">
+        <div class="cinema-col cinema-col-stack">
+          <section class="cinema-stack" data-fold="characters">
+            <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="characters" aria-expanded="true">
+              <span class="cinema-fold-title">Karakterler</span>
+              <span class="cinema-fold-meta"><span id="cinema-char-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▾</span></span>
+            </button>
+            <div class="cinema-fold-summary" id="cinema-char-summary"></div>
+            <div class="cinema-fold-body">
+              <p class="muted mode-hint">Karakter ekle+ ile kart açılır. Shot metninde isim geçince referans görsel bağlanır. Ses tarifi her klipte aynı konuşmacıyı kilitler.</p>
+              <div id="cinema-chars" class="cinema-cards"></div>
+            </div>
+            <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-char">Karakter ekle+</button>
+          </section>
+          <section class="cinema-stack" data-fold="locations">
+            <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="locations" aria-expanded="true">
+              <span class="cinema-fold-title">Mekanlar</span>
+              <span class="cinema-fold-meta"><span id="cinema-loc-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▾</span></span>
+            </button>
+            <div class="cinema-fold-summary" id="cinema-loc-summary"></div>
+            <div class="cinema-fold-body">
+              <p class="muted mode-hint">Bölge adı + tanım + referans görsel. Shot’ta isim geçince set kilidi olur.</p>
+              <div id="cinema-locs" class="cinema-cards"></div>
+            </div>
+            <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-loc">Mekan ekle+</button>
+          </section>
+        </div>
+        <section class="cinema-col cinema-script-col">
+          <div class="cinema-col-head">
+            <h3>Senaryo / shot listesi</h3>
+          </div>
+          <p class="muted mode-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder.</p>
+          <textarea id="cinema-shot-draft" rows="4" placeholder="Shot metnini yaz… örn. Ada walks into Rooftop at dusk, coat catching wind."></textarea>
+          <div class="cinema-shot-add">
+            <button type="button" class="btn-secondary" id="btn-cinema-add-t2v">+ Yeni video</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-add-cont">+ Continue</button>
+          </div>
+          <div id="cinema-shots" class="cinema-shots"></div>
+          <p class="muted" id="cinema-hint">Karakter / mekan ekle → shot’lara isimlerini yaz → kuyruğa al.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="view-gallery">
+    <div class="gallery-panel">
+      <header>
+        <h2>Galeri</h2>
+        <span class="muted gallery-order-hint">Tüm üretilenler · yeni → üst sol · 5 / satır</span>
+        <button type="button" class="menu-btn" id="btn-gallery-close">← Studio</button>
+      </header>
+      <div class="gallery-grid" id="gallery-grid"></div>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="view-support">
+    <div class="gallery-panel support-panel">
+      <header>
+        <h2>Destek</h2>
+        <span class="muted gallery-order-hint">Sorun ve fikirler GitHub Issues’a düşer — herkese açık</span>
+        <button type="button" class="menu-btn" id="btn-support-close">← Studio</button>
+      </header>
+      <p class="muted mode-hint" id="support-intro" data-i18n="support.intro">
+        Bize buradan ulaş. Bug, takılma, eksik çeviri veya “şunu da ekleseniz” — GitHub’da issue aç; takip edilebilir ve kaybolmaz.
+      </p>
+      <div class="support-grid">
+        <article class="support-card">
+          <h3 data-i18n="support.bugTitle">Sorun bildir</h3>
+          <p data-i18n="support.bugText">Kurulum, Start, VRAM, kuyruk, yönetmen, ses/mux… ne kırıldıysa yaz. GPU + ne yaptığın faydalı.</p>
+          <button type="button" class="btn-secondary" id="btn-support-bug">GitHub’da bug aç</button>
+        </article>
+        <article class="support-card">
+          <h3 data-i18n="support.ideaTitle">İyileştirme / fikir</h3>
+          <p data-i18n="support.ideaText">UI, yönetmen, Plan, sinema stüdyosu, dil, workflow… neyi daha iyi yapmak istersen.</p>
+          <button type="button" class="btn-secondary" id="btn-support-idea">GitHub’da fikir aç</button>
+        </article>
+      </div>
+      <p class="muted mode-hint" id="support-open-label">Açık issues:</p>
+      <p class="muted mode-hint">
+        <a href="https://github.com/erdinoral/minimax-h3-studio/issues" target="_blank" rel="noopener" id="support-issues-link">github.com/erdinoral/minimax-h3-studio/issues</a>
+      </p>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="view-settings">
+    <div class="gallery-panel settings-panel">
+      <header>
+        <h2>Ayarlar</h2>
+        <span class="muted gallery-order-hint">API anahtarları · bu makinede saklanır</span>
+        <button type="button" class="menu-btn" id="btn-settings-close">← Studio</button>
+      </header>
+      <div class="llm-settings" id="llm-settings">
+        <h3 class="llm-settings-title">Yönetmen LLM / API anahtarları</h3>
+        <p class="muted mode-hint">1) Aktif sağlayıcıyı seç (Gemini) · 2) Key yapıştır · 3) <strong>API ayarlarını kaydet</strong>. Sadece key kaydetmek yetmez — sağlayıcı da Gemini olmalı. Video üretimi (Comfy/H3) değişmez.</p>
+        <label>Aktif sağlayıcı
+          <select id="llm-provider-settings">
+            <option value="ollama">Ollama (yerel)</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini (Google)</option>
+            <option value="grok">Grok (xAI)</option>
+            <option value="claude">Claude (Anthropic)</option>
+          </select>
+        </label>
+        <label id="llm-ollama-url-wrap">Ollama URL
+          <input type="text" id="llm-ollama-url" placeholder="http://127.0.0.1:11434" autocomplete="off" />
+          <small class="muted">Boş = varsayılan localhost · API key gerekmez</small>
+        </label>
+        <label>OpenAI API key
+          <input type="password" id="llm-openai-key" placeholder="sk-… (platform.openai.com)" autocomplete="off" />
+        </label>
+        <label>Gemini API key
+          <input type="password" id="llm-gemini-key" placeholder="AIza… (aistudio.google.com/apikey)" autocomplete="off" />
+          <small class="muted">AI Studio key — Gemini Ultra üyeliği otomatik vermez</small>
+        </label>
+        <label>Grok (xAI) API key
+          <input type="password" id="llm-grok-key" placeholder="xai-… (console.x.ai)" autocomplete="off" />
+        </label>
+        <label>Claude (Anthropic) API key
+          <input type="password" id="llm-claude-key" placeholder="sk-ant-… (console.anthropic.com)" autocomplete="off" />
+        </label>
+        <label>Varsayılan model
+          <select id="director-model-settings"><option value="">—</option></select>
+        </label>
+        <button type="button" class="btn-secondary" id="btn-llm-save">API ayarlarını kaydet</button>
+        <p class="muted mode-hint" id="llm-settings-hint">Sağlayıcı + key → Kaydet. Bulut LLM VRAM kullanmaz.</p>
+
+        <h3 class="llm-settings-title" style="margin-top:1.25rem">Telefon bildirimi (Telegram)</h3>
+        <p class="muted mode-hint">
+          AkiFactory’deki bot ile aynı kanal. Üretim / seri bitince veya hata olunca Telegram’a mesaj düşer.
+          Bot’a bir kez <code>/start</code> yazmış olman gerekir.
+        </p>
+        <label class="check"><input type="checkbox" id="notify-enabled" /> <span>Bildirimleri aç</span></label>
+        <label>Kanal
+          <select id="notify-provider">
+            <option value="telegram">Telegram (AkiFactory bot)</option>
+            <option value="ntfy">ntfy (opsiyonel)</option>
+          </select>
+        </label>
+        <div id="notify-telegram-wrap">
+          <label>Bot token
+            <input type="password" id="notify-tg-token" placeholder="AkiFactory’den aktar veya yapıştır" autocomplete="off" />
+            <small class="muted" id="notify-tg-token-hint">Boş bırakırsan kayıtlı token korunur</small>
+          </label>
+          <label>Chat ID
+            <input type="text" id="notify-tg-chat" placeholder="8196…" autocomplete="off" />
+          </label>
+          <button type="button" class="btn-ghost" id="btn-notify-import-aki">AkiFactory’den aktar</button>
+        </div>
+        <div id="notify-ntfy-wrap" class="hidden">
+          <label>ntfy sunucu
+            <input type="text" id="notify-server" placeholder="https://ntfy.sh" autocomplete="off" />
+          </label>
+          <label>Konu (topic)
+            <input type="text" id="notify-topic" placeholder="h3-xxxxx" autocomplete="off" />
+            <small class="muted" id="notify-subscribe-hint">Abone URL kayıttan sonra</small>
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="notify-batch-done" checked /> <span>Seri / kuyruk bitince bildir</span></label>
+        <label class="check"><input type="checkbox" id="notify-each-clip" /> <span>Her klip bitince bildir (30 shot = 30 bildirim)</span></label>
+        <label class="check"><input type="checkbox" id="notify-error" checked /> <span>Hata olunca bildir</span></label>
+        <div class="batch-add-row">
+          <button type="button" class="btn-secondary" id="btn-notify-save">Bildirim ayarlarını kaydet</button>
+          <button type="button" class="btn-ghost" id="btn-notify-test">Test mesajı gönder</button>
+        </div>
+        <p class="muted mode-hint" id="notify-settings-hint">Tik’ler otomatik kaydolur · AkiFactory aktar → Test → Telegram’a bak.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js?v=cinema15"></script>
+  <script src="/static/app.js?v=cinema15"></script>
+</body>
+</html>

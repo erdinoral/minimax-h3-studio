@@ -1,7 +1,7 @@
 module.exports = {
   version: "8.0",
-  title: "MiniMax H3 ComfyUI",
-  description: "MiniMax H3 omni-modal video generation in ComfyUI. Text/image/video/audio in, video with native 32kHz stereo audio out (768p default, 1080p+ supported). Disk-optimized: pruned INT8 + NVFP4 weights (~63GB instead of ~290GB). NVIDIA only.",
+  title: "MiniMax H3 Studio",
+  description: "1-click MiniMax H3 video in ComfyUI plus H3 Studio: Director, Plan, cinema studio, TR/EN. NVIDIA GPU.",
   icon: "icon.png",
   menu: async (kernel, info) => {
     let installed = info.exists("app/env")

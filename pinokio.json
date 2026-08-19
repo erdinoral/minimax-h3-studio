@@ -1,10 +1,17 @@
 {
-  "title": "MiniMax H3 ComfyUI",
-  "description": "MiniMax H3 omni-modal video generation in ComfyUI. Text/image/video/audio in, video with native 32kHz stereo audio out (768p default, 1080p+ supported). Disk-optimized: pruned INT8 + NVFP4 weights (~63GB instead of ~290GB). NVIDIA only.",
+  "title": "MiniMax H3 Studio",
+  "description": "1-click MiniMax H3 video in ComfyUI plus H3 Studio: Director, Plan, cinema studio, TR/EN. NVIDIA GPU.",
   "icon": "icon.png",
   "gpu": "nvidia",
   "posts": [],
   "links": [
+    {
+      "title": "H3 Studio",
+      "links": [
+        { "title": "GitHub", "value": "https://github.com/erdinoral/minimax-h3-studio" },
+        { "title": "Support / Issues", "value": "https://github.com/erdinoral/minimax-h3-studio/issues" }
+      ]
+    },
     {
       "title": "MiniMax H3 (model)",
       "links": [

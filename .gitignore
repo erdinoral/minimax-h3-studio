@@ -8,6 +8,8 @@ venv
 /sage3.installed
 .env
 .*
+!.github/
+!.github/**
 ~*
 /logs/
 /cache/
@@ -16,3 +18,7 @@ venv
 /GEMINI.md
 /QWEN.md
 /SPEC.md
+/studio/data/
+/studio/logs/
+/studio/__pycache__/
+/studio/lib/__pycache__/

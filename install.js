@@ -117,11 +117,28 @@ module.exports = {
         uri: "download/ref2va.js"
       }
     },
+    {
+      method: "script.start",
+      params: {
+        uri: "download/lora.js"
+      }
+    },
     // Ready-to-run graphs in the Workflows sidebar, models already selected.
     {
       method: "script.start",
       params: {
         uri: "workflows.js"
+      }
+    },
+    // H3 Studio (custom UI) — lightweight deps into the same Comfy venv (app/env).
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: [
+          "uv pip install -r ../studio/requirements.txt"
+        ]
       }
     }
   ]

@@ -148,6 +148,10 @@ body {
   height: 100%;
   max-height: 100%;
 }
+body.director-modal-open .zone-scene {
+  position: relative;
+  z-index: 101;
+}
 .zone-player {
   grid-area: player;
   display: flex;
@@ -205,6 +209,7 @@ body {
   background: rgba(28, 22, 18, 0.98);
   color: var(--text);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
 }
 .director.modal-open .director-scroll {
   flex: 1 1 auto;
@@ -312,6 +317,8 @@ body {
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   z-index: 99;
+  /* Dim only — do not steal clicks from Sahne / Proje (left column). */
+  pointer-events: none;
 }
 
 .panel {
@@ -395,10 +402,28 @@ body {
 .llm-prod-pick .btn-secondary {
   width: auto;
   flex: 0 0 auto;
+  align-self: flex-end;
+  margin-bottom: 2px;
+}
+.settings-panel input.key-saved {
+  border-color: rgba(143, 186, 122, 0.45);
+}
+.settings-panel input.key-saved::placeholder {
+  color: #8fba7a;
+  opacity: 1;
 }
 .llm-prod-pick #llm-prod-hint {
   flex: 1 1 100%;
   margin: 0;
+}
+.llm-prod-pick #llm-prod-hint.llm-feedback-ok {
+  color: #6bcf7f;
+}
+.llm-prod-pick #llm-prod-hint.llm-feedback-warn {
+  color: var(--accent-amber, #d4a017);
+}
+.llm-prod-pick #llm-prod-hint.llm-feedback-err {
+  color: var(--accent-hot, #e05a4f);
 }
 .director-llm-tab {
   position: fixed;
@@ -597,9 +622,18 @@ body.director-modal-open .director-llm-tab {
   margin-top: 4px;
   font-size: 0.72rem;
 }
-.chip.on {
+.chip.on,
+.chip[aria-pressed="true"] {
   background: rgba(212, 160, 23, 0.18);
   border-color: var(--accent-amber);
+}
+#scene-purpose-chips .chip.on,
+#scene-style-chips .chip.on,
+#scene-purpose-chips .chip[aria-pressed="true"],
+#scene-style-chips .chip[aria-pressed="true"] {
+  background: rgba(212, 160, 23, 0.22);
+  border-color: var(--accent-amber);
+  color: var(--text);
 }
 .chip.warn.on {
   background: rgba(179, 58, 43, 0.2);
@@ -1310,6 +1344,14 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dir-plan-shot-del {
+  font-size: 0.72rem;
+  padding: 2px 8px;
 }
 .dir-plan-shot label {
   display: flex;

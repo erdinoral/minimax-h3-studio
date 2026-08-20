@@ -34,6 +34,7 @@
     directorBrief: null,
     directorBusy: false,
     directorOnline: false,
+    directorOfflineDetail: "",
     musicId: null,
     musicMeta: null,
     projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
@@ -402,6 +403,25 @@
     $("prod-text").textContent = msg;
   }
 
+  /** Feedback visible in director dock (prod bar is often off-screen when modal is open). */
+  function directorLlmFeedback(msg, kind) {
+    const hint = $("llm-prod-hint");
+    if (hint && msg) {
+      hint.textContent = msg;
+      hint.classList.remove("llm-feedback-ok", "llm-feedback-warn", "llm-feedback-err");
+      if (kind === "ok") hint.classList.add("llm-feedback-ok");
+      if (kind === "warn") hint.classList.add("llm-feedback-warn");
+      if (kind === "err") hint.classList.add("llm-feedback-err");
+    }
+    const st = $("director-status");
+    if (st && msg && kind && kind !== "ok") {
+      st.textContent = msg.length > 96 ? msg.slice(0, 93) + "…" : msg;
+      st.classList.toggle("on", false);
+      st.classList.toggle("off", true);
+    }
+    if (msg) toast(msg);
+  }
+
   async function copyText(text, okMsg) {
     const t = (text == null ? "" : String(text)).trim();
     if (!t) {
@@ -463,6 +483,31 @@
     nameEl.textContent = files.length === 1 ? files[0].name : `${files.length} dosya`;
     nameEl.classList.add("has-file");
     nameEl.title = Array.from(files).map((f) => f.name).join(", ");
+  }
+
+  function clearFilePickLabel(input) {
+    const el = typeof input === "string" ? $(input) : input;
+    const wrap = el?.closest?.(".file-pick");
+    const nameEl = wrap?.querySelector(".file-pick-name");
+    if (!nameEl) return;
+    const emptyKey = nameEl.getAttribute("data-i18n-empty");
+    nameEl.textContent = emptyKey ? tt(emptyKey) : "Seçilmedi";
+    nameEl.classList.remove("has-file");
+    nameEl.removeAttribute("title");
+    if (el && "value" in el) el.value = "";
+  }
+
+  const FILE_PICK_GRID_INPUT = {
+    "first-frame-thumb": "first-frame-file",
+    "last-frame-thumb": "last-frame-file",
+    "v2v-video-thumbs": "v2v-video-files",
+    "v2v-image-thumbs": "v2v-image-files",
+  };
+
+  function onFilePickListEmpty(gridId, list) {
+    if (list.length) return;
+    const inputId = FILE_PICK_GRID_INPUT[gridId];
+    if (inputId) clearFilePickLabel($(inputId));
   }
 
   function setProgress(pct, label, show) {
@@ -703,6 +748,9 @@
       card.querySelector("button").onclick = () => {
         list.splice(i, 1);
         renderRefThumbs(kind);
+        if (!list.length) {
+          clearFilePickLabel($(isFace ? "face-files" : "ref-files"));
+        }
       };
       grid.appendChild(card);
     });
@@ -735,7 +783,7 @@
     toast(isFace ? `${target.length} yüz hazır` : `${target.length} referans hazır`);
   }
 
-  function renderNamedThumbs(list, gridId, labelFn) {
+  function renderNamedThumbs(list, gridId, labelFn, onListChange) {
     const grid = $(gridId);
     if (!grid) return;
     grid.innerHTML = "";
@@ -749,7 +797,8 @@
       card.innerHTML = `<span class="ref-ord">${label}</span>${media}<button type="button" title="${tt("pick.remove")}">×</button>`;
       card.querySelector("button").onclick = () => {
         list.splice(i, 1);
-        renderNamedThumbs(list, gridId, labelFn);
+        if (typeof onListChange === "function") onListChange(list);
+        renderNamedThumbs(list, gridId, labelFn, onListChange);
       };
       grid.appendChild(card);
     });
@@ -778,7 +827,7 @@
         toast(String(e.message || e));
       }
     }
-    renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`);
+    renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`, (list) => onFilePickListEmpty(gridId, list));
     toast(`${targetList.length} video hazır`);
   }
 
@@ -801,7 +850,7 @@
         toast(String(e.message || e));
       }
     }
-    renderNamedThumbs(targetList, gridId, labelFn);
+    renderNamedThumbs(targetList, gridId, labelFn, (list) => onFilePickListEmpty(gridId, list));
   }
 
   async function uploadSingleFrame(file, which) {
@@ -813,19 +862,28 @@
       const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
+      const gridId = which === "first" ? "first-frame-thumb" : "last-frame-thumb";
+      const onFrameListChange = (list) => {
+        if (list.length) return;
+        if (which === "first") state.firstFrameName = null;
+        else state.lastFrameName = null;
+        onFilePickListEmpty(gridId, list);
+      };
       if (which === "first") {
         state.firstFrameName = data.name;
         renderNamedThumbs(
           [{ name: data.name, url: data.url }],
-          "first-frame-thumb",
-          () => "First"
+          gridId,
+          () => "First",
+          onFrameListChange
         );
       } else {
         state.lastFrameName = data.name;
         renderNamedThumbs(
           [{ name: data.name, url: data.url }],
-          "last-frame-thumb",
-          () => "Last"
+          gridId,
+          () => "Last",
+          onFrameListChange
         );
       }
       toast(`${which} frame hazır`);
@@ -923,6 +981,7 @@
   }
 
   let cinemaSaveGen = 0;
+  let cinemaForceLocalShots = false;
 
   async function saveCinema(quiet) {
     const gen = ++cinemaSaveGen;
@@ -946,7 +1005,10 @@
         role_script: cinemaTypingIn("cinema-role-script")
           ? ensureCinema().role_script
           : data.role_script || payload.role_script,
-        shots: cinemaTypingShots() ? ensureCinema().shots : data.shots || payload.shots,
+        shots:
+          cinemaTypingShots() || cinemaForceLocalShots
+            ? ensureCinema().shots
+            : data.shots || payload.shots,
         setup: { ...base.setup, ...(data.setup || payload.setup || {}) },
         audio: { ...base.audio, ...(data.audio || payload.audio || {}) },
         duration: data.duration || payload.duration,
@@ -957,7 +1019,8 @@
         characters: data.characters || payload.characters,
         locations: data.locations || payload.locations,
       };
-      if (!quiet) toast("Sinema stüdyosu kaydedildi");
+      if (gen === cinemaSaveGen) cinemaForceLocalShots = false;
+      if (!quiet) toast(tt("cinema.saved"));
     } catch (e) {
       if (!quiet) toast(String(e.message || e));
     }
@@ -1415,6 +1478,32 @@
     });
   }
 
+  function cinemaAssetCardsRoot(kind) {
+    return kind === "character" ? $("cinema-chars") : $("cinema-locs");
+  }
+
+  function cinemaAssetCardsTyping(kind) {
+    const root = cinemaAssetCardsRoot(kind);
+    const active = document.activeElement;
+    return !!(
+      root &&
+      active &&
+      root.contains(active) &&
+      active.matches("input:not([type=file]):not([type=button]), textarea, select")
+    );
+  }
+
+  function renderCinemaAssetCards(kind, opts) {
+    const force = !!(opts && opts.force);
+    const key = kind === "character" ? "characters" : "locations";
+    const root = cinemaAssetCardsRoot(kind);
+    if (!root) return;
+    const items = ensureCinema()[key] || [];
+    const domCount = root.querySelectorAll(".cinema-card").length;
+    if (!force && cinemaAssetCardsTyping(kind) && domCount === items.length) return;
+    root.innerHTML = items.map((x) => cinemaCardHtml(x, kind)).join("");
+  }
+
   function renderCinema() {
     const c = ensureCinema();
     if ($("cinema-title") && document.activeElement !== $("cinema-title")) {
@@ -1426,30 +1515,8 @@
     renderCinemaPills();
     renderCinemaKnobs();
     renderCinemaAudio();
-    const chars = $("cinema-chars");
-    const locs = $("cinema-locs");
-    const active = document.activeElement;
-    const typingIn = (root) =>
-      !!(
-        root &&
-        active &&
-        root.contains(active) &&
-        active.matches("input:not([type=file]):not([type=button]), textarea, select")
-      );
-    if (
-      chars &&
-      (!typingIn(chars) ||
-        chars.querySelectorAll(".cinema-card").length !== (c.characters || []).length)
-    ) {
-      chars.innerHTML = (c.characters || []).map((x) => cinemaCardHtml(x, "character")).join("");
-    }
-    if (
-      locs &&
-      (!typingIn(locs) ||
-        locs.querySelectorAll(".cinema-card").length !== (c.locations || []).length)
-    ) {
-      locs.innerHTML = (c.locations || []).map((x) => cinemaCardHtml(x, "location")).join("");
-    }
+    renderCinemaAssetCards("character");
+    renderCinemaAssetCards("location");
     if (
       $("cinema-shots") &&
       document.activeElement &&
@@ -1463,7 +1530,10 @@
     const nL = (c.locations || []).length;
     const nS = (c.shots || []).filter((s) => (s.text || "").trim()).length;
     if ($("cinema-hint")) {
-      $("cinema-hint").textContent = tf("cinema.hintCounts", { c: nC, l: nL, s: nS });
+      $("cinema-hint").textContent =
+        nC || nL || nS
+          ? tf("cinema.hintCounts", { c: nC, l: nL, s: nS })
+          : tt("cinema.hint");
     }
     syncCinemaFold();
     scheduleCinemaPreview();
@@ -1645,6 +1715,7 @@
     const key = kind === "character" ? "characters" : "locations";
     const c = ensureCinema();
     c[key] = (c[key] || []).filter((x) => x.id !== aid);
+    renderCinemaAssetCards(kind, { force: true });
     renderCinema();
     const path =
       kind === "character"
@@ -1654,7 +1725,7 @@
       const r = await fetch(path, { method: "DELETE" });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data) || "silinemedi");
-      toast(kind === "character" ? "Karakter silindi" : "Mekan silindi");
+      toast(kind === "character" ? tt("cinema.charDeleted") : tt("cinema.locDeleted"));
     } catch (e) {
       toast(String(e.message || e));
       await loadCinema();
@@ -1706,6 +1777,7 @@
         c[key] = list;
       }
       setCinemaFold(fold, true);
+      renderCinemaAssetCards(kind, { force: true });
       renderCinema();
       const card = document.querySelector(
         (kind === "character" ? "#cinema-chars" : "#cinema-locs") +
@@ -1726,11 +1798,12 @@
     const draft = $("cinema-shot-draft");
     const text = (draft?.value || "").trim();
     if (!text) {
-      toast("Önce shot metnini yaz, sonra Yeni video veya Continue ile ekle");
+      toast(tt("cinema.needShotText"));
       return;
     }
     const c = ensureCinema();
     const want = mode === "continue" ? "continue" : "t2v";
+    cinemaForceLocalShots = true;
     c.shots.push({ id: cinemaId(), text, mode: want });
     if (draft) draft.value = "";
     renderCinemaShots();
@@ -1740,6 +1813,30 @@
 
   function cinemaShotById(id) {
     return (ensureCinema().shots || []).find((s) => s.id === id);
+  }
+
+  function deleteCinemaShot(shotId) {
+    const id = String(shotId || "").trim();
+    if (!id) return;
+    cinemaForceLocalShots = true;
+    cinemaSaveGen += 1;
+    flushCinemaFields();
+    const c = ensureCinema();
+    const before = (c.shots || []).length;
+    c.shots = (c.shots || []).filter((s) => String(s.id) !== id);
+    if (c.shots.length === before) {
+      $("cinema-shots")
+        ?.querySelectorAll(".cinema-shot")
+        .forEach((card) => {
+          if (card.dataset.id === id) card.remove();
+        });
+    }
+    if (!c.shots.length) c.script = "";
+    const active = document.activeElement;
+    if (active && $("cinema-shots")?.contains(active)) active.blur();
+    renderCinemaShots();
+    renderCinema();
+    void saveCinema(true);
   }
 
   async function patchCinemaAsset(kind, id, fields) {
@@ -1854,7 +1951,7 @@
         }))
         .filter((s) => s.text);
       if (!shots.length) {
-        toast("Shot ekle — yaz, sonra Yeni video veya Continue");
+        toast(tt("cinema.addShotFirst"));
         return;
       }
       const audio = cinemaAudio();
@@ -1916,10 +2013,10 @@
         data.still_lock && $("cinema-seamless")?.checked
           ? tt("cinema.stillOverSeamless")
           : data.seamless
-          ? `Direktör: kesintisiz zincir (${shots.length} shot, tek take)`
-          : filmMode
-          ? `Direktör: ${data.count || 0} shot kuyruğa alındı — diyalog+SFX`
-          : `Direktör: ${data.count || 0} shot (sessiz görüntü)`
+            ? tf("cinema.produceSeamless", { n: shots.length })
+            : filmMode
+              ? tf("cinema.produceFilm", { n: data.count || 0 })
+              : tf("cinema.produceSilent", { n: data.count || 0 })
       );
       renderCinemaShots();
       await refreshJobs();
@@ -1943,7 +2040,7 @@
       audio.score_name = (data.music && data.music.filename) || file.name;
       renderCinemaAudio();
       await saveCinema(true);
-      toast("Film müziği kilitlendi — her shot’ta aynı yatak karışacak");
+      toast(tt("cinema.scoreLocked"));
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -1952,7 +2049,7 @@
   async function muxCinemaScore() {
     const audio = cinemaAudio();
     if (!audio.score_id) {
-      toast("Önce bir film müziği yükle");
+      toast(tt("cinema.needScore"));
       return;
     }
     const btn = $("btn-cinema-mux");
@@ -2440,17 +2537,18 @@
     host.innerHTML = shots
       .map((shot, i) => {
         const link = (shot.linkToPrev || (i === 0 ? "standalone" : "continue")).toString();
-        const dlg = Array.isArray(shot.dialogue)
-          ? shot.dialogue.join("\n")
-          : shot.dialogue || "";
         const prompt = _shotPromptText(shot);
         return (
           '<article class="dir-plan-shot" data-idx="' +
           i +
           '">' +
-          '<div class="dir-plan-shot-head">Shot ' +
+          '<div class="dir-plan-shot-head"><span>Shot ' +
           (i + 1) +
-          "</div>" +
+          '</span><button type="button" class="btn-ghost dir-plan-shot-del" title="' +
+          htmlEsc(tt("cinema.del")) +
+          '">' +
+          htmlEsc(tt("cinema.del")) +
+          "</button></div>" +
           "<label>" +
           tt("plan.link") +
           ' <select data-field="link">' +
@@ -2466,23 +2564,10 @@
           "</option>" +
           "</select></label>" +
           "<label>" +
-          tt("plan.camera") +
-          ' <input type="text" data-field="camera" value="' +
-          htmlEsc(shot.camera || "") +
-          '" /></label>' +
-          "<label>" +
-          tt("plan.action") +
-          ' <input type="text" data-field="action" value="' +
-          htmlEsc(shot.action || "") +
-          '" /></label>' +
-          "<label>" +
-          tt("plan.dialogue") +
-          ' <textarea rows="2" data-field="dialogue">' +
-          htmlEsc(dlg) +
-          "</textarea></label>" +
-          "<label>" +
           tt("plan.prompt") +
-          ' <textarea rows="8" data-field="h3Prompt">' +
+          ' <textarea rows="6" data-field="h3Prompt" placeholder="' +
+          htmlEsc(tt("cinema.shotWhat")) +
+          '">' +
           htmlEsc(prompt) +
           "</textarea></label>" +
           "</article>"
@@ -2496,20 +2581,31 @@
     if (!host) return [];
     const clip = (state.directorBrief && state.directorBrief.clipDurationSec) || state.duration || 5;
     return [...host.querySelectorAll(".dir-plan-shot")].map((el, i) => {
-      const dlg = (el.querySelector("[data-field=dialogue]")?.value || "")
-        .split("\n")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const prompt = (el.querySelector("[data-field=h3Prompt]")?.value || "").trim();
       return {
         durationSec: clip,
-        camera: el.querySelector("[data-field=camera]")?.value || "",
-        action: el.querySelector("[data-field=action]")?.value || "",
-        dialogue: dlg,
-        h3Prompt: el.querySelector("[data-field=h3Prompt]")?.value || "",
+        camera: "",
+        action: "",
+        dialogue: [],
+        h3Prompt: prompt,
         linkToPrev:
           el.querySelector("[data-field=link]")?.value || (i === 0 ? "standalone" : "continue"),
       };
     });
+  }
+
+  function deletePlanShot(idx) {
+    const brief = state.directorBrief || {};
+    const shots = Array.isArray(brief.shots) ? brief.shots.slice() : [];
+    if (idx < 0 || idx >= shots.length) return;
+    shots.splice(idx, 1);
+    state.directorBrief = { ...brief, shots };
+    renderDirectorPlanBoard();
+    if (state.directorBrief.shots.length) {
+      renderDirectorShotPanel(state.directorBrief, { open: !!$("director-shot-panel")?.open });
+    } else {
+      $("director-shot-panel")?.remove();
+    }
   }
 
   async function saveDirectorPlan(applyCinema) {
@@ -2564,20 +2660,79 @@
     $("director-msg").disabled = false;
     $("director-msg").readOnly = !!state.directorBusy;
     $("btn-director-send").disabled = !!state.directorBusy;
-    document.querySelectorAll("#director-chips .chip, #scene-purpose-chips .chip, #scene-style-chips .chip").forEach((b) => {
+    document.querySelectorAll("#director-chips .chip").forEach((b) => {
       b.disabled = !!state.directorBusy;
+    });
+    // Sahne / Proje chips stay clickable while director thinks
+    document.querySelectorAll("#scene-purpose-chips .chip, #scene-style-chips .chip").forEach((b) => {
+      b.disabled = false;
     });
   }
 
   const LLM_KEY_FIELDS = [
     { id: "llm-openai-key", set: "openai_api_key_set", mask: "openai_api_key_masked", body: "openai_api_key" },
+    { id: "llm-nvidia-key", set: "nvidia_api_key_set", mask: "nvidia_api_key_masked", body: "nvidia_api_key" },
     { id: "llm-gemini-key", set: "gemini_api_key_set", mask: "gemini_api_key_masked", body: "gemini_api_key" },
     { id: "llm-grok-key", set: "grok_api_key_set", mask: "grok_api_key_masked", body: "grok_api_key" },
     { id: "llm-claude-key", set: "claude_api_key_set", mask: "claude_api_key_masked", body: "claude_api_key" },
   ];
 
+  const LLM_PROVIDER_KEY_SET = {
+    openai: "openai_api_key_set",
+    nvidia: "nvidia_api_key_set",
+    gemini: "gemini_api_key_set",
+    grok: "grok_api_key_set",
+    claude: "claude_api_key_set",
+  };
+
+  function llmPubHasKey(pub, provider) {
+    const p = (provider || "").toLowerCase();
+    if (p === "ollama") return true;
+    const field = LLM_PROVIDER_KEY_SET[p];
+    return !!(field && pub && pub[field]);
+  }
+
+  function syncProviderSelects(prov) {
+    const p = (prov || "ollama").toLowerCase();
+    if ($("llm-provider")) $("llm-provider").value = p;
+    if ($("llm-provider-settings")) $("llm-provider-settings").value = p;
+    $("llm-ollama-url-wrap")?.classList.toggle("hidden", p !== "ollama");
+  }
+
+  function syncModelSelects(model) {
+    const m = (model || "").trim();
+    if (!m) return;
+    if ($("director-model")) $("director-model").value = m;
+    if ($("director-model-settings")) $("director-model-settings").value = m;
+  }
+
+  function syncLlmKeyFields(pub) {
+    if (!pub) return;
+    for (const f of LLM_KEY_FIELDS) {
+      const el = $(f.id);
+      if (!el) continue;
+      if (el.dataset.dirty === "1" && el.value.trim()) continue;
+      if (pub[f.set]) {
+        const mask = pub[f.mask] || tt("llm.keySaved");
+        el.value = "";
+        el.placeholder = "✓ " + mask + " (" + tt("llm.keySavedHint") + ")";
+        el.classList.add("key-saved");
+      } else {
+        el.classList.remove("key-saved");
+      }
+    }
+  }
+
   const FALLBACK_LLM_MODELS = {
     openai: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "o4-mini"],
+    nvidia: [
+      "minimaxai/minimax-m3",
+      "meta/llama-3.3-70b-instruct",
+      "meta/llama-3.1-70b-instruct",
+      "meta/llama-3.1-8b-instruct",
+      "google/gemma-2-9b-it",
+      "mistralai/mistral-nemo-12b-instruct",
+    ],
     gemini: [
       "gemini-3.6-flash",
       "gemini-3.5-flash",
@@ -2596,17 +2751,19 @@
   };
 
   function _fillModelSelect(sel, models, preferred, opts) {
-    if (!sel) return;
+    if (!sel) return "";
     const reset = !!(opts && opts.reset);
     const prev = reset ? "" : sel.value;
+    const list = [...(models || [])];
+    const want = (prev || preferred || list[0] || "").trim();
+    if (want && !list.includes(want)) list.unshift(want);
     sel.innerHTML = "";
-    if (!models.length) {
+    if (!list.length) {
       sel.innerHTML = `<option value="">${tt("llm.noModel")}</option>`;
-      return;
+      return "";
     }
-    const want = prev || preferred || models[0];
     let picked = false;
-    for (const name of models) {
+    for (const name of list) {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
@@ -2617,21 +2774,36 @@
       sel.appendChild(opt);
     }
     if (!picked && sel.options.length) sel.options[0].selected = true;
+    return (sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].value) || want || "";
   }
 
-  function _selectedLlmProvider() {
-    return (
+  function _selectedLlmProvider(which) {
+    const fromDirector =
       ($("llm-provider") && $("llm-provider").value) ||
       ($("llm-provider-settings") && $("llm-provider-settings").value) ||
-      "ollama"
-    ).toLowerCase();
+      "ollama";
+    const fromSettings =
+      ($("llm-provider-settings") && $("llm-provider-settings").value) ||
+      ($("llm-provider") && $("llm-provider").value) ||
+      "ollama";
+    const pick = which === "settings" ? fromSettings : fromDirector;
+    return String(pick).toLowerCase();
   }
 
-  function _llmUserPickingProvider() {
-    return !!(
-      ($("llm-provider") && $("llm-provider").dataset.userTouched) ||
-      ($("llm-provider-settings") && $("llm-provider-settings").dataset.userTouched)
-    );
+  function _unsavedLlmKeyForProvider(provider) {
+    const p = (provider || "").toLowerCase();
+    const fieldByProv = {
+      openai: "llm-openai-key",
+      nvidia: "llm-nvidia-key",
+      gemini: "llm-gemini-key",
+      grok: "llm-grok-key",
+      claude: "llm-claude-key",
+    };
+    const id = fieldByProv[p];
+    if (!id) return "";
+    const el = $(id);
+    if (!el || el.dataset.dirty !== "1") return "";
+    return (el.value || "").trim();
   }
 
   function _catalogForProvider(prov, pub) {
@@ -2641,6 +2813,12 @@
       return {
         models: cfg.openai_models || FALLBACK_LLM_MODELS.openai,
         preferred: cfg.openai_model,
+      };
+    }
+    if (p === "nvidia") {
+      return {
+        models: cfg.nvidia_models || FALLBACK_LLM_MODELS.nvidia,
+        preferred: cfg.nvidia_model,
       };
     }
     if (p === "gemini") {
@@ -2669,13 +2847,24 @@
     const useLive = opts && opts.liveModels && opts.liveModels.length;
     const cat = _catalogForProvider(p, pub);
     const models = useLive ? opts.liveModels : cat.models;
-    const preferred = (opts && opts.preferred) || cat.preferred;
-    _fillModelSelect($("director-model"), models, preferred, { reset: true });
-    _fillModelSelect($("director-model-settings"), models, preferred, { reset: true });
+    const preferred =
+      (opts && opts.preferred) ||
+      cat.preferred ||
+      (models && models[0]) ||
+      "";
+    const reset = !(opts && opts.keepSelection);
+    const m1 = _fillModelSelect($("director-model"), models, preferred, { reset });
+    const m2 = _fillModelSelect($("director-model-settings"), models, preferred, { reset });
+    syncModelSelects(m1 || m2 || preferred);
   }
 
-  async function ensureLlmPub() {
-    if (state.llmPub && (state.llmPub.gemini_models || state.llmPub.openai_models)) {
+  async function ensureLlmPub(opts) {
+    const fresh = !!(opts && opts.fresh);
+    if (
+      !fresh &&
+      state.llmPub &&
+      (state.llmPub.gemini_models || state.llmPub.openai_models)
+    ) {
       return state.llmPub;
     }
     try {
@@ -2688,17 +2877,15 @@
   }
 
   async function onLlmProviderChanged(prov) {
+    syncProviderSelects(prov);
     const pub = await ensureLlmPub();
     syncLlmSettingsUi({ ...pub, provider: prov }, { provider: prov });
-    fillDirectorModelsForProvider(prov, pub);
+    fillDirectorModelsForProvider(prov, pub, { keepSelection: true });
   }
 
   function syncLlmSettingsUi(pub, probe) {
     const prov = (pub && pub.provider) || (probe && probe.provider) || "ollama";
-    const selProd = $("llm-provider");
-    const selSet = $("llm-provider-settings");
-    if (selProd && !selProd.dataset.userTouched) selProd.value = prov;
-    if (selSet && !selSet.dataset.userTouched) selSet.value = prov;
+    syncProviderSelects(prov);
     const urlWrap = $("llm-ollama-url-wrap");
     if (urlWrap) urlWrap.classList.toggle("hidden", prov !== "ollama");
     const prodModelWrap = $("llm-prod-model-wrap");
@@ -2712,11 +2899,17 @@
       const el = $(f.id);
       if (!el || !pub) continue;
       if (pub[f.set] && !el.dataset.dirty) {
-        el.placeholder = pub[f.mask] || tt("llm.keySaved");
+        const mask = pub[f.mask] || tt("llm.keySaved");
+        el.placeholder = "✓ " + mask + " (" + tt("llm.keySavedHint") + ")";
+        el.classList.add("key-saved");
+      } else if (!el.dataset.dirty) {
+        el.classList.remove("key-saved");
       }
     }
+    syncLlmKeyFields(pub);
     const ready = {
       openai: pub && pub.openai_api_key_set,
+      nvidia: pub && pub.nvidia_api_key_set,
       gemini: pub && pub.gemini_api_key_set,
       grok: pub && pub.grok_api_key_set,
       claude: pub && pub.claude_api_key_set,
@@ -2724,6 +2917,7 @@
     const tips = {
       ollama: tt("llm.tip.ollama"),
       openai: ready.openai ? tt("llm.tip.openaiReady") : tt("llm.tip.openai"),
+      nvidia: ready.nvidia ? tt("llm.tip.nvidiaReady") : tt("llm.tip.nvidia"),
       gemini: ready.gemini ? tt("llm.tip.geminiReady") : tt("llm.tip.gemini"),
       grok: ready.grok ? tt("llm.tip.grokReady") : tt("llm.tip.grok"),
       claude: ready.claude ? tt("llm.tip.claudeReady") : tt("llm.tip.claude"),
@@ -2739,6 +2933,7 @@
   function _modelBodyForProvider(provider, model) {
     if (!model) return {};
     if (provider === "openai") return { openai_model: model };
+    if (provider === "nvidia") return { nvidia_model: model };
     if (provider === "gemini") return { gemini_model: model };
     if (provider === "grok") return { grok_model: model };
     if (provider === "claude") return { claude_model: model };
@@ -2746,47 +2941,135 @@
   }
 
   async function _postLlmSettings(body) {
-    const r = await fetch("/api/llm/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(errDetail(data));
-    return data;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    try {
+      const r = await fetch("/api/llm/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      return data;
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        throw new Error("İstek zaman aşımı (90sn) — sunucu probe’da takılmış olabilir, tekrar dene.");
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
-  /** Production drawer: switch active provider/model — never touches keys. */
+  function _setLlmBtnBusy(id, busy, busyLabelKey, idleLabelKey) {
+    const btn = $(id);
+    if (!btn) return;
+    if (busy) {
+      btn.dataset.busy = "1";
+      btn.disabled = true;
+      btn.textContent = tt(busyLabelKey) || btn.textContent;
+    } else {
+      delete btn.dataset.busy;
+      btn.disabled = false;
+      btn.textContent = tt(idleLabelKey) || btn.textContent;
+    }
+  }
+
+  function _applyLlmProbeToDirectorUi(data, provider, model) {
+    const prov = (data.provider || provider || "ollama").toLowerCase();
+    const activeModel =
+      model ||
+      data.default_model ||
+      _catalogForProvider(prov, data).preferred ||
+      "model";
+    state.llmProvider = prov;
+    state.directorOnline = !!data.online;
+    state.directorOfflineDetail = data.detail || "";
+    if (data.online) {
+      const nvidiaWarn = _directorNvidiaStatusLabel(activeModel, data.detail);
+      setDirectorUi(
+        true,
+        nvidiaWarn || `${prov} · ${activeModel}`
+      );
+    } else {
+      setDirectorUi(false, tf("dir.offline", { provider: prov }) || `${prov} kapalı`);
+    }
+  }
+
+  /** Production drawer: switch active provider/model — uses keys already saved in Ayarlar. */
   async function saveLlmProviderOnly() {
-    const provider = ($("llm-provider") && $("llm-provider").value) || "ollama";
-    const model = $("director-model") ? $("director-model").value : "";
+    if ($("btn-llm-provider-save")?.dataset.busy === "1") return;
+    const provider = _selectedLlmProvider("director");
+    syncProviderSelects(provider);
+    const model =
+      ($("director-model") && $("director-model").value) ||
+      ($("director-model-settings") && $("director-model-settings").value) ||
+      "";
+    syncModelSelects(model);
+    _setLlmBtnBusy("btn-llm-provider-save", true, "ayar.llmApplying", "ayar.llmApply");
     try {
+      let pub = await ensureLlmPub({ fresh: true });
+      const unsavedKey = _unsavedLlmKeyForProvider(provider);
+      if (!llmPubHasKey(pub, provider)) {
+        if (unsavedKey) {
+          directorLlmFeedback(
+            tf("toast.llmKeyDirty", { provider }) ||
+              `Ayarlar’da ${provider} key yazılı ama kaydedilmemiş — önce «API ayarlarını kaydet».`,
+            "warn"
+          );
+          return;
+        }
+        directorLlmFeedback(
+          tf("toast.llmNeedKey", { provider }) ||
+            `Önce Ayarlar’dan ${provider} API key kaydet, sonra Yönetmeni uygula.`,
+          "warn"
+        );
+        return;
+      }
       const data = await _postLlmSettings({
         provider,
         ..._modelBodyForProvider(provider, model),
       });
-      if ($("llm-provider")) delete $("llm-provider").dataset.userTouched;
-      if ($("llm-provider-settings")) {
-        $("llm-provider-settings").value = provider;
-        delete $("llm-provider-settings").dataset.userTouched;
-      }
-      toast(
-        data.online
-          ? tf("toast.llmOn", { provider: data.provider, model: data.default_model || "ok" })
-          : tf("toast.llmOff", { detail: data.detail || "?" })
-      );
-      await refreshDirectorStatus();
+      state.llmPub = data;
+      syncProviderSelects(data.provider || provider);
+      syncLlmKeyFields(data);
+      const activeModel =
+        model ||
+        data.default_model ||
+        _catalogForProvider(data.provider || provider, data).preferred;
+      fillDirectorModelsForProvider(data.provider || provider, data, {
+        liveModels: data.models,
+        preferred: activeModel,
+        keepSelection: true,
+      });
+      const msg = data.online
+        ? data.detail && String(data.detail).startsWith("default_model_unavailable")
+          ? _directorNvidiaStatusLabel(activeModel, data.detail) ||
+            tf("toast.llmOn", {
+              provider: data.provider || provider,
+              model: data.default_model || activeModel || "ok",
+            })
+          : tf("toast.llmOn", {
+              provider: data.provider || provider,
+              model: data.default_model || activeModel || "ok",
+            })
+        : tf("toast.llmOff", { detail: data.detail || "?" });
+      directorLlmFeedback(msg, data.online ? "ok" : "warn");
+      _applyLlmProbeToDirectorUi(data, provider, activeModel);
     } catch (e) {
-      toast(String(e.message || e));
+      directorLlmFeedback(String(e.message || e), "err");
+    } finally {
+      _setLlmBtnBusy("btn-llm-provider-save", false, "ayar.llmApplying", "ayar.llmApply");
     }
+    void refreshDirectorStatus();
   }
 
   /** Top-right Settings: save API keys + provider. */
   async function saveLlmSettings() {
-    const provider =
-      ($("llm-provider-settings") && $("llm-provider-settings").value) ||
-      ($("llm-provider") && $("llm-provider").value) ||
-      "ollama";
+    if ($("btn-llm-save")?.dataset.busy === "1") return;
+    const provider = _selectedLlmProvider("settings");
     const body = { provider };
     const model =
       ($("director-model-settings") && $("director-model-settings").value) ||
@@ -2797,57 +3080,97 @@
       const el = $(f.id);
       if (el && el.value.trim()) body[f.body] = el.value.trim();
     }
+    const oa = $("llm-openai-key");
+    const nv = $("llm-nvidia-key");
+    if (oa && nv && /^nvapi-/i.test((oa.value || "").trim()) && !(nv.value || "").trim()) {
+      body.nvidia_api_key = oa.value.trim();
+      body.openai_api_key = "";
+      body.provider = "nvidia";
+    }
     Object.assign(body, _modelBodyForProvider(provider, model));
+    _setLlmBtnBusy("btn-llm-save", true, "settings.saveApiBusy", "settings.saveApi");
     try {
       const data = await _postLlmSettings(body);
+      state.llmPub = data;
+      syncProviderSelects(data.provider || provider);
+      syncLlmKeyFields(data);
       for (const f of LLM_KEY_FIELDS) {
         const el = $(f.id);
-        if (el) {
+        if (el && el.value.trim()) {
           el.value = "";
           delete el.dataset.dirty;
         }
       }
       if (urlIn) delete urlIn.dataset.dirty;
-      if ($("llm-provider-settings")) delete $("llm-provider-settings").dataset.userTouched;
-      if ($("llm-provider")) {
-        $("llm-provider").value = provider;
-        delete $("llm-provider").dataset.userTouched;
-      }
+      fillDirectorModelsForProvider(data.provider || provider, data, {
+        liveModels: data.models,
+        preferred:
+          model ||
+          data.default_model ||
+          _catalogForProvider(data.provider || provider, data).preferred,
+        keepSelection: true,
+      });
+      syncLlmSettingsUi(data, data);
       toast(
         data.online
           ? tf("toast.llmSavedOn", { provider: data.provider, model: data.default_model || "ok" })
           : tf("toast.llmSavedOff", { detail: data.detail || "?" })
       );
-      await refreshDirectorStatus();
+      _applyLlmProbeToDirectorUi(data, provider, model);
     } catch (e) {
       toast(String(e.message || e));
+    } finally {
+      _setLlmBtnBusy("btn-llm-save", false, "settings.saveApiBusy", "settings.saveApi");
     }
+    void refreshDirectorStatus();
+  }
+
+  function _directorNvidiaStatusLabel(activeModel, detail) {
+    const d = String(detail || "");
+    if (!d.startsWith("default_model_unavailable")) return null;
+    if (/429|too many requests/i.test(d)) {
+      return (
+        tf("dir.nvidiaRateLimit", { model: activeModel }) ||
+        `nvidia · ${activeModel} — kota/rate limit (429). meta/llama-3.1-8b-instruct seç veya biraz bekle.`
+      );
+    }
+    return (
+      tf("dir.nvidiaModelDown", { model: activeModel }) ||
+      `nvidia açık · ${activeModel} yanıt vermiyor — model listesinden başka birini seç.`
+    );
   }
 
   async function refreshDirectorStatus() {
     try {
       const s = await fetch("/api/director/status?lang=" + encodeURIComponent(uiLang())).then((r) => r.json());
       const provider = s.provider || (s.llm && s.llm.provider) || "ollama";
+      state.llmProvider = provider;
+      state.directorOfflineDetail = s.detail || "";
       if (s.llm) state.llmPub = s.llm;
       const models = s.models || [];
       if (provider === "ollama") state.ollamaModels = models;
+      syncProviderSelects(provider);
       syncLlmSettingsUi(s.llm || {}, s);
-      const selected = _selectedLlmProvider();
-      const picking = _llmUserPickingProvider();
-      if (!picking || selected === provider) {
-        fillDirectorModelsForProvider(provider, s.llm || state.llmPub, {
-          liveModels: models,
-          preferred: s.default_model,
-        });
-      } else {
-        fillDirectorModelsForProvider(selected, s.llm || state.llmPub);
-      }
+      const cat = _catalogForProvider(provider, s.llm || state.llmPub);
+      const savedModel = cat.preferred;
+      fillDirectorModelsForProvider(provider, s.llm || state.llmPub, {
+        liveModels: models,
+        preferred: savedModel || s.default_model,
+        keepSelection: true,
+      });
+      const activeModel =
+        ($("director-model") && $("director-model").value) ||
+        savedModel ||
+        s.default_model ||
+        "model";
       if (s.online) {
+        const nvidiaWarn = _directorNvidiaStatusLabel(activeModel, s.detail);
+        state.directorOfflineDetail = nvidiaWarn ? s.detail || "" : "";
         const label = state.directorReady
           ? tt("dir.briefReady")
           : state.directorBusy
             ? tt("dir.thinkingStatus")
-            : `${provider} · ${($("director-model") && $("director-model").value) || s.default_model || "model"}`;
+            : nvidiaWarn || `${provider} · ${activeModel}`;
         setDirectorUi(true, label);
         if (!$("director-log").children.length && s.opening && !state.directorSessions.length) {
           appendDirectorMsg("assistant", s.opening);
@@ -2871,15 +3194,37 @@
         }
       }
     } catch {
+      state.directorOfflineDetail = "";
       setDirectorUi(false, tt("llm.help.noApi"));
     }
   }
 
   function errDetail(data) {
-    const d = data && data.detail;
-    if (typeof d === "string") return d;
+    if (data == null) return "hata";
+    const d = data.detail;
+    if (typeof d === "string" && d.trim()) return d;
+    if (typeof d === "object" && d !== null) {
+      if (typeof d.message === "string" && d.message.trim()) return d.message;
+      if (typeof d.detail === "string" && d.detail.trim()) return d.detail;
+      const s = JSON.stringify(d);
+      if (s && s !== "{}") return s;
+    }
     if (Array.isArray(d)) return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
-    return data ? JSON.stringify(data) : "hata";
+    if (typeof data.message === "string" && data.message.trim()) return data.message;
+    const s = JSON.stringify(data);
+    return s && s !== "{}" ? s : "istek başarısız";
+  }
+
+  function formatStreamError(detail) {
+    if (detail == null) return "Yönetmen stream hatası";
+    if (typeof detail === "string") return detail.trim() || "Yönetmen stream hatası";
+    if (typeof detail === "object") {
+      if (typeof detail.message === "string") return detail.message;
+      if (typeof detail.detail === "string") return detail.detail;
+      const s = JSON.stringify(detail);
+      return s && s !== "{}" ? s : "Yönetmen stream hatası";
+    }
+    return String(detail);
   }
 
   function updateProjectAudioHint() {
@@ -2941,6 +3286,7 @@
   }
 
   function selectProjectChip(btn, opts) {
+    if (!btn || btn.disabled) return;
     const g = btn.dataset.group;
     const fromScene = !!(opts && opts.fromScene);
     if (!fromScene) setDirectorOpen(true);
@@ -3053,7 +3399,7 @@
           if (ev.type === "result") {
             result = ev.data || ev;
           } else if (ev.type === "error") {
-            err = new Error(ev.detail || "Yönetmen stream hatası");
+            err = new Error(formatStreamError(ev.detail));
             err.status = ev.status;
           } else if (typeof onProgress === "function") {
             onProgress(ev);
@@ -3080,7 +3426,13 @@
         body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(errDetail(data));
+      if (!r.ok) {
+        const fallback =
+          r.status === 500
+            ? "Sunucu hatası (500) — terminal loglarına bak veya sayfayı yenile."
+            : `HTTP ${r.status}`;
+        throw new Error(errDetail(data) === "istek başarısız" ? fallback : errDetail(data));
+      }
       return data;
     }
   }
@@ -3093,11 +3445,16 @@
     // Show chat while waiting for reply
     setDirectorModal(true);
     if (!state.directorOnline) {
+      await refreshDirectorStatus();
+      const prov = state.llmProvider || _selectedLlmProvider();
+      const why = state.directorOfflineDetail || "";
       appendDirectorMsg(
         "assistant",
-        "Yönetmen LLM kapalı — sağ üst Ayarlar’dan API key kaydet (veya Ollama’yı aç), sonra Gönder."
+        why
+          ? tf("dir.offlineDetail", { provider: prov, detail: why }) ||
+              `${prov} kapalı: ${why} — Ayarlar’dan key/model kontrol et veya başka sağlayıcı seç.`
+          : "Yönetmen LLM kapalı — sağ üst Ayarlar’dan API key kaydet, sonra Yönetmeni uygula."
       );
-      await refreshDirectorStatus();
       if (!state.directorOnline) return;
     }
     state.directorBusy = true;
@@ -3161,9 +3518,25 @@
       const msg = String(e.message || e);
       const prov = (state.llmProvider || $("llm-provider")?.value || "").toLowerCase();
       let hint = "";
-      if (prov === "gemini" || /gemini/i.test(msg)) {
+      if (/403|forbidden|authorization failed/i.test(msg)) {
+        hint =
+          prov === "nvidia"
+            ? " — NVIDIA key geçersiz veya bu model için yetki yok. build.nvidia.com’da key oluştur, model erişimini aç."
+            : " — API key geçersiz veya bu model için yetki yok; Ayarlar’dan key / model kontrol et.";
+      } else if (/429|too many requests|rate limit/i.test(msg)) {
+        hint =
+          prov === "nvidia"
+            ? " — minimaxai/minimax-m3 kotası/rate limit dolmuş olabilir. Model olarak meta/llama-3.1-8b-instruct seç veya birkaç dakika bekle."
+            : " — API rate limit; biraz bekleyip tekrar dene veya başka model seç.";
+      } else if (
+        (prov === "gemini" || /gemini/i.test(msg)) &&
+        /gemini|api key|403|404|model|quota|invalid/i.test(msg)
+      ) {
         hint =
           " — Ayarlar’da modeli gemini-3.6-flash veya gemini-3.5-flash seç (2.5 yeni anahtarlarda kapalı).";
+      } else if (prov === "nvidia" || /nvidia|nvapi/i.test(msg)) {
+        hint =
+          " — Ayarlar: provider NVIDIA NIM, model minimaxai/minimax-m3 (veya listeden seç), nvapi-… key kaydet.";
       } else if (prov === "ollama" || /ollama/i.test(msg)) {
         hint = " — Ollama açık mı? Model listesinden qwen3:8b deneyebilirsin.";
       } else {
@@ -4830,6 +5203,16 @@
   });
   $("btn-plan-save")?.addEventListener("click", () => void saveDirectorPlan(false));
   $("btn-plan-to-cinema")?.addEventListener("click", () => void saveDirectorPlan(true));
+  $("director-plan-shots")?.addEventListener("click", (e) => {
+    const del = e.target.closest(".dir-plan-shot-del");
+    if (!del) return;
+    e.preventDefault();
+    const card = del.closest(".dir-plan-shot");
+    if (!card) return;
+    const idx = Number(card.dataset.idx);
+    if (!Number.isFinite(idx)) return;
+    deletePlanShot(idx);
+  });
   $("btn-plan-queue")?.addEventListener("click", async () => {
     await saveDirectorPlan(false);
     void applyBrief(true);
@@ -5113,18 +5496,19 @@
     }
   });
   $("cinema-shots")?.addEventListener("click", (e) => {
+    const del = e.target.closest(".cinema-shot-del");
+    if (del) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = del.closest(".cinema-shot");
+      if (!card?.dataset.id) return;
+      deleteCinemaShot(card.dataset.id);
+      return;
+    }
     const card = e.target.closest(".cinema-shot");
     if (!card) return;
     const shot = cinemaShotById(card.dataset.id);
     if (!shot) return;
-    const del = e.target.closest(".cinema-shot-del");
-    if (del) {
-      ensureCinema().shots = (ensureCinema().shots || []).filter((s) => s.id !== card.dataset.id);
-      renderCinemaShots();
-      renderCinema();
-      void saveCinema(true);
-      return;
-    }
     const modeBtn = e.target.closest("[data-mode]");
     if (modeBtn) {
       shot.mode = modeBtn.dataset.mode === "continue" ? "continue" : "t2v";
@@ -5427,48 +5811,48 @@
   document.querySelectorAll("#director-chips .chip").forEach((btn) => {
     btn.addEventListener("click", () => selectProjectChip(btn));
   });
-  document.querySelectorAll("#scene-purpose-chips .chip, #scene-style-chips .chip").forEach((btn) => {
-    btn.addEventListener("click", () => selectProjectChip(btn, { fromScene: true }));
-  });
+  const sceneProject = $("scene-project");
+  if (sceneProject) {
+    sceneProject.addEventListener("click", (e) => {
+      const btn = e.target.closest("#scene-purpose-chips .chip, #scene-style-chips .chip");
+      if (btn) selectProjectChip(btn, { fromScene: true });
+    });
+  }
   syncProjectChips();
   $("llm-provider")?.addEventListener("change", () => {
-    if ($("llm-provider")) $("llm-provider").dataset.userTouched = "1";
-    const prov = $("llm-provider").value;
-    if ($("llm-provider-settings")) $("llm-provider-settings").value = prov;
-    void onLlmProviderChanged(prov);
+    void onLlmProviderChanged($("llm-provider").value);
   });
   $("llm-provider-settings")?.addEventListener("change", () => {
-    if ($("llm-provider-settings")) $("llm-provider-settings").dataset.userTouched = "1";
-    const prov = $("llm-provider-settings").value;
-    if ($("llm-provider")) $("llm-provider").value = prov;
-    $("llm-ollama-url-wrap")?.classList.toggle("hidden", prov !== "ollama");
-    void onLlmProviderChanged(prov);
+    void onLlmProviderChanged($("llm-provider-settings").value);
+  });
+  $("director-model")?.addEventListener("change", () => {
+    syncModelSelects($("director-model").value);
+  });
+  $("director-model-settings")?.addEventListener("change", () => {
+    syncModelSelects($("director-model-settings").value);
   });
   $("llm-ollama-url")?.addEventListener("input", () => {
     if ($("llm-ollama-url")) $("llm-ollama-url").dataset.dirty = "1";
   });
   const KEY_TO_PROVIDER = {
     "llm-openai-key": "openai",
+    "llm-nvidia-key": "nvidia",
     "llm-gemini-key": "gemini",
     "llm-grok-key": "grok",
     "llm-claude-key": "claude",
   };
+  function _providerForKeyInput(id, value) {
+    const raw = (value || "").trim();
+    if (id === "llm-openai-key" && /^nvapi-/i.test(raw)) return "nvidia";
+    return KEY_TO_PROVIDER[id];
+  }
   for (const f of LLM_KEY_FIELDS) {
     $(f.id)?.addEventListener("input", () => {
       const el = $(f.id);
       if (el) el.dataset.dirty = "1";
-      // Key yapıştırınca o sağlayıcıyı otomatik seç (Ollama’da kalıp “bağlanamadım” olmasın)
-      const prov = KEY_TO_PROVIDER[f.id];
+      const prov = _providerForKeyInput(f.id, el && el.value);
       if (prov && el && el.value.trim()) {
-        if ($("llm-provider-settings")) {
-          $("llm-provider-settings").value = prov;
-          $("llm-provider-settings").dataset.userTouched = "1";
-        }
-        if ($("llm-provider")) {
-          $("llm-provider").value = prov;
-          $("llm-provider").dataset.userTouched = "1";
-        }
-        $("llm-ollama-url-wrap")?.classList.toggle("hidden", true);
+        syncProviderSelects(prov);
         void onLlmProviderChanged(prov);
       }
     });

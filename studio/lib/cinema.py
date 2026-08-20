@@ -206,12 +206,11 @@ def split_shots(script: str) -> list[str]:
 
 def _migrate_shots(data: dict[str, Any]) -> list[dict[str, Any]]:
     raw = data.get("shots")
-    cleaned: list[dict[str, Any]] = []
-    if isinstance(raw, list) and raw:
-        for i, item in enumerate(raw):
-            shot = _clean_shot(item, i)
-            cleaned.append(shot)
-        if any(s.get("text") for s in cleaned):
+    if isinstance(raw, list):
+        cleaned = [_clean_shot(item, i) for i, item in enumerate(raw)]
+        # Keep explicit shot rows (even empty drafts). Only fall back to script when
+        # the shots key is missing — legacy saves stored script only.
+        if cleaned or "shots" in data:
             return cleaned
     texts = split_shots(str(data.get("script") or ""))
     return [

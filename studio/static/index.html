@@ -21,8 +21,8 @@
     </div>
     <nav class="menu">
       <div class="lang-switch" id="lang-switch" role="group" aria-label="Language">
-        <button type="button" class="chip" data-lang="tr">TR</button>
         <button type="button" class="chip" data-lang="en">EN</button>
+        <button type="button" class="chip" data-lang="tr">TR</button>
       </div>
       <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
       <button type="button" id="btn-support" class="menu-btn" title="Sorun bildir / fikir yaz">Destek</button>
@@ -302,6 +302,7 @@
         <select id="llm-provider">
           <option value="ollama">Ollama (yerel)</option>
           <option value="openai">OpenAI</option>
+          <option value="nvidia">NVIDIA NIM</option>
           <option value="gemini">Gemini (Google)</option>
           <option value="grok">Grok (xAI)</option>
           <option value="claude">Claude (Anthropic)</option>
@@ -633,6 +634,7 @@
           <select id="llm-provider-settings">
             <option value="ollama">Ollama (yerel)</option>
             <option value="openai">OpenAI</option>
+            <option value="nvidia">NVIDIA NIM</option>
             <option value="gemini">Gemini (Google)</option>
             <option value="grok">Grok (xAI)</option>
             <option value="claude">Claude (Anthropic)</option>
@@ -644,6 +646,10 @@
         </label>
         <label><span id="settings-openai-key-label">OpenAI API key</span>
           <input type="password" id="llm-openai-key" placeholder="sk-… (platform.openai.com)" autocomplete="off" />
+        </label>
+        <label><span id="settings-nvidia-key-label">NVIDIA API key</span>
+          <input type="password" id="llm-nvidia-key" placeholder="nvapi-… (build.nvidia.com)" autocomplete="off" />
+          <small class="muted" id="settings-nvidia-hint">NVIDIA NIM — OpenAI uyumlu, sk- değil</small>
         </label>
         <label><span id="settings-gemini-key-label">Gemini API key</span>
           <input type="password" id="llm-gemini-key" placeholder="AIza… (aistudio.google.com/apikey)" autocomplete="off" />
@@ -719,7 +725,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema44"></script>
-  <script src="/static/app.js?v=cinema44"></script>
+  <script src="/static/i18n.js?v=cinema54"></script>
+  <script src="/static/app.js?v=cinema54"></script>
 </body>
 </html>

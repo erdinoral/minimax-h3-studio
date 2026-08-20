@@ -131,6 +131,28 @@ _lock_fh = None
 _lock_sock = None
 
 
+def _release_single_instance() -> None:
+    global _lock_fh, _lock_sock
+    try:
+        if _lock_sock:
+            _lock_sock.close()
+            _lock_sock = None
+    except Exception:
+        pass
+    try:
+        if _lock_fh:
+            _lock_fh.close()
+            _lock_fh = None
+        if LOCK_FILE.exists():
+            try:
+                if LOCK_FILE.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                    LOCK_FILE.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _acquire_single_instance() -> None:
     """Bind a lock socket so only one queue loop can own jobs.json."""
     global _lock_fh, _lock_sock
@@ -140,28 +162,7 @@ def _acquire_single_instance() -> None:
     # Dedicated lock port derived from Studio port (does not conflict with uvicorn)
     lock_port = 20000 + (int(PORT) % 20000)
 
-    def _release():
-        global _lock_fh, _lock_sock
-        try:
-            if _lock_sock:
-                _lock_sock.close()
-                _lock_sock = None
-        except Exception:
-            pass
-        try:
-            if _lock_fh:
-                _lock_fh.close()
-                _lock_fh = None
-            if LOCK_FILE.exists():
-                try:
-                    if LOCK_FILE.read_text(encoding="utf-8").strip() == str(os.getpid()):
-                        LOCK_FILE.unlink(missing_ok=True)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    atexit.register(_release)
+    atexit.register(_release_single_instance)
 
     # Drop stale lock file from a crashed previous process
     if LOCK_FILE.exists():
@@ -878,6 +879,8 @@ class DirectorChatBody(BaseModel):
     silent_audio: Optional[bool] = None
     clip_duration: Optional[int] = None
     cinema_studio: Optional[bool] = None
+    ui_lang: Optional[str] = None
+    plan_mode: Optional[bool] = None
 
 
 class DirectorCommitBody(BaseModel):
@@ -1133,6 +1136,23 @@ async def startup():
             _queue_supervisor_loop(), name="h3-queue-supervisor"
         )
     slog.info("studio ready", url=f"{HOST}:{PORT}")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global _queue_task, _queue_supervisor
+    slog.info("studio shutdown", pid=os.getpid())
+    for label, task in (("queue", _queue_task), ("supervisor", _queue_supervisor)):
+        if task is None or task.done():
+            continue
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            slog.warn("shutdown task", which=label, err=e)
+    _release_single_instance()
 
 
 @app.get("/api/health")
@@ -2797,11 +2817,13 @@ class LlmSettingsBody(BaseModel):
     provider: Optional[str] = None
     ollama_base_url: Optional[str] = None
     openai_api_key: Optional[str] = None
+    nvidia_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     grok_api_key: Optional[str] = None
     claude_api_key: Optional[str] = None
     ollama_model: Optional[str] = None
     openai_model: Optional[str] = None
+    nvidia_model: Optional[str] = None
     gemini_model: Optional[str] = None
     grok_model: Optional[str] = None
     claude_model: Optional[str] = None
@@ -3097,6 +3119,7 @@ async def director_status(lang: Optional[str] = None):
         "ollama_url": OLLAMA_URL,
         "models": models,
         "default_model": default,
+        "default_model_ok": bool(probe.get("default_model_ok", online)),
         "detail": detail,
         "opening": opening_message(lang),
         "llm": pub,
@@ -3393,6 +3416,7 @@ async def _director_chat_impl(body: DirectorChatBody):
         prov = llm.provider()
         hints = {
             "openai": "OpenAI API key yok/geçersiz — Ayarlar’dan sk-… key ekle.",
+            "nvidia": "NVIDIA chat reddedildi — build.nvidia.com’da yeni nvapi-… key oluştur; model (ör. minimaxai/minimax-m3) için erişim açık olmalı.",
             "gemini": "Gemini API key yok/geçersiz — aistudio.google.com/apikey",
             "grok": "Grok (xAI) API key yok/geçersiz — console.x.ai",
             "claude": "Claude API key yok/geçersiz — console.anthropic.com",

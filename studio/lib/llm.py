@@ -1,6 +1,6 @@
 """Multi-provider LLM client for H3 Director.
 
-Providers: ollama | openai | gemini | grok | claude
+Providers: ollama | openai | nvidia | gemini | grok | claude
 API keys live in studio/data/llm_settings.json (gitignored).
 """
 from __future__ import annotations
@@ -14,7 +14,8 @@ import httpx
 
 from lib.ollama import OllamaClient, OLLAMA_URL
 
-PROVIDERS = ("ollama", "openai", "gemini", "grok", "claude")
+PROVIDERS = ("ollama", "openai", "nvidia", "gemini", "grok", "claude")
+NVIDIA_API_BASE = "https://integrate.api.nvidia.com/v1"
 
 # Prefer current AI Studio models — gemini-2.5-* is closed to many new keys (404).
 GEMINI_MODELS = (
@@ -45,6 +46,15 @@ OPENAI_MODELS = (
     "gpt-4.1",
     "o4-mini",
 )
+NVIDIA_MODELS = (
+    "minimaxai/minimax-m3",
+    "meta/llama-3.3-70b-instruct",
+    "meta/llama-3.1-70b-instruct",
+    "meta/llama-3.1-8b-instruct",
+    "google/gemma-2-9b-it",
+    "mistralai/mistral-nemo-12b-instruct",
+    "nvidia/nemotron-4-340b-instruct",
+)
 CLAUDE_MODELS = (
     "claude-sonnet-4-20250514",
     "claude-3-5-haiku-latest",
@@ -54,20 +64,47 @@ CLAUDE_MODELS = (
 
 KEY_FIELDS = (
     "openai_api_key",
+    "nvidia_api_key",
     "gemini_api_key",
     "grok_api_key",
     "claude_api_key",
 )
 
+
+def _is_nvidia_key(key: str) -> bool:
+    return (key or "").strip().lower().startswith("nvapi-")
+
+
+def _migrate_provider_keys(cfg: dict[str, Any]) -> bool:
+    """Move misplaced keys (e.g. nvapi in openai slot) to the right provider."""
+    changed = False
+    oa = (cfg.get("openai_api_key") or "").strip()
+    nv = (cfg.get("nvidia_api_key") or "").strip()
+    if oa and _is_nvidia_key(oa):
+        if not nv:
+            cfg["nvidia_api_key"] = oa
+        cfg["openai_api_key"] = ""
+        if (cfg.get("provider") or "").lower() == "openai":
+            cfg["provider"] = "nvidia"
+        changed = True
+    prov = (cfg.get("provider") or "").lower()
+    if prov == "openai" and not oa and nv:
+        cfg["provider"] = "nvidia"
+        changed = True
+    return changed
+
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     "provider": "ollama",
     "ollama_base_url": "",
     "openai_api_key": "",
+    "nvidia_api_key": "",
     "gemini_api_key": "",
     "grok_api_key": "",
     "claude_api_key": "",
     "ollama_model": "",
     "openai_model": OPENAI_MODELS[0],
+    "nvidia_model": NVIDIA_MODELS[0],
     "gemini_model": GEMINI_MODELS[0],
     "grok_model": GROK_MODELS[0],
     "claude_model": CLAUDE_MODELS[0],
@@ -100,6 +137,7 @@ class LlmRouter:
         cfg = dict(DEFAULT_SETTINGS)
         env_map = {
             "openai_api_key": ("OPENAI_API_KEY",),
+            "nvidia_api_key": ("NVIDIA_API_KEY", "NVAPI_API_KEY"),
             "gemini_api_key": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
             "grok_api_key": ("XAI_API_KEY", "GROK_API_KEY"),
             "claude_api_key": ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"),
@@ -122,6 +160,8 @@ class LlmRouter:
         new_g = _normalize_gemini_model(old_g)
         if new_g != old_g:
             cfg["gemini_model"] = new_g
+            migrated = True
+        if _migrate_provider_keys(cfg):
             migrated = True
         self._settings = cfg
         self._sync_ollama_url(cfg)
@@ -176,18 +216,22 @@ class LlmRouter:
             "ollama_base_url": cfg.get("ollama_base_url") or "",
             "ollama_model": cfg.get("ollama_model") or "",
             "openai_model": cfg.get("openai_model") or OPENAI_MODELS[0],
+            "nvidia_model": cfg.get("nvidia_model") or NVIDIA_MODELS[0],
             "gemini_model": _normalize_gemini_model(cfg.get("gemini_model")),
             "grok_model": cfg.get("grok_model") or GROK_MODELS[0],
             "claude_model": cfg.get("claude_model") or CLAUDE_MODELS[0],
             "openai_api_key_set": bool((cfg.get("openai_api_key") or "").strip()),
+            "nvidia_api_key_set": bool((cfg.get("nvidia_api_key") or "").strip()),
             "gemini_api_key_set": bool((cfg.get("gemini_api_key") or "").strip()),
             "grok_api_key_set": bool((cfg.get("grok_api_key") or "").strip()),
             "claude_api_key_set": bool((cfg.get("claude_api_key") or "").strip()),
             "openai_api_key_masked": _mask(cfg.get("openai_api_key") or ""),
+            "nvidia_api_key_masked": _mask(cfg.get("nvidia_api_key") or ""),
             "gemini_api_key_masked": _mask(cfg.get("gemini_api_key") or ""),
             "grok_api_key_masked": _mask(cfg.get("grok_api_key") or ""),
             "claude_api_key_masked": _mask(cfg.get("claude_api_key") or ""),
             "openai_models": list(OPENAI_MODELS),
+            "nvidia_models": list(NVIDIA_MODELS),
             "gemini_models": list(GEMINI_MODELS),
             "grok_models": list(GROK_MODELS),
             "claude_models": list(CLAUDE_MODELS),
@@ -205,6 +249,8 @@ class LlmRouter:
         provider = (cfg.get("provider") or "ollama").lower()
         if provider == "openai":
             return await self._probe_openai(cfg)
+        if provider == "nvidia":
+            return await self._probe_nvidia(cfg)
         if provider == "gemini":
             return await self._probe_gemini(cfg)
         if provider == "grok":
@@ -259,6 +305,73 @@ class LlmRouter:
                 "default_model": default,
             }
 
+    async def _probe_nvidia(self, cfg: dict[str, Any]) -> dict[str, Any]:
+        key = (cfg.get("nvidia_api_key") or "").strip()
+        default = (cfg.get("nvidia_model") or NVIDIA_MODELS[0]).strip()
+        if not key:
+            return {
+                "online": False,
+                "provider": "nvidia",
+                "models": list(NVIDIA_MODELS),
+                "detail": "api_key_missing",
+                "default_model": default,
+                "default_model_ok": False,
+            }
+        try:
+            models = await self._nvidia_list_models(key)
+            if not models:
+                models = list(NVIDIA_MODELS)
+            if default and default not in models:
+                models = [default] + [m for m in models if m != default]
+            default_ok = False
+            default_err = ""
+            any_ok = False
+            # Fast probe: default once, then one lightweight fallback (avoid 8×45s hangs).
+            ping_order = [default] if default else []
+            for fb in ("meta/llama-3.1-8b-instruct", "google/gemma-2-9b-it"):
+                if fb in models and fb not in ping_order:
+                    ping_order.append(fb)
+                    break
+            for ping_model in ping_order[:2]:
+                try:
+                    await self._openai_compat_ping(
+                        NVIDIA_API_BASE, key, ping_model, label="NVIDIA", timeout=12.0
+                    )
+                    any_ok = True
+                    if ping_model == default:
+                        default_ok = True
+                        break
+                except Exception as e:
+                    err = str(e)[:200]
+                    if ping_model == default:
+                        default_err = err
+                    continue
+
+            if not any_ok:
+                raise RuntimeError(default_err or "NVIDIA chat probe failed")
+
+            detail = "ok"
+            if not default_ok and default_err:
+                detail = f"default_model_unavailable:{default_err}"
+
+            return {
+                "online": True,
+                "provider": "nvidia",
+                "models": models,
+                "detail": detail,
+                "default_model": default,
+                "default_model_ok": default_ok,
+            }
+        except Exception as e:
+            return {
+                "online": False,
+                "provider": "nvidia",
+                "models": list(NVIDIA_MODELS),
+                "detail": str(e)[:200],
+                "default_model": default,
+                "default_model_ok": False,
+            }
+
     async def _probe_gemini(self, cfg: dict[str, Any]) -> dict[str, Any]:
         key = (cfg.get("gemini_api_key") or "").strip()
         default = _normalize_gemini_model(cfg.get("gemini_model"))
@@ -274,8 +387,8 @@ class LlmRouter:
             models = await self._gemini_list_models(key)
             if not models:
                 models = list(GEMINI_MODELS)
-            if default not in models:
-                default = models[0]
+            if default and default not in models:
+                models = [default] + [m for m in models if m != default]
             return {
                 "online": True,
                 "provider": "gemini",
@@ -370,6 +483,8 @@ class LlmRouter:
             return preferred.strip()
         if provider == "openai":
             return (cfg.get("openai_model") or OPENAI_MODELS[0]).strip()
+        if provider == "nvidia":
+            return (cfg.get("nvidia_model") or NVIDIA_MODELS[0]).strip()
         if provider == "gemini":
             return _normalize_gemini_model(cfg.get("gemini_model"))
         if provider == "grok":
@@ -405,6 +520,11 @@ class LlmRouter:
                 pass
         if provider == "openai":
             return await self._openai_chat(
+                model, messages, temperature=temperature, format_json=format_json,
+                num_predict=num_predict, retries=retries,
+            )
+        if provider == "nvidia":
+            return await self._nvidia_chat(
                 model, messages, temperature=temperature, format_json=format_json,
                 num_predict=num_predict, retries=retries,
             )
@@ -472,6 +592,70 @@ class LlmRouter:
             label="OpenAI",
         )
 
+    async def _openai_compat_ping(
+        self,
+        base_url: str,
+        key: str,
+        model: str,
+        *,
+        label: str = "LLM",
+        timeout: float = 12.0,
+    ) -> None:
+        """Tiny chat call — list-models alone is not enough (NVIDIA keys may 403 on chat)."""
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 4,
+            "temperature": 0,
+            "stream": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            r = await c.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=payload,
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(self._http_err(r, label=label))
+
+    async def _nvidia_list_models(self, key: str) -> list[str]:
+        async with httpx.AsyncClient(timeout=20.0) as c:
+            r = await c.get(
+                NVIDIA_API_BASE + "/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            if r.status_code >= 400:
+                raise RuntimeError(self._http_err(r))
+            data = r.json()
+        out = [m.get("id") for m in (data.get("data") or []) if m.get("id")]
+        prefer = [n for n in NVIDIA_MODELS if n in out]
+        rest = [n for n in out if n not in prefer]
+        return prefer + rest or list(NVIDIA_MODELS)
+
+    async def _nvidia_chat(
+        self, model, messages, *, temperature, format_json, num_predict, retries
+    ) -> str:
+        cfg = self.load()
+        key = (cfg.get("nvidia_api_key") or "").strip()
+        if not key:
+            raise RuntimeError("NVIDIA API key yok — Ayarlar’dan nvapi-… key ekle")
+        return await self._openai_compat_chat(
+            base_url=NVIDIA_API_BASE,
+            key=key,
+            model=model or cfg.get("nvidia_model") or NVIDIA_MODELS[0],
+            messages=messages,
+            temperature=temperature,
+            format_json=format_json,
+            num_predict=num_predict,
+            retries=retries,
+            label="NVIDIA",
+        )
+
     async def _openai_compat_chat(
         self,
         *,
@@ -502,6 +686,7 @@ class LlmRouter:
         headers = {
             "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
             **(extra_headers or {}),
         }
         last_err: Exception | None = None
@@ -514,7 +699,7 @@ class LlmRouter:
                         json=payload,
                     )
                     if r.status_code >= 400:
-                        raise RuntimeError(self._http_err(r))
+                        raise RuntimeError(self._http_err(r, label=label))
                     data = r.json()
                 choices = data.get("choices") or []
                 if choices:
@@ -875,7 +1060,7 @@ class LlmRouter:
                         json=payload,
                     )
                     if r.status_code >= 400:
-                        raise RuntimeError(self._http_err(r))
+                        raise RuntimeError(self._http_err(r, label=label))
                     data = r.json()
                 parts = data.get("content") or []
                 text = "".join(
@@ -890,14 +1075,19 @@ class LlmRouter:
         raise RuntimeError(f"Claude chat başarısız: {last_err}")
 
     @staticmethod
-    def _http_err(r: httpx.Response) -> str:
+    def _http_err(r: httpx.Response, *, label: str = "") -> str:
+        prefix = f"{label} " if label else ""
         try:
             data = r.json()
             err = data.get("error")
             if isinstance(err, dict):
-                return f"http {r.status_code}: {err.get('message') or err}"[:400]
+                return f"{prefix}http {r.status_code}: {err.get('message') or err}"[:400]
             if isinstance(err, str):
-                return f"http {r.status_code}: {err}"[:400]
-            return f"http {r.status_code}: {str(data)[:300]}"
+                return f"{prefix}http {r.status_code}: {err}"[:400]
+            # NVIDIA NIM: {"status":403,"title":"Forbidden","detail":"..."}
+            if data.get("detail") and not err:
+                title = data.get("title") or data.get("status") or r.status_code
+                return f"{prefix}http {r.status_code}: {title} — {data.get('detail')}"[:400]
+            return f"{prefix}http {r.status_code}: {str(data)[:300]}"
         except Exception:
-            return f"http {r.status_code}: {(r.text or '')[:300]}"
+            return f"{prefix}http {r.status_code}: {(r.text or '')[:300]}"

@@ -55,7 +55,7 @@ module.exports = {
           STUDIO_PORT: "{{local.studio_port}}"
         },
         message: [
-          "python -m uvicorn server:app --host 127.0.0.1 --port {{local.studio_port}}"
+          "python -m uvicorn server:app --host 127.0.0.1 --port {{local.studio_port}} --timeout-graceful-shutdown 8"
         ],
         on: [{
           // Critical Pattern Lock (mochi-style). Studio prints a bare http:// line

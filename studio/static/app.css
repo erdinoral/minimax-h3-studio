@@ -452,6 +452,7 @@ body.director-modal-open .director-llm-tab {
   padding-top: 12px;
   border-top: 1px solid var(--border);
 }
+.rewriter-toggle { margin-top: 12px; }
 .lora-url-row {
   display: flex;
   flex-wrap: wrap;
@@ -997,6 +998,16 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 }
 .queue-toolbar {
   flex-shrink: 0;
+}
+.clip-prompt-seed {
+  margin: 8px 16px 16px;
+  font-variant-numeric: tabular-nums;
+}
+.prod-lane-tabs {
+  margin-bottom: 8px;
+}
+.prod-lane-tabs .chip.on {
+  font-weight: 600;
 }
 .job-queue {
   margin-top: 0;
@@ -1649,6 +1660,10 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 #view-support,
 #view-cinema {
   z-index: 92;
+}
+/* Prompt must sit above gallery when opened from a gallery card */
+#view-clip-prompt {
+  z-index: 96;
 }
 .gallery-panel {
   width: min(1280px, 100%);
@@ -2317,6 +2332,54 @@ button.cinema-fold-toggle:hover {
   position: relative;
   z-index: 3;
 }
+.cinema-character-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.62);
+}
+.cinema-character-modal.hidden {
+  display: none;
+}
+.cinema-character-dialog {
+  width: min(460px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+}
+.cinema-character-dialog header,
+.cinema-character-dialog .row-btns {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cinema-character-dialog h3 {
+  margin: 0;
+}
+.cinema-character-dialog label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 12px;
+}
+.cinema-character-dialog input,
+.cinema-character-dialog select,
+.cinema-character-dialog textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.cinema-character-dialog .row-btns {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
 .cinema-script-col #cinema-shot-draft {
   width: 100%;
   min-height: 88px;
@@ -2447,6 +2510,23 @@ button.cinema-fold-toggle:hover {
   gap: 8px;
   align-items: center;
 }
+.cinema-timeline { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.24); overflow-x: auto; }
+.cinema-timeline-head { display: flex; justify-content: space-between; align-items: end; margin-bottom: 12px; }
+.cinema-timeline-head h3 { margin: 2px 0 0; font-size: 1rem; }
+.eyebrow { color: var(--accent-amber); font: 0.65rem ui-monospace, Consolas, monospace; letter-spacing: 0.08em; }
+.timeline-ruler, .timeline-lane { position: relative; min-width: 560px; }
+.timeline-ruler { height: 22px; margin-left: 112px; border-bottom: 1px solid var(--border); }
+.timeline-ruler span { position: absolute; bottom: 3px; transform: translateX(-50%); font: 0.65rem ui-monospace, Consolas, monospace; color: var(--text-muted); }
+.timeline-track { display: grid; grid-template-columns: 104px minmax(560px, 1fr); gap: 8px; min-height: 48px; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.timeline-track-label { color: var(--text-muted); font-size: 0.72rem; }
+.timeline-lane { height: 34px; background: repeating-linear-gradient(90deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 5%); }
+.timeline-clip, .timeline-audio-clip { position: absolute; top: 3px; height: 28px; min-width: 28px; overflow: hidden; border: 1px solid rgba(212,160,23,0.58); border-radius: 4px; background: rgba(196,92,38,0.68); color: #fff; text-align: left; padding: 3px 12px 3px 7px; cursor: pointer; }
+.timeline-clip b { margin-right: 5px; font-size: 0.68rem; }
+.timeline-clip span, .timeline-audio-clip span { font-size: 0.68rem; white-space: nowrap; }
+.timeline-track[data-track="dialogue"] .timeline-clip { background: rgba(84,123,153,0.7); border-color: rgba(150,210,235,0.58); }
+.timeline-audio-clip { position: relative; display: flex; justify-content: space-between; align-items: center; width: 100%; background: rgba(74,132,96,0.68); border-color: rgba(140,210,160,0.56); }
+.timeline-audio-clip em { color: rgba(255,255,255,0.65); font-size: 0.62rem; }
+.timeline-empty { padding: 8px; color: var(--text-muted); font-size: 0.7rem; }
 @media (max-width: 980px) {
   .cinema-grid {
     grid-template-columns: 1fr;

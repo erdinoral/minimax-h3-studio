@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>H3 Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=cinema44" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema61" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -231,6 +231,7 @@
       <textarea id="prompt" rows="3" placeholder="Sahneyi, kamerayı, diyalogu ve sesi anlat… (Ctrl+Enter = sıraya ekle)"></textarea>
       <div class="gen-actions">
         <button type="button" class="btn-secondary" id="btn-batch-add" title="Prompt / Sahne metnini üretim kuyruğuna ekle">Sıraya ekle</button>
+        <button type="button" class="btn-ghost" id="btn-prompt-rewrite" title="LLM ile prompt düzenle (üretmeden)">Rewrite</button>
         <button type="button" class="cta" id="btn-generate">Üret</button>
       </div>
       <p class="muted gen-hint" id="gen-hint">Mod: Yeni video · Sıraya ekle = kuyruğa ekle</p>
@@ -247,6 +248,8 @@
           <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step">Hızlı</button>
         </div>
         <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Step sayısı Ayarlar’daki kutudan gelir — LoRA zorlamaz.</p>
+        <label class="check rewriter-toggle"><input type="checkbox" id="prompt-rewriter-enabled" /> <span id="prompt-optimize-label">Prompt’u LLM ile düzenle</span></label>
+        <p class="muted mode-hint" id="prompt-rewriter-status">Yönetmen LLM kontrol ediliyor…</p>
         <label><span id="ayar-sampler-label">Sampler</span>
           <select id="sampler">
             <option value="res_multistep">res_multistep</option>
@@ -272,6 +275,10 @@
     <section class="zone zone-prod panel drawer-production">
       <h2>Üretim listesi</h2>
       <div class="drawer-body drawer-body-production">
+        <div class="chips prod-lane-tabs" id="prod-lane-tabs" role="tablist" aria-label="Üretim sekmesi">
+          <button type="button" class="chip on" data-lane="scene" id="prod-lane-scene">Sahne</button>
+          <button type="button" class="chip" data-lane="director" id="prod-lane-director">Direktör</button>
+        </div>
         <div class="job-queue">
           <div class="job-queue-head">Kuyruk</div>
           <ul id="job-list" class="job-list"></ul>
@@ -351,6 +358,7 @@
         <div class="dir-plan-shots" id="director-plan-shots"></div>
         <div class="dir-plan-actions">
           <button type="button" class="btn-secondary" id="btn-plan-save">Kaydet</button>
+          <button type="button" class="btn-ghost" id="btn-plan-rewrite">Rewriter ile düzenle</button>
           <button type="button" class="btn-ghost" id="btn-plan-to-cinema">Stüdyoya aktar</button>
           <button type="button" class="cta" id="btn-plan-queue">Üretime al</button>
         </div>
@@ -412,6 +420,7 @@
           <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
         </label>
         <span class="muted" id="music-meta">yok</span>
+        <button type="button" class="btn-ghost hidden" id="btn-music-remove">Şarkıyı kaldır</button>
         <input type="text" id="music-concept" placeholder="Konsept (örn. dark phonk otopark)" autocomplete="off" />
         <input type="text" id="music-lyrics" placeholder="Sözler (isteğe bağlı, yapıştır)" autocomplete="off" />
         <button type="button" class="btn-secondary" id="btn-music-analyze" disabled title="Süre + söz → SCENE brief">Şarkıdan brief</button>
@@ -427,6 +436,7 @@
           <input type="checkbox" id="link-continue" checked />
           <span id="link-continue-label" style="font-size:12px">Devam zincirine ekle</span>
         </label>
+        <button type="button" class="btn-secondary hidden" id="btn-rewrite-brief" title="Shot prompt’larını Rewriter ile düzenle (üretmeden)">Rewriter ile düzenle</button>
         <button type="button" class="cta hidden" id="btn-queue-brief" title="Hazır shot’ları Comfy kuyruğuna bas ve üretimi başlat">Üretime al</button>
         <button type="button" class="btn-ghost" id="btn-director-new-session" title="Yeni sohbet başlat">Yeni sohbet</button>
         <button type="button" class="btn-ghost" id="btn-director-reset" title="Sohbeti sıfırla (yeni session)">Sıfırla</button>
@@ -448,6 +458,7 @@
         <button type="button" class="menu-btn" id="btn-clip-prompt-close">Kapat</button>
       </header>
       <pre id="clip-prompt-text" class="clip-prompt-full"></pre>
+      <p class="muted clip-prompt-seed" id="clip-prompt-seed" hidden></p>
     </div>
   </div>
 
@@ -520,6 +531,7 @@
             <span class="file-pick-btn" id="cinema-score-btn">Film müziği</span>
           </label>
           <span class="muted" id="cinema-score-name">yok — H3 her klipte yeni şarkı uydurur</span>
+          <button type="button" class="btn-ghost hidden" id="btn-cinema-score-remove">Müziği kaldır</button>
           <button type="button" class="btn-secondary hidden" id="btn-cinema-concat">Filmi birleştir</button>
           <button type="button" class="btn-secondary hidden" id="btn-cinema-mux">Müziği karıştır</button>
           <a class="muted hidden" id="cinema-final-link" href="#" target="_blank" rel="noopener">Son filmi aç</a>
@@ -561,8 +573,10 @@
             <textarea id="cinema-role-script" rows="6" placeholder="Tüm rol metnini / senaryoyu buraya yapıştır…"></textarea>
           </label>
           <button type="button" class="cta" id="btn-cinema-ingest">LLM ile film altyapısı kur</button>
+          <button type="button" class="btn-secondary" id="btn-cinema-generate-shots">LLM ile sahneleri yaz</button>
           <p class="muted mode-hint" id="cinema-role-hint">Yönetmen metni okur; karakter, mekan ve shot listesini doldurur. Mevcut görseller silinmez.</p>
-          <p class="muted mode-hint" id="cinema-script-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder.</p>
+          <p class="muted mode-hint" id="cinema-shots-llm-hint">Kartlar doluyken: LLM yalnızca stüdyo board’undaki karakter/mekanlarla shot yazar. Ana Sahne bu board’u görmez.</p>
+          <p class="muted mode-hint" id="cinema-script-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder. Portreli karakter = yüz kilidi zinciri.</p>
           <textarea id="cinema-shot-draft" rows="4" placeholder="Shot metnini yaz… örn. Ada walks into Rooftop at dusk, coat catching wind."></textarea>
           <div class="cinema-shot-add">
             <button type="button" class="btn-secondary" id="btn-cinema-add-t2v">+ Yeni video</button>
@@ -575,6 +589,44 @@
             <pre id="cinema-preview-text" class="cinema-preview-text"></pre>
           </details>
         </section>
+      </div>
+      <section class="cinema-timeline" aria-label="Zaman çizelgesi">
+        <div class="cinema-timeline-head">
+          <div>
+            <span class="eyebrow">TIMELINE</span>
+            <h3>Kurgu zaman çizelgesi</h3>
+          </div>
+            <span class="muted" id="cinema-timeline-total">5 sn / shot</span>
+        </div>
+        <div class="timeline-ruler" id="cinema-timeline-ruler"></div>
+        <div class="timeline-track" data-track="video">
+          <span class="timeline-track-label">Video</span>
+          <div class="timeline-lane" id="cinema-timeline-video"></div>
+        </div>
+        <div class="timeline-track" data-track="dialogue">
+          <span class="timeline-track-label">Diyalog / SFX</span>
+          <div class="timeline-lane" id="cinema-timeline-dialogue"></div>
+        </div>
+        <div class="timeline-track" data-track="music">
+          <span class="timeline-track-label">Film müziği</span>
+          <div class="timeline-lane" id="cinema-timeline-music"></div>
+        </div>
+      </section>
+      <div class="cinema-character-modal hidden" id="cinema-character-modal" aria-hidden="true">
+        <div class="cinema-character-dialog" role="dialog" aria-modal="true" aria-labelledby="cinema-character-dialog-title">
+          <header>
+            <h3 id="cinema-character-dialog-title">Karakter detayı</h3>
+            <button type="button" class="menu-btn" id="btn-cinema-character-close">Kapat</button>
+          </header>
+          <label><span>Karakter adı</span><input id="cinema-character-name" type="text" /></label>
+          <label><span>Görünüm / tanım</span><textarea id="cinema-character-notes" rows="4"></textarea></label>
+          <label><span>Ses</span><textarea id="cinema-character-voice" rows="2"></textarea></label>
+          <label><span>Karakter LoRA</span><select id="cinema-character-lora"></select></label>
+          <div class="row-btns">
+            <button type="button" class="btn-secondary" id="btn-cinema-character-cancel">İptal</button>
+            <button type="button" class="cta" id="btn-cinema-character-save">Kaydet</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -725,7 +777,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema54"></script>
-  <script src="/static/app.js?v=cinema54"></script>
+  <script src="/static/i18n.js?v=cinema61"></script>
+  <script src="/static/app.js?v=cinema61"></script>
 </body>
 </html>

@@ -14,6 +14,7 @@
     produceMode: "t2v", // t2v | continue | ref | face | v2v | cinema
     selectedJobId: null,
     clipPrompt: "",
+    clipSeed: "",
     continueFrom: null,
     pendingContinueChild: null,
     playerCleared: true,
@@ -25,6 +26,7 @@
     v2vImages: [],
     storyboardImages: [],
     cinema: { title: "", script: "", characters: [], locations: [] },
+    selectedCharacter: null,
     galleryItems: [],
     firstFrameName: null,
     lastFrameName: null,
@@ -35,6 +37,7 @@
     directorBusy: false,
     directorOnline: false,
     directorOfflineDetail: "",
+    prodLane: "scene",
     musicId: null,
     musicMeta: null,
     projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
@@ -448,18 +451,35 @@
     return true;
   }
 
-  function setClipPrompt(text, meta) {
+  function setClipPrompt(text, meta, seed) {
     state.clipPrompt = text == null ? "" : String(text);
     const has = !!state.clipPrompt.trim();
     const pre = $("clip-prompt-text");
     if (pre) pre.textContent = has ? state.clipPrompt : tt("clip.empty");
     const metaEl = $("clip-prompt-meta");
     if (metaEl) metaEl.textContent = meta || "";
+    if (seed !== undefined) {
+      state.clipSeed =
+        seed != null && seed !== "" && Number(seed) >= 0 ? String(seed) : "";
+    } else if (!has) {
+      state.clipSeed = "";
+    }
+    const s = state.clipSeed || "";
+    const seedEl = $("clip-prompt-seed");
+    if (seedEl) {
+      if (s) {
+        seedEl.hidden = false;
+        seedEl.textContent = tf("clip.seed", { seed: s }) || `Seed: ${s}`;
+      } else {
+        seedEl.hidden = true;
+        seedEl.textContent = "";
+      }
+    }
     $("btn-open-prompt")?.classList.toggle("hidden", !has);
   }
 
-  function openPromptView(text, meta) {
-    if (text !== undefined) setClipPrompt(text, meta);
+  function openPromptView(text, meta, seed) {
+    if (text !== undefined) setClipPrompt(text, meta, seed);
     const t = (state.clipPrompt || "").trim();
     if (!t) {
       toast(tt("toast.noClipPrompt"));
@@ -745,7 +765,8 @@
       const card = document.createElement("div");
       card.className = "ref-thumb";
       card.innerHTML = `<span class="ref-ord">&lt;Picture ${i + 1}&gt;</span><img src="${item.url}" alt="ref ${i + 1}" /><button type="button" title="${tt("pick.remove")}">×</button>`;
-      card.querySelector("button").onclick = () => {
+      card.querySelector("button").onclick = async () => {
+        if (!(await deleteUploadedMedia(item))) return;
         list.splice(i, 1);
         renderRefThumbs(kind);
         if (!list.length) {
@@ -774,13 +795,31 @@
         const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(errDetail(data));
-        target.push({ name: data.name, url: data.url || `#` });
+        target.push({ name: data.name, filename: data.filename, url: data.url || `#` });
+        renderRefThumbs(kind);
       } catch (e) {
         toast(String(e.message || e));
       }
     }
     renderRefThumbs(kind);
     toast(isFace ? `${target.length} yüz hazır` : `${target.length} referans hazır`);
+  }
+
+  async function deleteUploadedMedia(item) {
+    const filename = item?.filename || item?.name;
+    if (!filename) return true;
+    const path = item.kind === "video"
+      ? `/api/ref-videos/${encodeURIComponent(filename)}`
+      : `/api/refs/${encodeURIComponent(filename)}`;
+    try {
+      const r = await fetch(path, { method: "DELETE" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok && r.status !== 404) throw new Error(errDetail(data));
+      return true;
+    } catch (e) {
+      toast(String(e.message || e));
+      return false;
+    }
   }
 
   function renderNamedThumbs(list, gridId, labelFn, onListChange) {
@@ -795,7 +834,8 @@
         ? `<video src="${item.url}" muted preload="metadata"></video>`
         : `<img src="${item.url}" alt="${label}" />`;
       card.innerHTML = `<span class="ref-ord">${label}</span>${media}<button type="button" title="${tt("pick.remove")}">×</button>`;
-      card.querySelector("button").onclick = () => {
+      card.querySelector("button").onclick = async () => {
+        if (!(await deleteUploadedMedia(item))) return;
         list.splice(i, 1);
         if (typeof onListChange === "function") onListChange(list);
         renderNamedThumbs(list, gridId, labelFn, onListChange);
@@ -820,9 +860,11 @@
         if (!r.ok) throw new Error(errDetail(data));
         targetList.push({
           name: data.name,
+          filename: data.filename,
           url: data.url || "#",
           kind: "video",
         });
+        renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`, (list) => onFilePickListEmpty(gridId, list));
       } catch (e) {
         toast(String(e.message || e));
       }
@@ -845,7 +887,8 @@
         const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(errDetail(data));
-        targetList.push({ name: data.name, url: data.url || "#" });
+        targetList.push({ name: data.name, filename: data.filename, url: data.url || "#" });
+        renderNamedThumbs(targetList, gridId, labelFn, (list) => onFilePickListEmpty(gridId, list));
       } catch (e) {
         toast(String(e.message || e));
       }
@@ -872,7 +915,7 @@
       if (which === "first") {
         state.firstFrameName = data.name;
         renderNamedThumbs(
-          [{ name: data.name, url: data.url }],
+          [{ name: data.name, filename: data.filename, url: data.url }],
           gridId,
           () => "First",
           onFrameListChange
@@ -880,7 +923,7 @@
       } else {
         state.lastFrameName = data.name;
         renderNamedThumbs(
-          [{ name: data.name, url: data.url }],
+          [{ name: data.name, filename: data.filename, url: data.url }],
           gridId,
           () => "Last",
           onFrameListChange
@@ -982,21 +1025,65 @@
 
   let cinemaSaveGen = 0;
   let cinemaForceLocalShots = false;
+  const cinemaSaveRequests = new Set();
+  const cinemaSaveControllers = new Map();
+  const cinemaAssetVersions = new Map();
+
+  function nextCinemaAssetVersion(kind, id) {
+    const key = `${kind}:${String(id || "")}`;
+    const next = (cinemaAssetVersions.get(key) || 0) + 1;
+    cinemaAssetVersions.set(key, next);
+    return next;
+  }
+
+  function abortCinemaSaves() {
+    for (const controller of cinemaSaveControllers.values()) {
+      try {
+        controller.abort();
+      } catch {
+        /* ignore */
+      }
+    }
+    cinemaSaveControllers.clear();
+    cinemaSaveRequests.clear();
+  }
 
   async function saveCinema(quiet) {
     const gen = ++cinemaSaveGen;
     const payload = cinemaPayload();
+    abortCinemaSaves();
+    const controller = new AbortController();
+    cinemaSaveControllers.set(gen, controller);
     try {
-      const r = await fetch("/api/cinema", {
+      const request = fetch("/api/cinema", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+      cinemaSaveRequests.add(request);
+      let r;
+      try {
+        r = await request;
+      } finally {
+        cinemaSaveRequests.delete(request);
+        if (cinemaSaveControllers.get(gen) === controller) {
+          cinemaSaveControllers.delete(gen);
+        }
+      }
       if (gen !== cinemaSaveGen) return;
       const data = await r.json().catch(() => payload);
       if (!r.ok) throw new Error(errDetail(data));
       if (gen !== cinemaSaveGen) return;
       const base = emptyCinema();
+      // Prefer what we just sent for characters/locations so a racing DELETE/PATCH
+      // cannot resurrect cards that the UI already removed.
+      const chars = Array.isArray(payload.characters)
+        ? payload.characters
+        : data.characters || [];
+      const locs = Array.isArray(payload.locations)
+        ? payload.locations
+        : data.locations || [];
       state.cinema = {
         ...base,
         film_id: data.film_id || payload.film_id,
@@ -1016,12 +1103,13 @@
         steps: data.steps || payload.steps,
         seed: data.seed != null ? data.seed : payload.seed,
         seed_lock: !!(data.seed_lock != null ? data.seed_lock : payload.seed_lock),
-        characters: data.characters || payload.characters,
-        locations: data.locations || payload.locations,
+        characters: chars,
+        locations: locs,
       };
       if (gen === cinemaSaveGen) cinemaForceLocalShots = false;
       if (!quiet) toast(tt("cinema.saved"));
     } catch (e) {
+      if (controller.signal.aborted || gen !== cinemaSaveGen) return;
       if (!quiet) toast(String(e.message || e));
     }
   }
@@ -1188,6 +1276,39 @@
       htmlEsc(tt("cinema.del")) +
       "</button></div></div></div>"
     );
+  }
+
+  function renderCinemaCharacterModal() {
+    const modal = $("cinema-character-modal");
+    const item = state.selectedCharacter;
+    if (!modal || !item) return;
+    $("cinema-character-name").value = item.name || "";
+    $("cinema-character-notes").value = item.notes || "";
+    $("cinema-character-voice").value = item.voice || "";
+    $("cinema-character-lora").innerHTML = cinemaLoraOptions(item.lora_id || "");
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeCinemaCharacterModal() {
+    const modal = $("cinema-character-modal");
+    state.selectedCharacter = null;
+    modal?.classList.add("hidden");
+    modal?.setAttribute("aria-hidden", "true");
+  }
+
+  async function saveCinemaCharacterModal() {
+    const item = state.selectedCharacter;
+    if (!item) return;
+    const saved = await patchCinemaAsset("character", item.id, {
+      name: $("cinema-character-name")?.value || "",
+      notes: $("cinema-character-notes")?.value || "",
+      voice: $("cinema-character-voice")?.value || "",
+      lora_id: $("cinema-character-lora")?.value || "",
+    });
+    if (!saved) return;
+    closeCinemaCharacterModal();
+    renderCinema();
   }
 
   function filmPillHtml(key, value) {
@@ -1418,6 +1539,8 @@
         ? audio.score_name
         : tt("cinema.scoreNone");
     }
+      const remove = $("btn-cinema-score-remove");
+      if (remove) remove.classList.toggle("hidden", !audio.score_id);
     const concat = $("btn-cinema-concat");
     if (concat) {
       concat.classList.toggle("hidden", !audio.last_batch);
@@ -1450,6 +1573,36 @@
     if (!host) return;
     const shots = ensureCinema().shots || [];
     host.innerHTML = shots.map((s, i) => cinemaShotHtml(s, i)).join("");
+  }
+
+  function renderCinemaTimeline() {
+    const c = ensureCinema();
+    const shots = (c.shots || []).filter((shot) => (shot.text || "").trim());
+    const shotDuration = Number(c.duration) || 5;
+    const duration = shots.length * shotDuration;
+    const scale = Math.max(1, duration);
+    const ruler = $("cinema-timeline-ruler");
+    if (ruler) {
+      ruler.innerHTML = Array.from({ length: Math.ceil(scale / 5) + 1 }, (_, i) =>
+        `<span style="left:${(i * 5 / scale) * 100}%">${i * 5}s</span>`
+      ).join("");
+    }
+    const lanes = { video: $("cinema-timeline-video"), dialogue: $("cinema-timeline-dialogue"), music: $("cinema-timeline-music") };
+    [lanes.video, lanes.dialogue, lanes.music].forEach((lane) => { if (lane) lane.innerHTML = ""; });
+    let offset = 0;
+    shots.forEach((shot, index) => {
+      const left = (offset / scale) * 100;
+      const width = (shotDuration / scale) * 100;
+      const block = `<button type="button" class="timeline-clip" data-shot-id="${htmlEsc(shot.id)}" style="left:${left}%;width:${width}%" title="Shot ${index + 1} · ${shotDuration} sn"><b>${index + 1}</b><span>${htmlEsc(shot.text.slice(0, 32))}</span></button>`;
+      if (lanes.video) lanes.video.insertAdjacentHTML("beforeend", block);
+      if (lanes.dialogue && cinemaAudio().mode === "film") lanes.dialogue.insertAdjacentHTML("beforeend", block);
+      offset += shotDuration;
+    });
+    if (lanes.music) lanes.music.innerHTML = cinemaAudio().score_name
+      ? `<div class="timeline-audio-clip" style="width:100%"><span>♪ ${htmlEsc(cinemaAudio().score_name)}</span><em>waveform</em></div>`
+      : '<div class="timeline-empty">Film müziği eklenmedi</div>';
+    const total = $("cinema-timeline-total");
+    if (total) total.textContent = `${shotDuration} sn / shot · ${duration.toFixed(1).replace(".0", "")} sn toplam`;
   }
 
   function syncCinemaShotJobs() {
@@ -1515,6 +1668,7 @@
     renderCinemaPills();
     renderCinemaKnobs();
     renderCinemaAudio();
+    renderCinemaTimeline();
     renderCinemaAssetCards("character");
     renderCinemaAssetCards("location");
     if (
@@ -1705,18 +1859,29 @@
 
   function cinemaItem(kind, id) {
     const key = kind === "character" ? "characters" : "locations";
-    return (state.cinema[key] || []).find((x) => x.id === id);
+    const aid = String(id || "").trim();
+    return (state.cinema[key] || []).find((x) => String(x.id || "") === aid);
   }
 
   async function deleteCinemaAsset(kind, id) {
-    const aid = (id || "").trim();
+    const aid = String(id || "").trim();
     if (!aid) return;
     if (!confirm("Bu kartı sil?")) return;
+    clearTimeout(cinemaPreviewTimer);
+    cinemaSaveGen += 1;
+    abortCinemaSaves();
+    const assetKey = `${kind}:${aid}`;
+    cinemaAssetVersions.set(assetKey, (cinemaAssetVersions.get(assetKey) || 0) + 1);
     const key = kind === "character" ? "characters" : "locations";
     const c = ensureCinema();
-    c[key] = (c[key] || []).filter((x) => x.id !== aid);
+    const removedName = String((cinemaItem(kind, aid) || {}).name || "").trim();
+    if (kind === "character" && String(state.selectedCharacter?.id || "") === aid) {
+      closeCinemaCharacterModal();
+    }
+    c[key] = (c[key] || []).filter((x) => String(x.id || "") !== aid);
     renderCinemaAssetCards(kind, { force: true });
     renderCinema();
+    clearTimeout(cinemaPreviewTimer);
     const path =
       kind === "character"
         ? `/api/cinema/character/${encodeURIComponent(aid)}`
@@ -1724,9 +1889,19 @@
     try {
       const r = await fetch(path, { method: "DELETE" });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(errDetail(data) || "silinemedi");
+      // 404 = already gone on disk; still lock the filtered local list via PUT
+      if (!r.ok && r.status !== 404) throw new Error(errDetail(data) || "silinemedi");
+      // Persist filtered cards so a late saveCinema/PATCH cannot resurrect them
+      await saveCinema(true);
+      if ((cinemaAssetVersions.get(assetKey) || 0) > 0) {
+        cinemaAssetVersions.delete(assetKey);
+      }
+      if (removedName) scrubDirectorBriefName(removedName);
       toast(kind === "character" ? tt("cinema.charDeleted") : tt("cinema.locDeleted"));
     } catch (e) {
+      if ((cinemaAssetVersions.get(assetKey) || 0) > 0) {
+        cinemaAssetVersions.delete(assetKey);
+      }
       toast(String(e.message || e));
       await loadCinema();
     }
@@ -1738,6 +1913,7 @@
     $("view-support")?.classList.add("hidden");
     setDirectorLlmOpen(false);
     setDirectorOpen(false);
+    state.cinemaDirector = true;
     $("view-cinema")?.classList.remove("hidden");
     if (!state.loraCatalog || !state.loraCatalog.length) {
       try {
@@ -1751,6 +1927,7 @@
 
   function closeCinemaStudio() {
     $("view-cinema")?.classList.add("hidden");
+    state.cinemaDirector = false;
     void saveCinema(true);
   }
 
@@ -1759,7 +1936,15 @@
     const key = kind === "character" ? "characters" : "locations";
     const fold = kind === "character" ? "characters" : "locations";
     setCinemaFold(fold, true);
+    clearTimeout(cinemaPreviewTimer);
     cinemaSaveGen += 1;
+    abortCinemaSaves();
+    // Flush any pending local deletes to disk before creating a new card
+    try {
+      await saveCinema(true);
+    } catch {
+      /* continue — create may still work */
+    }
     try {
       const r = await fetch(path, {
         method: "POST",
@@ -1771,7 +1956,7 @@
       const c = ensureCinema();
       const list = Array.isArray(c[key]) ? c[key].slice() : [];
       if (data && data.id) {
-        const i = list.findIndex((x) => x.id === data.id);
+        const i = list.findIndex((x) => String(x.id || "") === String(data.id));
         if (i >= 0) list[i] = data;
         else list.push(data);
         c[key] = list;
@@ -1840,10 +2025,18 @@
   }
 
   async function patchCinemaAsset(kind, id, fields) {
-    const item = cinemaItem(kind, id);
+    const aid = String(id || "").trim();
+    if (!aid) return false;
+    // Deleted cards must not be re-created by a late PATCH
+    if (!cinemaItem(kind, aid)) return false;
+    const assetKey = `${kind}:${aid}`;
+    const version = nextCinemaAssetVersion(kind, aid);
+    const item = cinemaItem(kind, aid);
     if (item) Object.assign(item, fields);
     const path =
-      kind === "character" ? `/api/cinema/character/${id}` : `/api/cinema/location/${id}`;
+      kind === "character"
+        ? `/api/cinema/character/${encodeURIComponent(aid)}`
+        : `/api/cinema/location/${encodeURIComponent(aid)}`;
     try {
       const r = await fetch(path, {
         method: "PATCH",
@@ -1851,12 +2044,18 @@
         body: JSON.stringify(fields),
       });
       const data = await r.json().catch(() => ({}));
+      if (r.status === 404) return false;
       if (!r.ok) throw new Error(errDetail(data));
+      if ((cinemaAssetVersions.get(assetKey) || 0) !== version) return false;
+      if (!cinemaItem(kind, aid)) return false;
       const key = kind === "character" ? "characters" : "locations";
-      const idx = (state.cinema[key] || []).findIndex((x) => x.id === id);
+      const idx = (state.cinema[key] || []).findIndex((x) => String(x.id || "") === aid);
       if (idx >= 0) state.cinema[key][idx] = data;
+      return true;
     } catch (e) {
+      if ((cinemaAssetVersions.get(assetKey) || 0) !== version) return false;
       toast(String(e.message || e));
+      return false;
     }
   }
 
@@ -1878,19 +2077,39 @@
     }));
     for (const file of take) {
       toast(`Yükleniyor · ${file.name}`);
+      const previewUrl = URL.createObjectURL(file);
+      images.push({ name: file.name, file: `preview:${file.name}`, url: previewUrl });
+      if (item) {
+        item.images = images.slice();
+        renderCinemaAssetCards(kind, { force: true });
+        renderCinema();
+      }
       try {
         const fd = new FormData();
         fd.append("file", file);
         const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(errDetail(data));
+        images.splice(images.length - 1, 1);
+        URL.revokeObjectURL(previewUrl);
         images.push({ name: "", file: data.name, url: data.url });
+        await patchCinemaAsset(kind, id, { images });
+        renderCinemaAssetCards(kind, { force: true });
+        renderCinema();
       } catch (e) {
+        images.splice(images.length - 1, 1);
+        URL.revokeObjectURL(previewUrl);
+        if (item) {
+          item.images = images.slice();
+          renderCinemaAssetCards(kind, { force: true });
+          renderCinema();
+        }
         toast(String(e.message || e));
         return;
       }
     }
     await patchCinemaAsset(kind, id, { images });
+    renderCinemaAssetCards(kind, { force: true });
     renderCinema();
     toast(tt("cinema.imgBound"));
   }
@@ -1899,7 +2118,15 @@
     const item = cinemaItem(kind, id);
     if (!item) return;
     const images = cinemaAssetImages(item).filter((x) => x.file !== file);
-    await patchCinemaAsset(kind, id, { images, image: images[0]?.file || "", url: images[0]?.url || "" });
+    const saved = await patchCinemaAsset(kind, id, { images, image: images[0]?.file || "", url: images[0]?.url || "" });
+    if (!saved) return;
+    if (file && !String(file).startsWith("preview:")) {
+      const r = await fetch(`/api/refs/${encodeURIComponent(file)}`, { method: "DELETE" });
+      if (!r.ok && r.status !== 404) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(errDetail(data) || "görsel silinemedi");
+      }
+    }
     renderCinema();
   }
 
@@ -1927,6 +2154,48 @@
       ? tt("cinema.directorBuild") + "\n\n" + text
       : tt("cinema.directorAsk");
     await directorSend(msg);
+  }
+
+  async function generateCinemaShots() {
+    const btn = $("btn-cinema-generate-shots");
+    if (btn) btn.disabled = true;
+    try {
+      await saveCinema(true);
+      const c = ensureCinema();
+      const chars = (c.characters || []).filter((x) => String(x.name || "").trim());
+      const locs = (c.locations || []).filter((x) => String(x.name || "").trim());
+      if (!chars.length && !locs.length) {
+        toast(tt("cinema.needCast") || "Önce karakter veya mekan kartı ekle");
+        return;
+      }
+      toast(tt("cinema.writingShots") || "LLM sahneleri yazıyor…");
+      const r = await fetch("/api/cinema/generate-shots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          duration: Number($("cinema-duration")?.value) || c.duration || state.duration || 5,
+          logline: (c.title || "").trim() || null,
+          prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      if (data.cinema) {
+        const base = emptyCinema();
+        state.cinema = {
+          ...base,
+          ...data.cinema,
+          setup: { ...base.setup, ...(data.cinema.setup || {}) },
+          audio: { ...base.audio, ...(data.cinema.audio || {}) },
+        };
+        renderCinema();
+      }
+      toast(tf("cinema.shotsWritten", { n: data.shot_count || 0 }) || `${data.shot_count || 0} shot yazıldı`);
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function produceCinema() {
@@ -1997,7 +2266,7 @@
           sage_attention: "disabled",
           purpose,
           silent_audio: !filmMode,
-          link_continue: false,
+          link_continue: true,
           seamless: !!$("cinema-seamless")?.checked,
           ...collectLoraPayload(),
         }),
@@ -2019,6 +2288,7 @@
               : tf("cinema.produceSilent", { n: data.count || 0 })
       );
       renderCinemaShots();
+      setProdLane("director");
       await refreshJobs();
     } catch (e) {
       toast(String(e.message || e));
@@ -2041,6 +2311,33 @@
       renderCinemaAudio();
       await saveCinema(true);
       toast(tt("cinema.scoreLocked"));
+      return true;
+    } catch (e) {
+      toast(String(e.message || e));
+      return false;
+    }
+  }
+
+  async function deleteUploadedMusic(id, kind) {
+    const musicId = String(id || "").trim();
+    if (!musicId || !confirm("Bu şarkıyı kaldır?")) return;
+    try {
+      const r = await fetch(`/api/music/${encodeURIComponent(musicId)}`, { method: "DELETE" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data) || "şarkı silinemedi");
+      if (state.musicId === musicId) {
+        state.musicId = null;
+        state.musicMeta = null;
+        updateMusicMetaUi();
+      }
+      const audio = cinemaAudio();
+      if (audio.score_id === musicId) {
+        audio.score_id = "";
+        audio.score_name = "";
+        renderCinemaAudio();
+        await saveCinema(true);
+      }
+      toast(kind === "cinema" ? "Film müziği kaldırıldı" : "Şarkı kaldırıldı");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -2416,6 +2713,15 @@
 
     const actions = document.createElement("div");
     actions.className = "dir-shot-actions";
+    const btnRw = document.createElement("button");
+    btnRw.type = "button";
+    btnRw.className = "btn-secondary";
+    btnRw.textContent = tt("plan.rewrite") || "LLM ile düzenle";
+    btnRw.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void rewriteDirectorShots();
+    };
     const btnQ = document.createElement("button");
     btnQ.type = "button";
     btnQ.className = "cta";
@@ -2425,6 +2731,8 @@
       e.stopPropagation();
       applyBrief(true);
     };
+    actions.appendChild(btnRw);
+    actions.appendChild(btnQ);
     const btnClose = document.createElement("button");
     btnClose.type = "button";
     btnClose.className = "btn-ghost";
@@ -2444,7 +2752,6 @@
       e.stopPropagation();
       setDirectorTab("plan");
     };
-    actions.appendChild(btnQ);
     actions.appendChild(btnPlan);
     actions.appendChild(btnClose);
     body.appendChild(actions);
@@ -2457,7 +2764,11 @@
 
   function applyCinemaFromDirector(data) {
     const cine = data && data.cinema;
+    // Never resurrect cards from a null/stale cinema payload
     if (!cine || typeof cine !== "object") return;
+    if (!Array.isArray(cine.characters) && !Array.isArray(cine.locations) && !Array.isArray(cine.shots)) {
+      return;
+    }
     const base = emptyCinema();
     state.cinema = {
       ...base,
@@ -2473,6 +2784,23 @@
         s: (state.cinema.shots || []).length,
       })
     );
+  }
+
+  function scrubDirectorBriefName(name) {
+    const n = String(name || "").trim().toLowerCase();
+    if (!n || !state.directorBrief) return;
+    const brief = { ...state.directorBrief };
+    const filterNamed = (arr) =>
+      (Array.isArray(arr) ? arr : []).filter(
+        (x) => String((x && x.name) || "").trim().toLowerCase() !== n
+      );
+    brief.characters = filterNamed(brief.characters);
+    brief.locations = filterNamed(brief.locations);
+    state.directorBrief = brief;
+    if ((brief.shots || []).length) {
+      renderDirectorShotPanel(brief, { open: !!$("director-shot-panel")?.open });
+      if (state.directorTab === "plan") renderDirectorPlanBoard();
+    }
   }
 
   function syncDirectorBriefFromResponse(data) {
@@ -3360,6 +3688,7 @@
       clip_duration: state.duration || 5,
       cinema_studio:
         !!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden"),
+      prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
     };
     // Prefer SSE stream so thinking shows in the same assistant row
     try {
@@ -3548,6 +3877,10 @@
       clearDirectorThinking();
       if (!handedOffRetry) {
         state.directorBusy = false;
+        setDirectorUi(
+          state.directorOnline,
+          state.directorOnline ? $("director-status")?.textContent : tt("llm.help.noApi")
+        );
         await refreshDirectorStatus();
         if (state.directorReady || (state.directorBrief && state.directorBrief.shots?.length)) {
           const n = state.directorBrief?.shots?.length || 0;
@@ -3567,11 +3900,15 @@
       (state.directorBrief && state.directorBrief.shots && state.directorBrief.shots.length) ||
       0;
     const q = $("btn-queue-brief");
+    const rw = $("btn-rewrite-brief");
     if (q) {
       q.classList.toggle("hidden", !state.directorReady);
       if (state.directorReady) {
         q.textContent = n ? `Üretime al (${n} shot)` : "Üretime al";
       }
+    }
+    if (rw) {
+      rw.classList.toggle("hidden", !state.directorReady);
     }
     if (state.directorBrief && (state.directorBrief.shots || []).length) {
       renderDirectorShotPanel(state.directorBrief);
@@ -3581,13 +3918,54 @@
     updateMusicMuxUi();
   }
 
+  async function rewriteDirectorShots() {
+    if (!state.directorSessionId) {
+      toast(tt("plan.needSession") || "Önce yönetmen sohbeti aç");
+      return;
+    }
+    const btns = [$("btn-plan-rewrite"), $("btn-rewrite-brief")].filter(Boolean);
+    btns.forEach((b) => {
+      b.disabled = true;
+    });
+    try {
+      toast(tt("plan.rewriting") || "Shot’lar LLM ile düzenleniyor…");
+      if (state.directorTab === "plan") {
+        await saveDirectorPlan(false);
+      }
+      const r = await fetch("/api/director/rewrite-shots", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: state.directorSessionId, force: true }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      if (data.brief) {
+        state.directorBrief = data.brief;
+        renderDirectorShotPanel(data.brief, { open: true });
+        if (state.directorTab === "plan") renderDirectorPlanBoard();
+      }
+      toast(
+        tf("plan.rewritten", { n: data.rewritten || 0 }) ||
+          `${data.rewritten || 0} shot düzenlendi`
+      );
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      btns.forEach((b) => {
+        b.disabled = false;
+      });
+    }
+  }
+
   function updateMusicMetaUi() {
     const el = $("music-meta");
     const analyze = $("btn-music-analyze");
+    const remove = $("btn-music-remove");
     if (!el) return;
     if (!state.musicMeta) {
       el.textContent = "yok";
       if (analyze) analyze.disabled = true;
+      if (remove) remove.classList.add("hidden");
       updateMusicMuxUi();
       return;
     }
@@ -3600,6 +3978,7 @@
     el.textContent = `${m.filename || "track"} · ${(m.durationSec || 0).toFixed(1)}sn · ~${shots}×5${prog}`;
     el.title = el.textContent;
     if (analyze) analyze.disabled = !!state.directorBusy;
+    if (remove) remove.classList.remove("hidden");
     updateMusicMuxUi();
   }
 
@@ -3816,6 +4195,7 @@
       sampler: $("sampler")?.value || "res_multistep",
       scheduler: $("scheduler")?.value || "simple",
       loraId: $("lora-select") ? $("lora-select").value : (state.loraId || ""),
+      promptRewriterEnabled: !!$("prompt-rewriter-enabled")?.checked,
       produceMode: state.produceMode || "t2v",
       batchContinue: true,
       projectPurpose: state.projectPurpose,
@@ -3842,6 +4222,9 @@
     if ($("steps") && snap.steps != null) $("steps").value = String(snap.steps);
     if ($("sampler") && snap.sampler) $("sampler").value = snap.sampler;
     if ($("scheduler") && snap.scheduler) $("scheduler").value = snap.scheduler;
+    if ($("prompt-rewriter-enabled") && snap.promptRewriterEnabled !== undefined) {
+      $("prompt-rewriter-enabled").checked = !!snap.promptRewriterEnabled;
+    }
     if (snap.loraId !== undefined && $("lora-select")) {
       $("lora-select").value = snap.loraId || "";
       state.loraId = snap.loraId || "";
@@ -3995,15 +4378,33 @@
       toast("Önce yönetmenle konuş");
       return;
     }
+    const queueBtns = [$("btn-queue-brief"), $("btn-plan-queue")].filter(Boolean);
+    queueBtns.forEach((b) => {
+      b.disabled = true;
+    });
+    const inCinema =
+      !!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden");
+    if (queue) {
+      // Show the right production tab immediately (don't wait for slow commit)
+      setProdLane(inCinema ? "director" : "scene");
+      toast(
+        inCinema
+          ? "Shot’lar Direktör kuyruğuna alınıyor…"
+          : "Shot’lar Sahne kuyruğuna alınıyor…"
+      );
+    } else {
+      toast("Shot listesi aktarılıyor…");
+    }
     try {
-      toast(queue ? "Shot’lar kuyruğa alınıyor…" : "Shot listesi aktarılıyor…");
+      const knobs = collectGenerateKnobs();
+      // Don't block commit on per-shot LLM polish — that can take minutes
+      delete knobs.prompt_rewriter_enabled;
       const r = await fetch("/api/director/commit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: state.directorSessionId,
           queue: !!queue,
-          // use UI checkbox to control continue-linking (default checked)
           link_continue: !!$("link-continue")?.checked,
           append_to_chain: true,
           quality: state.quality,
@@ -4011,7 +4412,8 @@
           purpose: state.projectPurpose,
           silent_audio: state.projectSilent || state.projectPurpose === "music_video",
           clip_duration: state.duration || 5,
-          ...collectGenerateKnobs(),
+          prompt_rewriter_enabled: false,
+          ...knobs,
         }),
       });
       const data = await r.json();
@@ -4025,11 +4427,13 @@
             .filter(Boolean);
       if (a.prompt) $("prompt").value = a.prompt;
       if (prompts.length) setQueueFromTexts(prompts);
-      const n = a.shot_count || prompts.length;
+      const n = a.shot_count || prompts.length || (data.queued && data.queued.count) || 0;
       const total = a.total_duration_sec ? ` · ${a.total_duration_sec}sn` : "";
+      const lane = a.lane || (inCinema ? "director" : "scene");
+      if (queue) setProdLane(lane === "director" ? "director" : "scene");
       toast(
         queue
-          ? `Üretim: ${n} iş sıraya alındı (continue zinciri)${total}`
+          ? `Üretim: ${n} iş sıraya alındı (${lane === "director" ? "Direktör" : "Sahne"})${total}`
           : `${n} shot listede${total}`
       );
       if (queue) {
@@ -4038,6 +4442,10 @@
       }
     } catch (e) {
       toast(String(e.message || e));
+    } finally {
+      queueBtns.forEach((b) => {
+        b.disabled = false;
+      });
     }
   }
 
@@ -4111,7 +4519,7 @@
   function selectJob(job, { play = true } = {}) {
     state.selectedJobId = job.id;
     const meta = `${job.duration || "?"}sn · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`;
-    setClipPrompt(job.prompt || "", meta);
+    setClipPrompt(job.prompt || "", meta, job.seed);
     if (play && job.output?.url) {
       showPlayerVideo(job.output.url, job.id, job.prompt || "");
     }
@@ -4125,6 +4533,22 @@
         ? `Hazır · ${job.duration}sn · seed ${job.seed}`
         : `${job.status} · ${job.progress || 0}%`
     );
+  }
+
+  function jobLane(j) {
+    const lane = String(j?.lane || "").trim().toLowerCase();
+    if (lane === "director" || lane === "scene") return lane;
+    if (j?.cinema_batch || j?.batch_id) return "director";
+    return "scene";
+  }
+
+  function setProdLane(lane) {
+    const next = lane === "director" ? "director" : "scene";
+    state.prodLane = next;
+    document.querySelectorAll("#prod-lane-tabs .chip").forEach((btn) => {
+      btn.classList.toggle("on", btn.dataset.lane === next);
+    });
+    renderJobs();
   }
 
   function renderJobs() {
@@ -4141,10 +4565,11 @@
       if (ra !== rb) return ra - rb;
       return (Number(b.created_at) || 0) - (Number(a.created_at) || 0);
     };
-    const active = state.jobs
+    const laneJobs = state.jobs.filter((j) => jobLane(j) === state.prodLane);
+    const active = laneJobs
       .filter((j) => j.status === "running" || j.status === "queued")
       .sort(productionOrderCmp);
-    const finished = state.jobs
+    const finished = laneJobs
       .filter((j) => j.status !== "running" && j.status !== "queued")
       .sort(byFinishedThenRecent)
       .slice(0, 40);
@@ -4153,11 +4578,12 @@
     if (head) {
       const qn = active.filter((j) => j.status === "queued").length;
       const rn = active.some((j) => j.status === "running");
+      const laneLabel = state.prodLane === "director" ? tt("prod.laneDirector") : tt("prod.laneScene");
       head.textContent = rn
-        ? tf("prod.queueRun", { n: qn })
+        ? `${laneLabel} · ${tf("prod.queueRun", { n: qn })}`
         : qn
-          ? tf("prod.queueN", { n: qn })
-          : tt("prod.queue");
+          ? `${laneLabel} · ${tf("prod.queueN", { n: qn })}`
+          : `${laneLabel} · ${tt("prod.queue")}`;
     }
     const activeOrder = new Map(active.map((j, i) => [j.id, i + 1]));
     for (const j of jobs) {
@@ -4186,7 +4612,8 @@
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration || "?"}sn · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`
+            `${j.duration || "?"}sn · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
+            j.seed
           );
         };
       }
@@ -4200,7 +4627,8 @@
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration || "?"}sn · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`
+            `${j.duration || "?"}sn · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
+            j.seed
           );
         };
         right.appendChild(cp);
@@ -4460,7 +4888,8 @@
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration != null ? j.duration + "sn · " : ""}${j.width || "?"}×${j.height || "?"}`
+            `${j.duration != null ? j.duration + "sn · " : ""}${j.width || "?"}×${j.height || "?"}`,
+            j.seed
           );
         };
       }
@@ -4487,7 +4916,7 @@
           selectJob(live);
         } else {
           showPlayerVideo(url, j.id, j.prompt || "");
-          setClipPrompt(j.prompt || "", meta);
+          setClipPrompt(j.prompt || "", meta, j.seed);
           toast(`Arşiv · ${meta}`);
         }
         $("view-gallery").classList.add("hidden");
@@ -4629,7 +5058,7 @@
       job.output?.url ||
       `/api/gallery/${jobId}/video`;
     showPlayerVideo(url, jobId, job.prompt || "");
-    if (job.prompt) setClipPrompt(job.prompt);
+    if (job.prompt) setClipPrompt(job.prompt, undefined, job.seed);
     setProduceMode("continue");
     await fillContinueSource();
     const sel = $("continue-source");
@@ -4780,9 +5209,16 @@
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
+      if (data.prompt && data.prompt_rewritten) {
+        $("prompt").value = data.prompt;
+      } else if (data.prompt && !!$("prompt-rewriter-enabled")?.checked) {
+        $("prompt").value = data.prompt;
+      }
       state.selectedJobId = data.id;
       state.playerCleared = false;
       state.pendingContinueChild = isContinue ? data.id : null;
+      state.prodLane = "scene";
+      setProdLane("scene");
       const queuedLabel = isContinue
         ? faceLockOn
           ? "Devam + yüz kilidi sıraya alındı"
@@ -4791,7 +5227,9 @@
           ? "Yüz referansı kuyruğa alındı (sonraki kliplerde kilitlenebilir)"
           : isRef
             ? "Referans kuyruğa alındı"
-            : "Yeni video kuyruğa alındı";
+            : data.prompt_rewritten
+              ? "Yeni video kuyruğa alındı (LLM düzenleme)"
+              : "Yeni video kuyruğa alındı";
       toast(queuedLabel);
       setDirectorOpen(false);
       await refreshJobs();
@@ -4859,6 +5297,7 @@
       sampler: $("sampler")?.value || "res_multistep",
       scheduler: $("scheduler")?.value || "simple",
       sage_attention: "disabled",
+      prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
       ...collectLoraPayload(),
     };
   }
@@ -5203,6 +5642,8 @@
   });
   $("btn-plan-save")?.addEventListener("click", () => void saveDirectorPlan(false));
   $("btn-plan-to-cinema")?.addEventListener("click", () => void saveDirectorPlan(true));
+  $("btn-plan-rewrite")?.addEventListener("click", () => void rewriteDirectorShots());
+  $("btn-rewrite-brief")?.addEventListener("click", () => void rewriteDirectorShots());
   $("director-plan-shots")?.addEventListener("click", (e) => {
     const del = e.target.closest(".dir-plan-shot-del");
     if (!del) return;
@@ -5215,7 +5656,37 @@
   });
   $("btn-plan-queue")?.addEventListener("click", async () => {
     await saveDirectorPlan(false);
+    setProdLane("director");
     void applyBrief(true);
+  });
+  $("btn-prompt-rewrite")?.addEventListener("click", async () => {
+    const prompt = $("prompt")?.value?.trim();
+    if (!prompt) {
+      toast("Prompt yaz");
+      return;
+    }
+    const btn = $("btn-prompt-rewrite");
+    if (btn) btn.disabled = true;
+    try {
+      toast(tt("prompt.rewriting") || "LLM düzenliyor…");
+      const r = await fetch("/api/prompt/rewrite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          prompt_rewriter_enabled: true,
+          context: `mode=${state.produceMode || "t2v"}`,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      if (data.prompt) $("prompt").value = data.prompt;
+      toast(data.rewritten ? tt("prompt.rewritten") || "Prompt düzenlendi" : tt("prompt.unchanged") || "Değişiklik yok");
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   });
   $("btn-bible-generate")?.addEventListener("click", async () => {
     const chars = ($("bible-characters")?.value || "")
@@ -5344,6 +5815,24 @@
   });
   $("btn-cinema-close")?.addEventListener("click", () => closeCinemaStudio());
   $("btn-cinema-ingest")?.addEventListener("click", () => void ingestCinemaRole());
+  $("btn-cinema-generate-shots")?.addEventListener("click", () => void generateCinemaShots());
+  $("prompt-rewriter-enabled")?.addEventListener("change", () => {
+    void saveProduction({ quiet: true });
+  });
+  (async () => {
+    const status = $("prompt-rewriter-status");
+    if (!status) return;
+    try {
+      const data = await fetch("/api/prompt-rewriter/status").then((r) => r.json());
+      status.textContent = data.available
+        ? (tt("prompt.optimizeReady") || "Yönetmen LLM hazır — Rewrite ile düzenleyebilirsin")
+        : (tt("prompt.optimizeOffline") || "Yönetmen LLM kapalı — Ayarlar’dan model/key aç");
+      const toggle = $("prompt-rewriter-enabled");
+      if (toggle) toggle.disabled = !data.available;
+    } catch {
+      status.textContent = tt("prompt.optimizeStatusFail") || "Prompt düzenleme durumu alınamadı";
+    }
+  })();
   $("cinema-role-script")?.addEventListener("change", () => {
     ensureCinema().role_script = $("cinema-role-script").value || "";
     void saveCinema(true);
@@ -5386,6 +5875,7 @@
     if (!btn) return;
     cinemaAudio().mode = btn.dataset.audio === "silent" ? "silent" : "film";
     renderCinemaAudio();
+    renderCinemaTimeline();
     void saveCinema(true);
   });
   $("cinema-score-file")?.addEventListener("change", (e) => {
@@ -5394,6 +5884,9 @@
     void uploadCinemaScore(f);
   });
   $("btn-cinema-mux")?.addEventListener("click", () => void muxCinemaScore());
+  $("btn-cinema-score-remove")?.addEventListener("click", () => {
+    void deleteUploadedMusic(cinemaAudio().score_id, "cinema");
+  });
   $("btn-cinema-concat")?.addEventListener("click", () => void concatCinemaFilm());
   $("btn-gallery-concat")?.addEventListener("click", () => void concatCinemaFilm());
   $("btn-cinema-film-new")?.addEventListener("click", () => {
@@ -5493,6 +5986,7 @@
       shot.text = e.target.value;
       void saveCinema(true);
       scheduleCinemaPreview();
+      renderCinemaTimeline();
     }
   });
   $("cinema-shots")?.addEventListener("click", (e) => {
@@ -5547,20 +6041,39 @@
         e.stopPropagation();
         const card = imgDel.closest(".cinema-card");
         if (!card) return;
-        void removeCinemaImage(kind, card.dataset.id || "", imgDel.dataset.file || "");
+        void removeCinemaImage(kind, card.dataset.id || "", imgDel.dataset.file || "").catch((error) => {
+          toast(String(error.message || error));
+        });
         return;
       }
       const del = e.target.closest(".cinema-del");
-      if (!del) return;
+      if (del) {
+        e.preventDefault();
+        e.stopPropagation();
+        const card = del.closest(".cinema-card");
+        if (!card) return;
+        void deleteCinemaAsset(kind, card.dataset.id || "");
+        return;
+      }
+      if (kind !== "character" || e.target.closest("input, textarea, select, button, label")) return;
+      const card = e.target.closest(".cinema-card");
+      if (!card) return;
+      const item = cinemaItem(kind, card.dataset.id || "");
+      if (!item) return;
       e.preventDefault();
       e.stopPropagation();
-      const card = del.closest(".cinema-card");
-      if (!card) return;
-      void deleteCinemaAsset(kind, card.dataset.id || "");
+      state.selectedCharacter = item;
+      renderCinemaCharacterModal();
     });
   };
   cinemaDelegate("cinema-chars", "character");
   cinemaDelegate("cinema-locs", "location");
+  $("btn-cinema-character-close")?.addEventListener("click", closeCinemaCharacterModal);
+  $("btn-cinema-character-cancel")?.addEventListener("click", closeCinemaCharacterModal);
+  $("btn-cinema-character-save")?.addEventListener("click", () => void saveCinemaCharacterModal());
+  $("cinema-character-modal")?.addEventListener("click", (e) => {
+    if (e.target === $("cinema-character-modal")) closeCinemaCharacterModal();
+  });
   $("first-frame-file")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     const f = e.target.files && e.target.files[0];
@@ -5712,17 +6225,19 @@
   }
 
   async function clearJobs(scope) {
+    const lane = state.prodLane === "director" ? "director" : "scene";
+    const laneLabel = lane === "director" ? tt("prod.laneDirector") : tt("prod.laneScene");
     const labels = {
       errors: "hatalı / iptal kayıtları",
       finished: "bitmiş + hatalı geçmişi",
       done: "başarılı klipleri",
     };
-    if (!confirm(`${labels[scope] || scope} silinsin mi?`)) return;
+    if (!confirm(`${laneLabel}: ${labels[scope] || scope} silinsin mi?`)) return;
     try {
       const r = await fetch("/api/jobs/clear", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope, delete_files: true }),
+        body: JSON.stringify({ scope, delete_files: true, lane }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
@@ -5738,6 +6253,9 @@
 
   $("btn-clear-errors").onclick = () => clearJobs("errors");
   $("btn-clear-finished").onclick = () => clearJobs("finished");
+  document.querySelectorAll("#prod-lane-tabs .chip").forEach((btn) => {
+    btn.addEventListener("click", () => setProdLane(btn.dataset.lane));
+  });
 
 
   $("btn-reset-production")?.addEventListener("click", async () => {
@@ -6021,6 +6539,9 @@
     if (f) uploadMusicFile(f);
   });
   $("btn-music-analyze")?.addEventListener("click", () => analyzeMusic());
+  $("btn-music-remove")?.addEventListener("click", () => {
+    void deleteUploadedMusic(state.musicId, "director");
+  });
   $("btn-music-mux")?.addEventListener("click", () => muxMusicFinal());
   $("btn-gallery")?.addEventListener("click", () => {
     setDirectorLlmOpen(false);

@@ -331,13 +331,14 @@ Türkçe `reply` ile ne değiştiğini söyle. Üretime alma, kuyruk yok.
 
 CINEMA_STUDIO_ADDENDUM = """
 ## SİNEMA STÜDYOSU (şu an açık)
-Kullanıcı Direktör sinema panelinden geldi. Çıktın oraya yazılır.
+Kullanıcı Direktör sinema panelinden geldi. Aşağıdaki DİREKTÖR STÜDYOSU board kaynağıdır.
 
-Hedef: karakter kartları, mekan kartları, shot listesi.
-Shot metninde karakter/mekan adlarını birebir kullan (Arthur, arthur2, Rooftop).
-Mevcut still / görselleri silme; kartları isimle birleştir.
-Brief hazır olunca JSON'da characters[], locations[], shots[] (h3Prompt + linkToPrev) ver.
-Üretime alma — sadece stüdyo altyapısını kur.
+Kurallar:
+- Sadece board’daki karakter ve mekan adlarını kullan; board dışından karakter/mekan uydurma.
+- Shot metninde karakter/mekan adlarını birebir yaz (Arthur, Rooftop).
+- Mevcut still / görselleri silme; kartları isimle birleştir.
+- Brief / shot listesi yazarken characters[], locations[], shots[] (h3Prompt veya text + continue) ver.
+- Üretime alma — stüdyo altyapısını ve shot metinlerini kur.
 """
 
 

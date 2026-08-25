@@ -15,7 +15,26 @@ STUDIO_ROOT = Path(__file__).resolve().parent.parent
 CINEMA_FILE = STUDIO_ROOT / "data" / "cinema.json"
 FILMS_DIR = STUDIO_ROOT / "data" / "films"
 REFS_DIR = STUDIO_ROOT / "data" / "refs"
+COMFY_INPUT_DIR = STUDIO_ROOT.parent / "app" / "input"
 MUSIC_DIR = STUDIO_ROOT / "data" / "music"
+
+
+def _unlink_retry(path: Path, attempts: int = 8) -> bool:
+    if not path or str(path) in ("", ".", "None"):
+        return True
+    try:
+        if not path.exists() or not path.is_file():
+            return True
+    except OSError:
+        return True
+    for attempt in range(attempts):
+        try:
+            path.unlink()
+            return True
+        except OSError:
+            if attempt + 1 < attempts:
+                time.sleep(0.12 * (attempt + 1))
+    return False
 
 SETUP_HINTS: dict[str, dict[str, str]] = {
     "look": {
@@ -429,7 +448,7 @@ def upsert_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     key = "characters" if kind == "character" else "locations"
     cleaned = _clean_asset(asset, kind)
     items = data[key]
-    idx = next((i for i, x in enumerate(items) if x.get("id") == cleaned["id"]), -1)
+    idx = next((i for i, x in enumerate(items) if str(x.get("id") or "") == cleaned["id"]), -1)
     if idx >= 0:
         items[idx] = cleaned
     else:
@@ -439,14 +458,61 @@ def upsert_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def update_asset(kind: str, asset_id: str, fields: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Patch an existing card in one load/save. Never re-creates a deleted id."""
+    aid = str(asset_id or "").strip()
+    if not aid:
+        return None
+    data = load()
+    key = "characters" if kind == "character" else "locations"
+    items = data[key]
+    idx = next((i for i, x in enumerate(items) if str(x.get("id") or "") == aid), -1)
+    if idx < 0:
+        return None
+    merged = {**(items[idx] if isinstance(items[idx], dict) else {}), **(fields or {})}
+    merged["id"] = aid
+    cleaned = _clean_asset(merged, kind)
+    items[idx] = cleaned
+    data[key] = items
+    save(data)
+    return cleaned
+
+
 def delete_asset(kind: str, asset_id: str) -> bool:
     data = load()
     key = "characters" if kind == "character" else "locations"
+    aid = str(asset_id or "").strip()
+    removed = [x for x in data[key] if str(x.get("id") or "") == aid]
     before = len(data[key])
-    data[key] = [x for x in data[key] if x.get("id") != asset_id]
+    data[key] = [x for x in data[key] if str(x.get("id") or "") != aid]
     if len(data[key]) == before:
         return False
     save(data)
+    keep_files = {
+        Path(str(image.get("file"))).name
+        for item in data[key]
+        for image in item.get("images") or []
+        if isinstance(image, dict) and image.get("file")
+    }
+    for item in data[key]:
+        if item.get("image"):
+            keep_files.add(Path(str(item["image"])).name)
+    for item in removed:
+        images = list(item.get("images") or [])
+        if item.get("image"):
+            images.append({"file": item["image"]})
+        for image in images:
+            if not isinstance(image, dict):
+                continue
+            filename = image.get("file") or image.get("name")
+            if not filename:
+                continue
+            name = Path(str(filename)).name
+            if name in keep_files:
+                continue
+            for path in (REFS_DIR / name, COMFY_INPUT_DIR / name):
+                if path.exists():
+                    _unlink_retry(path)
     return True
 
 

@@ -112,6 +112,18 @@ PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
 
+
+def _prompt_optimize_instruction(enabled: bool) -> str:
+    """Extra system guidance when the user opts into LLM prompt polishing (not a LoRA)."""
+    if not enabled:
+        return ""
+    return (
+        "\n\nPROMPT OPTIMIZE: Rewrite and optimize raw scene text into production-ready "
+        "MiniMax H3 SCENE prompts. Preserve names, identity, wardrobe, location, "
+        "camera, duration, dialogue tags, and audio intent. Return structured prompts, "
+        "not an explanation."
+    )
+
 def _normalize_http_url(raw: str, default: str) -> str:
     u = (raw or "").strip() or default
     if not u.startswith(("http://", "https://")):
@@ -357,6 +369,53 @@ comfy = ComfyClient(COMFY_URL)
 ollama = OllamaClient(OLLAMA_URL)
 llm = LlmRouter(LLM_SETTINGS_FILE, ollama=ollama)
 notifier = NotifyService(NOTIFY_SETTINGS_FILE)
+
+
+async def _rewrite_scene_text(
+    raw: str,
+    *,
+    enabled: bool,
+    context: str = "",
+) -> str:
+    """LLM SCENE polish when prompt-optimize toggle is on (instruction-following, not LoRA)."""
+    text = (raw or "").strip()
+    if not text or not enabled:
+        return text
+    try:
+        model = await llm.resolve_model(None)
+    except Exception:
+        return text
+    sys = (
+        "You are a MiniMax H3 prompt editor. Rewrite the user draft into ONE production-ready "
+        "cinematic SCENE screenplay paragraph block in English. "
+        "Preserve character names, wardrobe, location, camera intent, duration cues, "
+        "<d>[Lang]…</d> dialogue tags, and silent/audio policy. "
+        "Do not explain. Output only the rewritten SCENE body."
+        + _prompt_optimize_instruction(True)
+    )
+    if context.strip():
+        sys += "\n\nCONTEXT:\n" + context.strip()[:2000]
+    try:
+        out = await llm.chat(
+            model,
+            [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": text},
+            ],
+            temperature=0.4,
+            think=False,
+            retries=2,
+            num_predict=4096,
+        )
+        cleaned = (out or "").strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:\w+)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+        return cleaned if len(cleaned) >= 40 else text
+    except Exception as e:
+        slog.warn("prompt rewrite skipped", err=e)
+        return text
+
 
 # job queue state
 _jobs: list[dict] = []
@@ -715,6 +774,67 @@ def _load_sessions():
             _sessions = {}
 
 
+def _session_removed_names(sess: Optional[dict]) -> set[str]:
+    if not isinstance(sess, dict):
+        return set()
+    out: set[str] = set()
+    for key in ("removed_characters", "removed_locations"):
+        for raw in sess.get(key) or []:
+            n = str(raw or "").strip().lower()
+            if n:
+                out.add(n)
+    return out
+
+
+def _scrub_brief_removed(brief: Optional[dict], sess: Optional[dict]) -> Optional[dict]:
+    """Drop characters/locations the user removed so LLM cannot resurrect them via merge."""
+    if not isinstance(brief, dict):
+        return brief
+    removed = _session_removed_names(sess)
+    if not removed:
+        return brief
+    out = dict(brief)
+
+    def _keep(item: Any) -> bool:
+        if isinstance(item, dict):
+            name = str(item.get("name") or item.get("role") or "").strip().lower()
+        else:
+            name = str(item or "").strip().lower()
+        return bool(name) and name not in removed
+
+    if isinstance(out.get("characters"), list):
+        out["characters"] = [c for c in out["characters"] if _keep(c)]
+    if isinstance(out.get("locations"), list):
+        out["locations"] = [c for c in out["locations"] if _keep(c)]
+    return out
+
+
+def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
+    """Mark name as removed on all director sessions and strip it from briefs."""
+    label = str(name or "").strip()
+    if not label and not asset_id:
+        return
+    key = "removed_characters" if kind == "character" else "removed_locations"
+    low = label.lower()
+    changed = False
+    for sess in _sessions.values():
+        if not isinstance(sess, dict):
+            continue
+        bucket = list(sess.get(key) or [])
+        if low and low not in {str(x).strip().lower() for x in bucket}:
+            bucket.append(label)
+            sess[key] = bucket
+            changed = True
+        if isinstance(sess.get("brief"), dict):
+            before = json.dumps(sess["brief"], sort_keys=True, ensure_ascii=False)
+            sess["brief"] = _scrub_brief_removed(sess["brief"], sess)
+            after = json.dumps(sess["brief"] or {}, sort_keys=True, ensure_ascii=False)
+            if before != after:
+                changed = True
+    if changed:
+        _save_sessions()
+
+
 class GenerateBody(BaseModel):
     prompt: str = Field(..., min_length=1)
     duration: int = Field(5, description="4 | 5 | 6 | 8 | 10 | 15")
@@ -739,6 +859,8 @@ class GenerateBody(BaseModel):
     # music video: strip generated audio after download
     silent_audio: bool = False
     purpose: Optional[str] = None
+    prompt_rewriter_enabled: bool = False
+    lane: Optional[str] = None
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
@@ -795,6 +917,8 @@ class BatchBody(BaseModel):
     # Cinema film score is mixed later — do NOT set music_id (that silences dialogue).
     cinema_batch: Optional[str] = None
     score_id: Optional[str] = None
+    lane: Optional[str] = None
+    prompt_rewriter_enabled: bool = False
 
 
 class CinemaProduceBody(BaseModel):
@@ -881,6 +1005,7 @@ class DirectorChatBody(BaseModel):
     cinema_studio: Optional[bool] = None
     ui_lang: Optional[str] = None
     plan_mode: Optional[bool] = None
+    prompt_rewriter_enabled: bool = False
 
 
 class DirectorCommitBody(BaseModel):
@@ -899,6 +1024,19 @@ class DirectorCommitBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    prompt_rewriter_enabled: bool = False
+    sage_attention: Optional[str] = "auto"
+
+
+class DirectorRewriteShotsBody(BaseModel):
+    session_id: str
+    force: bool = False
+
+
+class PromptRewriteBody(BaseModel):
+    prompt: str = Field(..., min_length=1)
+    context: Optional[str] = None
+    prompt_rewriter_enabled: bool = True
 
 
 def _looks_like_finished_plan(text: str) -> bool:
@@ -1412,6 +1550,13 @@ async def generate(body: GenerateBody):
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
 
+    if body.prompt_rewriter_enabled:
+        rewritten = await _rewrite_scene_text(
+            body.prompt, enabled=True, context=f"mode={body.mode or 't2v'}"
+        )
+        if rewritten and rewritten.strip():
+            body.prompt = rewritten.strip()
+
     mode = (body.mode or "").strip().lower()
     continue_from = body.continue_from_job_id
     first_frame = body.first_frame_name
@@ -1606,6 +1751,8 @@ async def generate(body: GenerateBody):
         "silent_audio": silent,
         "purpose": purpose,
         "sage_attention": _sage_mode(body),
+        "lane": "director" if (body.lane or "").strip().lower() == "director" else "scene",
+        "prompt_rewritten": bool(body.prompt_rewriter_enabled),
         **_lora_fields(lora_src),
     }
     async with _lock:
@@ -1636,6 +1783,14 @@ async def batch(body: BatchBody):
     prompts = [p.strip() for p in body.prompts if p.strip()]
     if not prompts:
         raise HTTPException(400, "prompt yok")
+    if body.prompt_rewriter_enabled:
+        rewritten_prompts = []
+        for i, p in enumerate(prompts):
+            rp = await _rewrite_scene_text(
+                p, enabled=True, context=f"batch shot {i + 1}/{len(prompts)}"
+            )
+            rewritten_prompts.append((rp or p).strip() or p)
+        prompts = rewritten_prompts
     shot_modes = [str(m or "").strip().lower() for m in (body.modes or [])]
     use_per_shot = bool(shot_modes)
     # Chain: 2+ always; 1+ append_to_chain when tip exists; else link_continue flag
@@ -1703,8 +1858,15 @@ async def batch(body: BatchBody):
             )
             shot_text = bound["prompt"] if bound.get("hits") else text
             if mode in ("continue", "face_continue"):
-                # Last-frame I2V: identity stays in the prompt text, not as extra stills
+                # Prefer locked face stills; also absorb newly bound character portraits
                 shot_refs = list(face_refs) if face_refs else []
+                if body.face_lock and bound.get("has_character"):
+                    extra = [str(x) for x in (bound.get("ref_images") or []) if x]
+                    if extra:
+                        face_refs = list(dict.fromkeys([*face_refs, *extra]))[:9]
+                        shot_refs = list(face_refs)
+                if face_refs:
+                    mode = "face_continue"
             else:
                 shot_refs = bound["ref_images"] or (list(face_refs) if face_refs else [])
             if bound.get("hits") and shot_refs and mode == "t2v":
@@ -1713,6 +1875,9 @@ async def batch(body: BatchBody):
                     if bound["has_character"] and not bound["has_location"]
                     else "ref"
                 )
+            # Accumulate character/face stills so later continues stay face_continue
+            if body.face_lock and shot_refs:
+                face_refs = list(dict.fromkeys([*face_refs, *shot_refs]))[:9]
             lora_src, graph = _lora_src_for_shot(body, bound, mode)
             shot_steps, shot_sampler, shot_scheduler = _with_lora_preset(
                 lora_src, base_steps, base_sampler, base_scheduler, graph=graph
@@ -1751,6 +1916,11 @@ async def batch(body: BatchBody):
                 "silent_audio": silent,
                 "purpose": purpose,
                 "sage_attention": _sage_mode(body),
+                "lane": (
+                    "director"
+                    if (body.lane or "").strip().lower() == "director" or body.cinema_batch
+                    else "scene"
+                ),
                 **_lora_fields(lora_src),
             }
             if mode == "face" and shot_refs:
@@ -1908,6 +2078,17 @@ class ClearJobsBody(BaseModel):
     # finished = error+cancelled+done; all = everything except running/queued
     scope: str = "errors"
     delete_files: bool = True
+    # Optional: only clear jobs in this lane (scene | director)
+    lane: Optional[str] = None
+
+
+def _job_lane(job: dict) -> str:
+    lane = str(job.get("lane") or "").strip().lower()
+    if lane in ("scene", "director"):
+        return lane
+    if job.get("cinema_batch") or job.get("batch_id"):
+        return "director"
+    return "scene"
 
 
 @app.post("/api/jobs/clear")
@@ -1917,10 +2098,15 @@ async def clear_jobs(body: ClearJobsBody):
     scope = (body.scope or "errors").strip().lower()
     if scope not in ("errors", "done", "finished", "all"):
         raise HTTPException(400, "scope: errors | done | finished | all")
+    lane_filter = (body.lane or "").strip().lower()
+    if lane_filter and lane_filter not in ("scene", "director"):
+        raise HTTPException(400, "lane: scene | director")
 
     def _match(j: dict) -> bool:
         st = j.get("status")
         if st in ("running", "queued"):
+            return False
+        if lane_filter and _job_lane(j) != lane_filter:
             return False
         if scope == "errors":
             return st in ("error", "cancelled")
@@ -2063,6 +2249,34 @@ async def get_ref_video(filename: str):
     return FileResponse(path, media_type="video/mp4")
 
 
+@app.delete("/api/refs/{filename}")
+async def delete_ref(filename: str):
+    """Delete an uploaded reference image from Studio and Comfy input."""
+    name = Path(filename).name
+    removed = False
+    for path in (REFS / name, COMFY_INPUT / name):
+        if path.exists():
+            removed = _unlink_retry(path) or removed
+    if not removed:
+        raise HTTPException(404, "görsel yok")
+    slog.info("reference image deleted", filename=name)
+    return {"ok": True, "filename": name}
+
+
+@app.delete("/api/ref-videos/{filename}")
+async def delete_ref_video(filename: str):
+    """Delete an uploaded reference video from Studio and Comfy input."""
+    name = Path(filename).name
+    removed = False
+    for path in (REF_VIDEOS / name, COMFY_INPUT / name):
+        if path.exists():
+            removed = _unlink_retry(path) or removed
+    if not removed:
+        raise HTTPException(404, "video yok")
+    slog.info("reference video deleted", filename=name)
+    return {"ok": True, "filename": name}
+
+
 @app.get("/api/cinema")
 async def cinema_get():
     return cinema.load()
@@ -2077,6 +2291,33 @@ class CinemaIngestBody(BaseModel):
     text: str = ""
     model: Optional[str] = None
     duration: Optional[int] = None
+    prompt_rewriter_enabled: bool = False
+
+
+@app.get("/api/prompt-rewriter/status")
+async def prompt_rewriter_status():
+    """Status for LLM prompt optimize (legacy path name kept for the UI)."""
+    ok = False
+    try:
+        ok = bool(await llm.healthy())
+    except Exception:
+        ok = False
+    return {
+        "available": ok,
+        "runtime": "llm" if ok else "unavailable",
+    }
+
+
+@app.post("/api/prompt/rewrite")
+async def prompt_rewrite(body: PromptRewriteBody):
+    """Rewrite a Sahne prompt without queueing (LLM instruction polish)."""
+    raw = (body.prompt or "").strip()
+    if not raw:
+        raise HTTPException(400, "prompt yok")
+    if not body.prompt_rewriter_enabled:
+        return {"prompt": raw, "rewritten": False}
+    out = await _rewrite_scene_text(raw, enabled=True, context=body.context or "")
+    return {"prompt": out, "rewritten": out.strip() != raw}
 
 
 @app.post("/api/cinema/ingest")
@@ -2101,7 +2342,7 @@ async def cinema_ingest(body: CinemaIngestBody):
         f"Each shot is one {clip}s H3 clip. First shot mode t2v, later shots continue. "
         "Shot text must mention character and location names exactly as in characters[]. "
         "20–40 shots max. No markdown."
-    )
+    ) + _prompt_optimize_instruction(body.prompt_rewriter_enabled)
     user_msg = f"Rol metni / senaryo:\n\n{raw[:24000]}"
     try:
         reply = await llm.chat(
@@ -2137,6 +2378,103 @@ async def cinema_ingest(body: CinemaIngestBody):
     return {"ok": True, "cinema": out}
 
 
+class CinemaGenerateShotsBody(BaseModel):
+    model: Optional[str] = None
+    duration: Optional[int] = None
+    shot_count: Optional[int] = None
+    logline: Optional[str] = None
+    prompt_rewriter_enabled: bool = False
+
+
+@app.post("/api/cinema/generate-shots")
+async def cinema_generate_shots(body: CinemaGenerateShotsBody):
+    """LLM writes shot list from existing cinema cast/locations only (studio production)."""
+    lib = cinema.load()
+    chars = [c for c in (lib.get("characters") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
+    locs = [c for c in (lib.get("locations") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
+    if not chars and not locs:
+        raise HTTPException(400, "Önce karakter veya mekan kartı ekle")
+    if not await llm.healthy():
+        raise HTTPException(503, "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan key ekle")
+    model = await llm.resolve_model(body.model or _director_model)
+    clip = int(body.duration or lib.get("duration") or 5)
+    if clip not in (4, 5, 6, 8, 10, 15):
+        clip = 5
+    n = int(body.shot_count or 0)
+    if n < 1:
+        n = max(4, min(24, 6 + len(chars) * 2))
+    n = max(2, min(40, n))
+    removed: set[str] = set()
+    for sess in (_sessions or {}).values():
+        removed |= _session_removed_names(sess)
+    board = format_cinema_board(lib, full=True)
+    sys_msg = (
+        "You are MiniMax H3 Cinema Studio shot writer. "
+        "Read the studio board and write ONLY a shot list. Reply with JSON only:\n"
+        '{"shots":[{"text":"cinematic SCENE paragraph","mode":"t2v"|"continue"}]}\n'
+        f"Each shot is one {clip}s clip. First shot mode t2v, later shots continue. "
+        f"Write exactly {n} shots. "
+        "Use character and location names EXACTLY as on the board. "
+        "Do not invent new characters or locations. Do not modify cast cards. No markdown."
+    ) + _prompt_optimize_instruction(body.prompt_rewriter_enabled)
+    if removed:
+        sys_msg += (
+            "\nDo not use these removed names: " + ", ".join(sorted(removed)) + "."
+        )
+    user_bits = [board or "(empty board)"]
+    title = str(lib.get("title") or "").strip()
+    logline = str(body.logline or "").strip()
+    if title:
+        user_bits.insert(0, f"Film title: {title}")
+    if logline:
+        user_bits.insert(0, f"Logline / brief: {logline}")
+    role = str(lib.get("role_script") or lib.get("script") or "").strip()
+    if role and len(role) > 40:
+        user_bits.append("Optional role text (tone only; cast board wins):\n" + role[:8000])
+    try:
+        reply = await llm.chat(
+            model,
+            [
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": "\n\n".join(user_bits)},
+            ],
+            temperature=0.45,
+            format_json=True,
+            num_predict=8192,
+        )
+    except Exception as e:
+        raise HTTPException(502, f"Yönetmen LLM hata ({llm.provider()}): {e}") from e
+    parsed = extract_json_object(reply) or {}
+    raw_shots = parsed.get("shots") if isinstance(parsed, dict) else None
+    if not isinstance(raw_shots, list) or not raw_shots:
+        raise HTTPException(502, "LLM shot listesi döndürmedi")
+    new_shots: list[dict[str, Any]] = []
+    for i, item in enumerate(raw_shots[:n]):
+        if isinstance(item, dict):
+            text = str(item.get("text") or item.get("h3Prompt") or item.get("prompt") or "").strip()
+            mode = str(item.get("mode") or ("t2v" if i == 0 else "continue")).lower()
+        else:
+            text = str(item or "").strip()
+            mode = "t2v" if i == 0 else "continue"
+        if not text:
+            continue
+        if mode not in ("continue", "devam", "i2v", "last_frame"):
+            mode = "t2v" if not new_shots else "continue"
+        else:
+            mode = "continue"
+        if not new_shots:
+            mode = "t2v"
+        new_shots.append({"id": str(uuid.uuid4())[:8], "text": text, "mode": mode})
+    if not new_shots:
+        raise HTTPException(502, "Geçerli shot yok")
+    lib["shots"] = new_shots
+    lib["script"] = "\n\n---\n\n".join(s["text"] for s in new_shots)
+    lib["duration"] = clip
+    cinema.save(lib)
+    slog.info("cinema generate-shots", shots=len(new_shots), chars=len(chars), locs=len(locs))
+    return {"ok": True, "cinema": lib, "shot_count": len(new_shots)}
+
+
 @app.post("/api/cinema/character")
 async def cinema_add_character(body: dict[str, Any]):
     return cinema.upsert_asset("character", body or {})
@@ -2144,19 +2482,20 @@ async def cinema_add_character(body: dict[str, Any]):
 
 @app.patch("/api/cinema/character/{asset_id}")
 async def cinema_patch_character(asset_id: str, body: dict[str, Any]):
-    data = cinema.load()
-    found = next((x for x in data["characters"] if x.get("id") == asset_id), None)
-    if not found:
+    updated = cinema.update_asset("character", asset_id, body or {})
+    if not updated:
         raise HTTPException(404, "karakter yok")
-    found.update(body or {})
-    found["id"] = asset_id
-    return cinema.upsert_asset("character", found)
+    return updated
 
 
 @app.delete("/api/cinema/character/{asset_id}")
 async def cinema_del_character(asset_id: str):
+    data = cinema.load()
+    found = next((x for x in (data.get("characters") or []) if str(x.get("id") or "") == str(asset_id)), None)
+    name = str((found or {}).get("name") or "").strip()
     if not cinema.delete_asset("character", asset_id):
         raise HTTPException(404, "karakter yok")
+    _remember_removed_asset("character", name, asset_id)
     return {"ok": True, "id": asset_id}
 
 
@@ -2167,19 +2506,20 @@ async def cinema_add_location(body: dict[str, Any]):
 
 @app.patch("/api/cinema/location/{asset_id}")
 async def cinema_patch_location(asset_id: str, body: dict[str, Any]):
-    data = cinema.load()
-    found = next((x for x in data["locations"] if x.get("id") == asset_id), None)
-    if not found:
+    updated = cinema.update_asset("location", asset_id, body or {})
+    if not updated:
         raise HTTPException(404, "mekan yok")
-    found.update(body or {})
-    found["id"] = asset_id
-    return cinema.upsert_asset("location", found)
+    return updated
 
 
 @app.delete("/api/cinema/location/{asset_id}")
 async def cinema_del_location(asset_id: str):
+    data = cinema.load()
+    found = next((x for x in (data.get("locations") or []) if str(x.get("id") or "") == str(asset_id)), None)
+    name = str((found or {}).get("name") or "").strip()
     if not cinema.delete_asset("location", asset_id):
         raise HTTPException(404, "mekan yok")
+    _remember_removed_asset("location", name, asset_id)
     return {"ok": True, "id": asset_id}
 
 
@@ -2367,6 +2707,7 @@ async def _queue_cinema_seamless(
         "sage_attention": _sage_mode(body),
         "cinema_batch": cinema_batch,
         "batch_id": cinema_batch,
+        "lane": "director",
         **_lora_fields(lora_src),
     }
     if audio.get("score_id"):
@@ -2426,7 +2767,24 @@ async def cinema_produce(body: CinemaProduceBody):
     )
     prompts = [cinema.apply_look(s["text"], head) for s in parsed]
     modes = [s["mode"] for s in parsed]
-    still_lock = any(
+    # Seed face lock from cast portraits that appear in any shot (or all char stills)
+    cast_refs: list[str] = []
+    for p in prompts:
+        bound = cinema.bind_prompt(p, lib=lib)
+        for f in bound.get("ref_images") or []:
+            if f and f not in cast_refs:
+                cast_refs.append(str(f))
+    if not cast_refs:
+        for ch in lib.get("characters") or []:
+            if not isinstance(ch, dict):
+                continue
+            for im in ch.get("images") or []:
+                if isinstance(im, dict) and im.get("file"):
+                    f = str(im["file"])
+                    if f not in cast_refs:
+                        cast_refs.append(f)
+    cast_refs = cast_refs[:9]
+    still_lock = bool(cast_refs) or any(
         (cinema.bind_prompt(p, lib=lib).get("ref_images") or []) for p in prompts
     )
     want_seamless = bool(body.seamless)
@@ -2444,27 +2802,34 @@ async def cinema_produce(body: CinemaProduceBody):
             purpose=purpose or "short_film",
         )
     else:
+        chain_modes = modes
+        if body.seamless:
+            chain_modes = ["t2v"] + ["continue"] * max(0, len(prompts) - 1)
         bb = BatchBody(
             prompts=prompts,
-            modes=modes,
+            modes=chain_modes,
             duration=body.duration,
             aspect=body.aspect,
             quality=body.quality,
             steps=body.steps if body.steps and body.steps > 0 else 20,
             sampler=body.sampler,
             scheduler=body.scheduler,
-            link_continue=False,
+            link_continue=bool(body.link_continue or body.seamless),
             append_to_chain=False,
             seed=body.seed,
             silent_audio=silent,
             purpose=purpose or "short_film",
             face_lock=True,
+            ref_images=cast_refs or None,
+            ref_role="face" if cast_refs else None,
+            ref_image_size="max" if cast_refs else None,
             lora_id=body.lora_id,
             lora_name=body.lora_name,
             lora_strength=body.lora_strength,
             sage_attention=_sage_mode(body),
             cinema_batch=cinema_batch,
             score_id=audio.get("score_id") or None,
+            lane="director",
         )
         queued = await batch(bb)
     for i, job in enumerate(queued.get("jobs") or []):
@@ -3137,6 +3502,9 @@ async def director_new_session(model: Optional[str] = None, lang: Optional[str] 
         "messages": [{"role": "assistant", "content": opening_message(ui)}],
         "brief": None,
         "ready": False,
+        "removed_characters": [],
+        "removed_locations": [],
+        "cinema_studio": False,
         "created_at": time.time(),
     }
     _sessions[sid] = sess
@@ -3501,46 +3869,47 @@ async def _director_chat_impl(body: DirectorChatBody):
                 n = len(brief["shots"])
                 need = brief.get("expectedShotCount") or n
                 reply = ready_shots_reply(n, need, ui_lang)
-                sess["brief"] = brief
+                sess["brief"] = _scrub_brief_removed(brief, sess)
                 sess["ready"] = True
                 sess["messages"].append({"role": "assistant", "content": reply})
                 _sessions[sid] = sess
                 _save_sessions()
-                cinema_out = None
-                if sess.get("cinema_studio"):
-                    try:
-                        role = str((cinema.load() or {}).get("role_script") or "")
-                        cinema_out = cinema.ingest_from_director_brief(brief, role)
-                    except Exception:
-                        cinema_out = None
                 return {
                     "session_id": sid,
                     "reply": reply,
                     "ready": True,
-                    "brief": brief,
+                    "brief": sess["brief"],
                     "shot_count": n,
                     "model": model,
                     "messages": sess["messages"],
-                    "cinema": cinema_out,
+                    "cinema": None,
                 }
 
     # Ask model; empty answers are retried inside llm.chat, then local fallback
     sys = system_prompt()
     sys = (sys or "") + ui_lang_addendum(ui_lang)
+    sys = (sys or "") + _prompt_optimize_instruction(body.prompt_rewriter_enabled)
     if plan_mode:
         sys = (sys or "") + "\n\n" + PLAN_MODE_ADDENDUM
         if ui_lang == "en":
             sys += "\nPlan-mode `reply` must be English (not Turkish)."
     if sess.get("cinema_studio"):
         sys = (sys or "") + "\n\n" + CINEMA_STUDIO_ADDENDUM
+        cine_board = format_cinema_board(cinema.load(), full=plan_mode)
+        if cine_board:
+            sys = (sys or "") + "\n\n---\n" + cine_board
     board = format_brief_board(sess.get("brief"), full=plan_mode)
-    try:
-        cinema_board = format_cinema_board(cinema.load(), full=plan_mode)
-    except Exception:
-        cinema_board = ""
-    extra_boards = "\n\n".join(x for x in (board, cinema_board) if x)
-    if extra_boards:
-        sys = (sys or "") + "\n\n---\n" + extra_boards
+    # Outside cinema studio: never inject cinema.json (prevents deleted-card resurrection).
+    # Inside cinema studio: board injected above.
+    removed = _session_removed_names(sess)
+    if removed:
+        sys = (sys or "") + (
+            "\n\nREMOVED CHARACTERS/LOCATIONS (do not reintroduce or name these): "
+            + ", ".join(sorted(removed))
+            + "."
+        )
+    if board:
+        sys = (sys or "") + "\n\n---\n" + board
     history = [{"role": "system", "content": sys}] + sess["messages"][-24:]
     content = ""
     progress = _director_progress.get()
@@ -3638,7 +4007,7 @@ async def _director_chat_impl(body: DirectorChatBody):
         )
     )
     if has_patch and isinstance(sess.get("brief"), dict) and (sess["brief"].get("shots") or []):
-        sess["brief"] = apply_shot_patches(sess["brief"], parsed)
+        sess["brief"] = _scrub_brief_removed(apply_shot_patches(sess["brief"], parsed), sess)
         sess["ready"] = True
         ready = True
         brief = sess["brief"]
@@ -3692,7 +4061,7 @@ async def _director_chat_impl(body: DirectorChatBody):
                 if brief.get("shotsIncomplete"):
                     reply += f"\nUyarı: {n}/{need} shot."
             ready = True
-            sess["brief"] = brief
+            sess["brief"] = _scrub_brief_removed(brief, sess)
             sess["ready"] = True
             if brief.get("purpose") == "music_video":
                 sess["purpose"] = "music_video"
@@ -3702,20 +4071,20 @@ async def _director_chat_impl(body: DirectorChatBody):
 
     sess["messages"].append({"role": "assistant", "content": reply})
     sess["last_raw"] = content
+    if isinstance(sess.get("brief"), dict):
+        sess["brief"] = _scrub_brief_removed(sess["brief"], sess)
     _sessions[sid] = sess
     _save_sessions()
     out_brief = brief or sess.get("brief")
+    if isinstance(out_brief, dict):
+        out_brief = _scrub_brief_removed(out_brief, sess)
     out_shots = (out_brief or {}).get("shots") or []
     # Keep ready sticky after a finished brief so UI can show shot panel + Üretime al
     # while the user keeps chatting / revising.
     out_ready = bool(ready or (sess.get("ready") and out_shots))
     cinema_out = None
-    if sess.get("cinema_studio") and out_ready and out_brief:
-        try:
-            role = str((cinema.load() or {}).get("role_script") or "")
-            cinema_out = cinema.ingest_from_director_brief(out_brief, role)
-        except Exception as e:
-            slog.error("cinema studio ingest from director failed", err=e)
+    # Do NOT auto-ingest director brief into cinema.json on every chat reply —
+    # that resurrected deleted character cards via name-merge.
     return {
         "session_id": sid,
         "reply": reply,
@@ -3826,6 +4195,48 @@ async def director_recover(body: DirectorRecoverBody):
     }
 
 
+@app.post("/api/director/rewrite-shots")
+async def director_rewrite_shots(body: DirectorRewriteShotsBody):
+    """Rewrite each brief h3Prompt with LLM prompt optimize."""
+    sess = _sessions.get(body.session_id)
+    if not sess or not sess.get("brief"):
+        raise HTTPException(400, "Brief yok — önce yönetmenle konuşmayı bitir")
+    brief = _scrub_brief_removed(validate_brief(sess["brief"]), sess) or sess["brief"]
+    shots = list(brief.get("shots") or [])
+    if not shots:
+        raise HTTPException(400, "Shot listesi boş")
+    changed = 0
+    for i, shot in enumerate(shots):
+        if not isinstance(shot, dict):
+            continue
+        if shot.get("rewritten_at") and not body.force:
+            continue
+        raw = str(shot.get("h3Prompt") or shot.get("text") or "").strip()
+        if len(raw) < 20:
+            continue
+        out = await _rewrite_scene_text(
+            raw,
+            enabled=True,
+            context=f"director shot {i + 1}/{len(shots)}",
+        )
+        cleaned = (out or "").strip()
+        if cleaned and cleaned != raw:
+            shot["h3Prompt"] = cleaned
+            shot["rewritten_at"] = time.time()
+            changed += 1
+        elif cleaned:
+            shot["rewritten_at"] = time.time()
+    brief["shots"] = shots
+    sess["brief"] = _scrub_brief_removed(brief, sess) or brief
+    _save_sessions()
+    return {
+        "ok": True,
+        "brief": sess["brief"],
+        "rewritten": changed,
+        "shot_count": len(shots),
+    }
+
+
 @app.post("/api/director/commit")
 async def director_commit(body: DirectorCommitBody):
     sess = _sessions.get(body.session_id)
@@ -3840,6 +4251,7 @@ async def director_commit(body: DirectorCommitBody):
         brief = await _expand_brief_shots(brief, model)
     else:
         brief = ensure_shot_count_sync(brief)
+    brief = _scrub_brief_removed(brief, sess) or brief
     sess["brief"] = brief
     _save_sessions()
     shots = brief.get("shots") or []
@@ -3866,7 +4278,11 @@ async def director_commit(body: DirectorCommitBody):
     brief = ensure_shot_count_sync(validate_brief(brief))
     # ensure_shot_count_sync will respect brief["force_continue"]; use resulting shots directly
     shots = brief.get("shots") or shots
-    prompts = [s["h3Prompt"] for s in shots]
+
+    # Do NOT auto-rewrite every shot here — that blocks Üretime al for minutes
+    # (one LLM call per shot). Use Plan → "Rewriter ile düzenle" explicitly.
+
+    prompts = [s["h3Prompt"] for s in shots if isinstance(s, dict) and s.get("h3Prompt")]
 
     dur = int(brief.get("clipDurationSec") or shots[0].get("durationSec") or 5)
     if dur not in ALLOWED_DURATIONS:
@@ -3881,7 +4297,7 @@ async def director_commit(body: DirectorCommitBody):
     lora_bits = _lora_fields(body)
 
     applied = {
-        "prompt": prompts[0],
+        "prompt": prompts[0] if prompts else "",
         "batch_prompts": "\n\n---\n\n".join(prompts),
         "prompts": prompts,
         "duration": dur,
@@ -3904,6 +4320,10 @@ async def director_commit(body: DirectorCommitBody):
     if music_id:
         applied["music_id"] = music_id
 
+    # Normal Yönetmen (ana Sahne) → scene lane; Sinema stüdyosu → director lane
+    commit_lane = "director" if sess.get("cinema_studio") else "scene"
+    applied["lane"] = commit_lane
+
     queued = None
     if body.queue:
         bb = BatchBody(
@@ -3923,6 +4343,7 @@ async def director_commit(body: DirectorCommitBody):
             lora_name=lora_bits.get("lora_name") or None,
             lora_strength=lora_bits.get("lora_strength"),
             sage_attention=_sage_mode(body),
+            lane=commit_lane,
         )
         queued = await batch(bb)
 
@@ -4006,6 +4427,26 @@ async def music_upload(file: UploadFile = File(...)):
             "suggestedShots10": max(1, math.ceil(dur / 10)),
         }
     }
+
+
+@app.delete("/api/music/{music_id}")
+async def music_delete(music_id: str):
+    if not re.fullmatch(r"[0-9a-fA-F-]{36}", music_id):
+        raise HTTPException(400, "geçersiz şarkı kimliği")
+    MUSIC.mkdir(parents=True, exist_ok=True)
+    meta_path = MUSIC / f"{music_id}.json"
+    if not meta_path.exists():
+        raise HTTPException(404, "şarkı yok")
+    removed = False
+    paths = set(MUSIC.glob(f"{music_id}.*"))
+    paths.add(MUSIC / f"{music_id}_final.mp4")
+    for path in paths:
+        if path.is_file():
+            removed = _unlink_retry(path) or removed
+    if not removed:
+        raise HTTPException(404, "şarkı dosyası yok")
+    slog.info("music deleted", id=music_id)
+    return {"ok": True, "id": music_id}
 
 
 @app.post("/api/music/analyze")

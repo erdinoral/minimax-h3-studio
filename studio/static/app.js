@@ -106,6 +106,11 @@
     found_footage: "handheld found-footage documentary camera, natural light, raw texture",
   };
 
+  function queueBtnLabel(n) {
+    const count = Number(n) || 0;
+    return count ? tf("dir.queueN", { n: String(count) }) : tt("dir.queue");
+  }
+
   function tt(key) {
     return typeof t === "function" ? t(key) : key;
   }
@@ -2682,8 +2687,7 @@
     }
     const hint = document.createElement("p");
     hint.className = "dir-shot-hint muted";
-    hint.textContent =
-      "Beğenmezsen Plan sekmesinde düzenle veya aşağıya yaz. Beğendiysen Üretime al.";
+    hint.textContent = tt("dir.shotPanelHint");
     body.appendChild(hint);
 
     const list = document.createElement("div");
@@ -2725,7 +2729,7 @@
     const btnQ = document.createElement("button");
     btnQ.type = "button";
     btnQ.className = "cta";
-    btnQ.textContent = `Üretime al (${n} shot)`;
+    btnQ.textContent = queueBtnLabel(n);
     btnQ.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -2736,7 +2740,7 @@
     const btnClose = document.createElement("button");
     btnClose.type = "button";
     btnClose.className = "btn-ghost";
-    btnClose.textContent = "Kapat · yazmaya devam";
+    btnClose.textContent = tt("dir.closeKeep");
     btnClose.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -2746,7 +2750,7 @@
     const btnPlan = document.createElement("button");
     btnPlan.type = "button";
     btnPlan.className = "btn-secondary";
-    btnPlan.textContent = "Plan’da düzenle";
+    btnPlan.textContent = tt("dir.editPlan");
     btnPlan.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -3838,7 +3842,7 @@
       setDirectorUi(
         true,
         state.directorReady || nShots
-          ? `Hazır · ${nShots || "?"} shot — Shot’ları gör / Üretime al`
+          ? tf("dir.readyStatusFull", { n: String(nShots || "?") })
           : `Ollama · ${data.model || ""}`
       );
       setDirectorModal(true);
@@ -3885,7 +3889,10 @@
         if (state.directorReady || (state.directorBrief && state.directorBrief.shots?.length)) {
           const n = state.directorBrief?.shots?.length || 0;
           setDirectorReadyUi(true, n);
-          setDirectorUi(true, n ? `Hazır · ${n} shot — Shot’ları gör` : "Hazır — Üretime al");
+          setDirectorUi(
+            true,
+            n ? tf("dir.readyStatusN", { n: String(n) }) : tt("dir.readyStatusQueue")
+          );
           renderDirectorShotPanel(state.directorBrief);
         }
         $("director-msg").focus();
@@ -3904,7 +3911,7 @@
     if (q) {
       q.classList.toggle("hidden", !state.directorReady);
       if (state.directorReady) {
-        q.textContent = n ? `Üretime al (${n} shot)` : "Üretime al";
+        q.textContent = queueBtnLabel(n);
       }
     }
     if (rw) {
@@ -5752,8 +5759,8 @@
       setDirectorTab("plan");
       toast(
         state.directorReady
-          ? `Direktör brief hazır · ${n} shot — Üretime al`
-          : (data.reply || "Brief için sohbete bak").slice(0, 120)
+          ? tf("dir.briefToastReady", { n: String(n) })
+          : (data.reply || tt("dir.briefReady")).slice(0, 120)
       );
     } catch (e) {
       toast(String(e.message || e));

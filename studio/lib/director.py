@@ -868,16 +868,24 @@ def infer_duration_and_shots(
     raw = str(text)
     clip = clip_sec if clip_sec in CLIP_DURATIONS else 5
 
-    # Explicit shot count: "12 shot", "12×5", "12 x 5" — not "16:9" or JSON keys.
+    # Explicit shot count: "12 shot", "5 shotlık", "12×5" — not "16:9" or JSON keys.
     m = re.search(
-        r"(?<![A-Za-z_])(\d{1,3})\s*(?:[×x]\s*(?:4|5|6|8|10|15)\s*)?(?:shot|sahne|klip)\b",
+        r"(?<![A-Za-z_])(\d{1,3})\s*(?:[×x]\s*(?:4|5|6|8|10|15)\s*)?"
+        r"(?:shot(?:lık|luk)?|sahne(?:lik|lık|ler)?|klip(?:lik|lık)?)\b",
         raw,
         re.I,
     )
     if m:
         n = int(m.group(1))
         if 1 <= n <= 120:
-            return n * clip, n
+            shot_total = n * clip
+            # Also read explicit duration ("25 saniyelik") — may differ from n×clip.
+            dur_total = None
+            dm = re.search(r"(\d+)\s*(?:sn\b|saniye(?:lik)?|sec(?:onds)?\b)", raw, re.I)
+            if dm:
+                dur_total = int(dm.group(1))
+            total_out = max(shot_total, dur_total) if dur_total else shot_total
+            return int(total_out), n
 
     # Prefer "1 dakika" / "10 saniye" over clock times so "16:9" cannot win.
     total = None
@@ -1273,11 +1281,29 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
         if parsed:
             brief["totalDurationSec"] = parsed
             total = parsed
+
+    explicit_need: Optional[int] = None
+    try:
+        if brief.get("expectedShotCount") is not None:
+            explicit_need = int(brief["expectedShotCount"])
+    except (TypeError, ValueError):
+        explicit_need = None
+
     need = None
     if isinstance(total, int) and total > 0:
         computed = expected_shot_count(total, dur)
-        need = computed
+        if explicit_need and explicit_need > computed:
+            need = explicit_need
+            brief["expectedShotCount"] = need
+            brief["totalDurationSec"] = max(int(total), explicit_need * dur)
+        else:
+            need = computed
+            brief["expectedShotCount"] = need
+    elif explicit_need and explicit_need > 0:
+        need = explicit_need
         brief["expectedShotCount"] = need
+        if not brief.get("totalDurationSec"):
+            brief["totalDurationSec"] = need * dur
 
     raw_shots = brief.get("shots") or []
     cleaned = []

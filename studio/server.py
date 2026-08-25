@@ -1128,14 +1128,19 @@ def _apply_session_timing(brief: dict, sess: Optional[dict] = None) -> dict:
         clip_sec=clip,
         default_total=None,
     )
-    if total_inf:
-        brief["totalDurationSec"] = int(total_inf)
-        # UI clip is law: 10sn chip + 10sn istek = 1 shot, not 2×5.
-        brief["expectedShotCount"] = expected_shot_count(int(total_inf), clip)
-    elif need_inf:
+    # Explicit shot count from user ("5 shotlık") beats ceil(total/clip).
+    if need_inf:
         brief["expectedShotCount"] = int(need_inf)
-        if not brief.get("totalDurationSec"):
-            brief["totalDurationSec"] = int(need_inf) * clip
+        if total_inf:
+            brief["totalDurationSec"] = max(int(total_inf), int(need_inf) * clip)
+        else:
+            brief["totalDurationSec"] = max(
+                int(brief.get("totalDurationSec") or 0),
+                int(need_inf) * clip,
+            )
+    elif total_inf:
+        brief["totalDurationSec"] = int(total_inf)
+        brief["expectedShotCount"] = expected_shot_count(int(total_inf), clip)
     elif brief.get("totalDurationSec"):
         brief["expectedShotCount"] = expected_shot_count(
             int(brief["totalDurationSec"]), clip

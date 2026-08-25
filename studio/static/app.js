@@ -123,6 +123,12 @@
     }
     return s;
   }
+  function tToast(key, map) {
+    toast(tf(key, map || {}));
+  }
+  function tConfirm(key, map) {
+    return confirm(tf(key, map || {}));
+  }
   function uiLang() {
     return typeof h3Lang === "function" ? h3Lang() : "tr";
   }
@@ -232,7 +238,7 @@
     look: [
       ["auto", "Auto"],
       ["feature", "Sinematik"],
-      ["handheld", "El kamerası"],
+      ["handheld", "Handheld doc"],
       ["documentary", "Belgesel"],
       ["commercial", "Reklam"],
       ["music_video", "Klip"],
@@ -288,10 +294,10 @@
       ["1980s", "1980s"],
       ["1990s", "1990s"],
       ["2000s", "2000s"],
-      ["present", "Günümüz"],
-      ["near_future", "Yakın gelecek"],
-      ["medieval", "Ortaçağ"],
-      ["ancient", "Antik"],
+      ["present", "Present"],
+      ["near_future", "Near future"],
+      ["medieval", "Medieval"],
+      ["ancient", "Ancient"],
     ],
   };
   const CINEMA_SETUP_META = {
@@ -516,7 +522,7 @@
     const nameEl = wrap?.querySelector(".file-pick-name");
     if (!nameEl) return;
     const emptyKey = nameEl.getAttribute("data-i18n-empty");
-    nameEl.textContent = emptyKey ? tt(emptyKey) : "Seçilmedi";
+    nameEl.textContent = emptyKey ? tt(emptyKey) : tt("pick.none");
     nameEl.classList.remove("has-file");
     nameEl.removeAttribute("title");
     if (el && "value" in el) el.value = "";
@@ -790,12 +796,12 @@
     if (!files.length) return;
     for (const file of files) {
       if (target.length >= max) {
-        toast(isFace ? "Yüz için en fazla 3 foto" : "En fazla 9 referans");
+        tToast(isFace ? "toast.faceMax3" : "toast.refMax9");
         break;
       }
       const fd = new FormData();
       fd.append("file", file);
-      toast(`Yükleniyor · ${file.name}`);
+      tToast("toast.uploading", { name: file.name });
       try {
         const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
@@ -807,7 +813,7 @@
       }
     }
     renderRefThumbs(kind);
-    toast(isFace ? `${target.length} yüz hazır` : `${target.length} referans hazır`);
+    tToast(isFace ? "toast.faceReady" : "toast.refReady", { n: String(target.length) });
   }
 
   async function deleteUploadedMedia(item) {
@@ -853,12 +859,12 @@
     const files = Array.from(fileList || []);
     for (const file of files) {
       if (targetList.length >= 3) {
-        toast("En fazla 3 video");
+        tToast("toast.videoMax3");
         break;
       }
       const fd = new FormData();
       fd.append("file", file);
-      toast(`Video yükleniyor · ${file.name}`);
+      tToast("toast.videoUploading", { name: file.name });
       try {
         const r = await fetch("/api/refs/upload-video", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
@@ -875,19 +881,19 @@
       }
     }
     renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`, (list) => onFilePickListEmpty(gridId, list));
-    toast(`${targetList.length} video hazır`);
+    tToast("toast.videosReady", { n: String(targetList.length) });
   }
 
   async function uploadImageToList(fileList, targetList, gridId, max, labelFn) {
     const files = Array.from(fileList || []);
     for (const file of files) {
       if (targetList.length >= max) {
-        toast(`En fazla ${max} görsel`);
+        tToast("toast.imageMax", { n: String(max) });
         break;
       }
       const fd = new FormData();
       fd.append("file", file);
-      toast(`Yükleniyor · ${file.name}`);
+      toast(tf("toast.uploading", { name: file.name }));
       try {
         const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
@@ -905,7 +911,7 @@
     if (!file) return;
     const fd = new FormData();
     fd.append("file", file);
-    toast(`${which} frame yükleniyor…`);
+    tToast("toast.frameUploading", { which });
     try {
       const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));
@@ -934,7 +940,7 @@
           onFrameListChange
         );
       }
-      toast(`${which} frame hazır`);
+      tToast("toast.frameReady", { which });
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -1510,7 +1516,7 @@
         (x) => x.id === $("cinema-lora-select")?.value
       );
       const graphs = spec && spec.file ? (spec.graphs || ["fl2va", "ref2va"]).join("+") : "";
-      const vram = q === "1080" ? "~yüksek VRAM" : q === "480" ? "~düşük VRAM" : "~orta VRAM";
+      const vram = q === "1080" ? tt("quality.vramHigh") : q === "480" ? tt("quality.vramLow") : tt("quality.vramMid");
       hint.textContent = graphs
         ? tf("cinema.prodHintLora", { graphs, vram, q, st })
         : tf("cinema.prodHint", { vram, q, st });
@@ -1605,9 +1611,9 @@
     });
     if (lanes.music) lanes.music.innerHTML = cinemaAudio().score_name
       ? `<div class="timeline-audio-clip" style="width:100%"><span>♪ ${htmlEsc(cinemaAudio().score_name)}</span><em>waveform</em></div>`
-      : '<div class="timeline-empty">Film müziği eklenmedi</div>';
+      : `<div class="timeline-empty">${tt("cinema.timelineNoScore")}</div>`;
     const total = $("cinema-timeline-total");
-    if (total) total.textContent = `${shotDuration} sn / shot · ${duration.toFixed(1).replace(".0", "")} sn toplam`;
+    if (total) total.textContent = tf("cinema.timelineTotal", { clip: String(shotDuration), total: duration.toFixed(1).replace(".0", "") });
   }
 
   function syncCinemaShotJobs() {
@@ -1871,7 +1877,7 @@
   async function deleteCinemaAsset(kind, id) {
     const aid = String(id || "").trim();
     if (!aid) return;
-    if (!confirm("Bu kartı sil?")) return;
+    if (!tConfirm("confirm.deleteCard")) return;
     clearTimeout(cinemaPreviewTimer);
     cinemaSaveGen += 1;
     abortCinemaSaves();
@@ -2081,7 +2087,7 @@
       url: x.url,
     }));
     for (const file of take) {
-      toast(`Yükleniyor · ${file.name}`);
+      toast(tf("toast.uploading", { name: file.name }));
       const previewUrl = URL.createObjectURL(file);
       images.push({ name: file.name, file: `preview:${file.name}`, url: previewUrl });
       if (item) {
@@ -2129,7 +2135,7 @@
       const r = await fetch(`/api/refs/${encodeURIComponent(file)}`, { method: "DELETE" });
       if (!r.ok && r.status !== 404) {
         const data = await r.json().catch(() => ({}));
-        throw new Error(errDetail(data) || "görsel silinemedi");
+        throw new Error(errDetail(data) || tt("err.imageDeleteFailed"));
       }
     }
     renderCinema();
@@ -2170,10 +2176,10 @@
       const chars = (c.characters || []).filter((x) => String(x.name || "").trim());
       const locs = (c.locations || []).filter((x) => String(x.name || "").trim());
       if (!chars.length && !locs.length) {
-        toast(tt("cinema.needCast") || "Önce karakter veya mekan kartı ekle");
+        toast(tt("cinema.needCast"));
         return;
       }
-      toast(tt("cinema.writingShots") || "LLM sahneleri yazıyor…");
+      toast(tt("cinema.writingShots"));
       const r = await fetch("/api/cinema/generate-shots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2195,7 +2201,7 @@
         };
         renderCinema();
       }
-      toast(tf("cinema.shotsWritten", { n: data.shot_count || 0 }) || `${data.shot_count || 0} shot yazıldı`);
+      toast(tf("cinema.shotsWritten", { n: data.shot_count || 0 }));
     } catch (e) {
       toast(String(e.message || e));
     } finally {
@@ -2325,11 +2331,11 @@
 
   async function deleteUploadedMusic(id, kind) {
     const musicId = String(id || "").trim();
-    if (!musicId || !confirm("Bu şarkıyı kaldır?")) return;
+    if (!musicId || !tConfirm("confirm.removeSong")) return;
     try {
       const r = await fetch(`/api/music/${encodeURIComponent(musicId)}`, { method: "DELETE" });
       const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(errDetail(data) || "şarkı silinemedi");
+      if (!r.ok) throw new Error(errDetail(data) || tt("err.songDeleteFailed"));
       if (state.musicId === musicId) {
         state.musicId = null;
         state.musicMeta = null;
@@ -2342,7 +2348,7 @@
         renderCinemaAudio();
         await saveCinema(true);
       }
-      toast(kind === "cinema" ? "Film müziği kaldırıldı" : "Şarkı kaldırıldı");
+      tToast(kind === "cinema" ? "toast.musicRemovedFilm" : "toast.musicRemovedSong");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -2369,7 +2375,7 @@
       if (!r.ok) throw new Error(errDetail(data));
       if (data.batch_id) audio.last_batch = data.batch_id;
       renderCinemaAudio();
-      toast(`Film hazır: ${data.clips || 0} klip + aynı müzik`);
+      tToast("toast.filmClipsReady", { n: String(data.clips || 0) });
       if (data.final_url) window.open(data.final_url, "_blank");
     } catch (e) {
       toast(String(e.message || e));
@@ -2458,10 +2464,10 @@
       .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))
       .forEach((j) => {
         const tag =
-          j.status === "done" ? "bitmiş" : j.status === "running" ? "üretiliyor" : "sırada";
+          j.status === "done" ? tt("job.continueTagDone") : j.status === "running" ? tt("job.continueTagRunning") : tt("job.continueTagQueued");
         add(j, tag);
       });
-    (state.galleryItems || []).forEach((g) => add(g, "galeri"));
+    (state.galleryItems || []).forEach((g) => add(g, tt("job.continueTagGallery")));
     const sig = pool.map((x) => x.job.id + ":" + x.tag).join("|");
     if (sig === state._continueSourceSig && sel.options.length === pool.length + 1) {
       if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
@@ -2469,13 +2475,19 @@
       return;
     }
     state._continueSourceSig = sig;
-    sel.innerHTML = `<option value="">— otomatik: kuyruk sonu / son video —</option>`;
+    sel.innerHTML = `<option value="">${tt("cont.sourceAuto")}</option>`;
     pool.forEach((x, i) => {
       const j = x.job;
       const opt = document.createElement("option");
       opt.value = j.id;
       const label = (j.prompt || "").slice(0, 42).replace(/\s+/g, " ");
-      opt.textContent = `${i + 1}. [${x.tag}] ${j.duration || "?"}sn · ${label || j.id.slice(0, 8)}`;
+      opt.textContent = tf("cont.sourceOption", {
+        i: String(i + 1),
+        tag: x.tag,
+        dur: String(j.duration || "?"),
+        sec: tt("sec"),
+        label: label || j.id.slice(0, 8),
+      });
       sel.appendChild(opt);
     });
     if (prev && pool.some((x) => x.job.id === prev)) sel.value = prev;
@@ -2498,7 +2510,7 @@
     state.playerCleared = true;
     state.selectedJobId = null;
     setClipPrompt("");
-    if (!quiet) toast("Player kapatıldı");
+    if (!quiet) tToast("toast.playerClosed");
   }
 
   /** FIFO üretim sırası: önce eklenen / düşük batch_index önde. */
@@ -2673,8 +2685,8 @@
 
     const summary = document.createElement("summary");
     summary.innerHTML =
-      `<span class="dir-shot-sum-main">Shot’ları gör (${n}${need && need !== n ? ` / ${need}` : ""})</span>` +
-      `<span class="dir-shot-sum-meta">${clip}sn · ~${total}sn · tıkla aç/kapa</span>`;
+      `<span class="dir-shot-sum-main">${tf("dir.shotViewMain", { n, extra: need && need !== n ? tf("dir.shotViewExtra", { need }) : "" })}</span>` +
+      `<span class="dir-shot-sum-meta">${tf("dir.shotSumMeta", { clip, total, sec: tt("sec") })}</span>`;
     panel.appendChild(summary);
 
     const body = document.createElement("div");
@@ -2699,10 +2711,10 @@
       const link = (shot.linkToPrev || (i === 0 ? "standalone" : "continue")).toString();
       const head = document.createElement("div");
       head.className = "dir-shot-head";
-      head.textContent = `#${i + 1} · ${dur}sn · ${link}`;
+      head.textContent = tf("dir.shotHead", { i: i + 1, dur, sec: tt("sec"), link });
       const pre = document.createElement("pre");
       pre.className = "dir-shot-prompt";
-      pre.textContent = _shotPromptText(shot) || "(prompt yok)";
+      pre.textContent = _shotPromptText(shot) || tt("clip.empty");
       item.appendChild(head);
       if (shot.camera) {
         const cam = document.createElement("div");
@@ -2720,7 +2732,7 @@
     const btnRw = document.createElement("button");
     btnRw.type = "button";
     btnRw.className = "btn-secondary";
-    btnRw.textContent = tt("plan.rewrite") || "LLM ile düzenle";
+    btnRw.textContent = tt("plan.rewrite");
     btnRw.onclick = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -2942,12 +2954,12 @@
 
   async function saveDirectorPlan(applyCinema) {
     if (!state.directorSessionId) {
-      toast("Önce yönetmenle konuş");
+      tToast("toast.directorTalkFirst");
       return;
     }
     const shots = collectPlanShotsFromDom();
     if (!shots.length) {
-      toast("Kaydedilecek shot yok");
+      tToast("toast.noShotsToSave");
       return;
     }
     try {
@@ -2976,7 +2988,7 @@
         state.cinema = { ...ensureCinema(), ...data.cinema };
         if (typeof renderCinema === "function") renderCinema();
       }
-      toast(applyCinema ? "Plan kaydedildi · stüdyoya aktarıldı" : "Plan kaydedildi");
+      tToast(applyCinema ? "toast.planSavedCinema" : "toast.planSaved");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -3287,7 +3299,7 @@
       return data;
     } catch (e) {
       if (e && e.name === "AbortError") {
-        throw new Error("İstek zaman aşımı (90sn) — sunucu probe’da takılmış olabilir, tekrar dene.");
+        throw new Error(tt("err.timeout90"));
       }
       throw e;
     } finally {
@@ -3326,7 +3338,7 @@
         nvidiaWarn || `${prov} · ${activeModel}`
       );
     } else {
-      setDirectorUi(false, tf("dir.offline", { provider: prov }) || `${prov} kapalı`);
+      setDirectorUi(false, tf("dir.offline", { provider: prov }));
     }
   }
 
@@ -3347,15 +3359,13 @@
       if (!llmPubHasKey(pub, provider)) {
         if (unsavedKey) {
           directorLlmFeedback(
-            tf("toast.llmKeyDirty", { provider }) ||
-              `Ayarlar’da ${provider} key yazılı ama kaydedilmemiş — önce «API ayarlarını kaydet».`,
+            tf("toast.llmKeyDirty", { provider }),
             "warn"
           );
           return;
         }
         directorLlmFeedback(
-          tf("toast.llmNeedKey", { provider }) ||
-            `Önce Ayarlar’dan ${provider} API key kaydet, sonra Yönetmeni uygula.`,
+          tf("toast.llmNeedKey", { provider }),
           "warn"
         );
         return;
@@ -3462,13 +3472,11 @@
     if (!d.startsWith("default_model_unavailable")) return null;
     if (/429|too many requests/i.test(d)) {
       return (
-        tf("dir.nvidiaRateLimit", { model: activeModel }) ||
-        `nvidia · ${activeModel} — kota/rate limit (429). meta/llama-3.1-8b-instruct seç veya biraz bekle.`
+        tf("dir.nvidiaRateLimit", { model: activeModel })
       );
     }
     return (
-      tf("dir.nvidiaModelDown", { model: activeModel }) ||
-      `nvidia açık · ${activeModel} yanıt vermiyor — model listesinden başka birini seç.`
+      tf("dir.nvidiaModelDown", { model: activeModel })
     );
   }
 
@@ -3544,17 +3552,17 @@
     if (Array.isArray(d)) return d.map((x) => x.msg || JSON.stringify(x)).join("; ");
     if (typeof data.message === "string" && data.message.trim()) return data.message;
     const s = JSON.stringify(data);
-    return s && s !== "{}" ? s : "istek başarısız";
+    return s && s !== "{}" ? s : tt("err.requestFailed");
   }
 
   function formatStreamError(detail) {
-    if (detail == null) return "Yönetmen stream hatası";
-    if (typeof detail === "string") return detail.trim() || "Yönetmen stream hatası";
+    if (detail == null) return tt("err.directorStream");
+    if (typeof detail === "string") return detail.trim() || tt("err.directorStream");
     if (typeof detail === "object") {
       if (typeof detail.message === "string") return detail.message;
       if (typeof detail.detail === "string") return detail.detail;
       const s = JSON.stringify(detail);
-      return s && s !== "{}" ? s : "Yönetmen stream hatası";
+      return s && s !== "{}" ? s : tt("err.directorStream");
     }
     return String(detail);
   }
@@ -3678,7 +3686,7 @@
   function _directorReplyLooksBroken(text) {
     const t = (text || "").trim();
     if (!t) return true;
-    return /yanıt boş geldi|yanıt alınamadı|boş geldi/i.test(t);
+    return /yanıt boş geldi|yanıt alınamadı|boş geldi|empty reply|no reply|reply was empty/i.test(t);
   }
 
   async function directorChatRequest(message, onProgress) {
@@ -3762,9 +3770,9 @@
       if (!r.ok) {
         const fallback =
           r.status === 500
-            ? "Sunucu hatası (500) — terminal loglarına bak veya sayfayı yenile."
+            ? tt("err.server500")
             : `HTTP ${r.status}`;
-        throw new Error(errDetail(data) === "istek başarısız" ? fallback : errDetail(data));
+        throw new Error(errDetail(data) === tt("err.requestFailed") ? fallback : errDetail(data));
       }
       return data;
     }
@@ -3784,9 +3792,8 @@
       appendDirectorMsg(
         "assistant",
         why
-          ? tf("dir.offlineDetail", { provider: prov, detail: why }) ||
-              `${prov} kapalı: ${why} — Ayarlar’dan key/model kontrol et veya başka sağlayıcı seç.`
-          : "Yönetmen LLM kapalı — sağ üst Ayarlar’dan API key kaydet, sonra Yönetmeni uygula."
+          ? tf("dir.offlineDetail", { provider: prov, detail: why })
+          : tt("dir.llmOfflineFull")
       );
       if (!state.directorOnline) return;
     }
@@ -3796,7 +3803,7 @@
       appendDirectorMsg("user", message);
       $("director-msg").value = "";
     }
-    beginDirectorThinking(isRetry ? "Yeniden deniyor…" : null);
+    beginDirectorThinking(isRetry ? tt("dir.retryStatus") : null);
     let handedOffRetry = false;
     try {
       const data = await directorChatRequest(message, updateDirectorThinking);
@@ -3815,20 +3822,19 @@
       } else {
         appendDirectorMsg(
           "assistant",
-          reply || "Yanıt alınamadı — tekrar dene veya modeli değiştir."
+          reply || tt("toast.emptyReply")
         );
       }
       // One automatic retry if still empty / legacy empty-error string
       if (!isRetry && _directorReplyLooksBroken(reply)) {
         appendDirectorMsg(
           "assistant",
-          "Boş yanıt yakalandı — bir kez daha deniyorum…"
+          tt("toast.retryEmpty")
         );
         handedOffRetry = true;
         state.directorBusy = false;
         return directorSend(
-          "Önceki çıktın boştu. Türkçe 2–4 cümle yönetmen cevabı ver; " +
-            "hikâyeyi ilerlet veya net bir soru sor.",
+          tt("dir.retryUserMsg"),
           { retry: true }
         );
       }
@@ -3854,26 +3860,25 @@
       if (/403|forbidden|authorization failed/i.test(msg)) {
         hint =
           prov === "nvidia"
-            ? " — NVIDIA key geçersiz veya bu model için yetki yok. build.nvidia.com’da key oluştur, model erişimini aç."
-            : " — API key geçersiz veya bu model için yetki yok; Ayarlar’dan key / model kontrol et.";
+            ? tt("hint.nvidia403")
+            : tt("hint.api403");
       } else if (/429|too many requests|rate limit/i.test(msg)) {
         hint =
           prov === "nvidia"
-            ? " — minimaxai/minimax-m3 kotası/rate limit dolmuş olabilir. Model olarak meta/llama-3.1-8b-instruct seç veya birkaç dakika bekle."
-            : " — API rate limit; biraz bekleyip tekrar dene veya başka model seç.";
+            ? tt("hint.nvidia429")
+            : tt("hint.api429");
       } else if (
         (prov === "gemini" || /gemini/i.test(msg)) &&
         /gemini|api key|403|404|model|quota|invalid/i.test(msg)
       ) {
-        hint =
-          " — Ayarlar’da modeli gemini-3.6-flash veya gemini-3.5-flash seç (2.5 yeni anahtarlarda kapalı).";
+        hint = tt("hint.geminiModel");
       } else if (prov === "nvidia" || /nvidia|nvapi/i.test(msg)) {
         hint =
-          " — Ayarlar: provider NVIDIA NIM, model minimaxai/minimax-m3 (veya listeden seç), nvapi-… key kaydet.";
+          tt("hint.nvidiaSetup");
       } else if (prov === "ollama" || /ollama/i.test(msg)) {
-        hint = " — Ollama açık mı? Model listesinden qwen3:8b deneyebilirsin.";
+        hint = tt("hint.ollamaTry");
       } else {
-        hint = " — Sağ üst Ayarlar’dan provider / model / API key kontrol et.";
+        hint = tt("hint.checkSettings");
       }
       appendDirectorMsg("assistant", msg + hint);
       await refreshDirectorStatus();
@@ -3927,7 +3932,7 @@
 
   async function rewriteDirectorShots() {
     if (!state.directorSessionId) {
-      toast(tt("plan.needSession") || "Önce yönetmen sohbeti aç");
+      toast(tt("plan.needSession"));
       return;
     }
     const btns = [$("btn-plan-rewrite"), $("btn-rewrite-brief")].filter(Boolean);
@@ -3935,7 +3940,7 @@
       b.disabled = true;
     });
     try {
-      toast(tt("plan.rewriting") || "Shot’lar LLM ile düzenleniyor…");
+      toast(tt("plan.rewriting"));
       if (state.directorTab === "plan") {
         await saveDirectorPlan(false);
       }
@@ -3953,7 +3958,7 @@
       }
       toast(
         tf("plan.rewritten", { n: data.rewritten || 0 }) ||
-          `${data.rewritten || 0} shot düzenlendi`
+          tf("toast.shotsRewritten", { n: String(data.rewritten || 0) })
       );
     } catch (e) {
       toast(String(e.message || e));
@@ -3970,7 +3975,7 @@
     const remove = $("btn-music-remove");
     if (!el) return;
     if (!state.musicMeta) {
-      el.textContent = "yok";
+      el.textContent = tt("dir.songNone");
       if (analyze) analyze.disabled = true;
       if (remove) remove.classList.add("hidden");
       updateMusicMuxUi();
@@ -3980,9 +3985,19 @@
     const shots = m.suggestedShots5 || Math.ceil((m.durationSec || 0) / 5);
     const prog =
       m.linked_jobs != null
-        ? ` · klipler ${m.linked_done || 0}/${m.linked_jobs}${m.linked_pending ? ` (+${m.linked_pending})` : ""}`
+        ? tf("dir.musicClipProg", {
+            done: String(m.linked_done || 0),
+            total: String(m.linked_jobs),
+            pending: m.linked_pending ? tf("dir.musicClipPending", { n: String(m.linked_pending) }) : "",
+          })
         : "";
-    el.textContent = `${m.filename || "track"} · ${(m.durationSec || 0).toFixed(1)}sn · ~${shots}×5${prog}`;
+    el.textContent = tf("dir.musicTrackMeta", {
+      file: m.filename || "track",
+      dur: (m.durationSec || 0).toFixed(1),
+      sec: tt("sec"),
+      shots: String(shots),
+      prog,
+    });
     el.title = el.textContent;
     if (analyze) analyze.disabled = !!state.directorBusy;
     if (remove) remove.classList.remove("hidden");
@@ -4021,7 +4036,7 @@
   async function uploadMusicFile(file) {
     if (!file) return;
     setDirectorOpen(true);
-    toast("Şarkı yükleniyor…");
+    tToast("toast.songUploading");
     const fd = new FormData();
     fd.append("file", file);
     try {
@@ -4036,9 +4051,9 @@
       updateMusicMetaUi();
       appendDirectorMsg(
         "assistant",
-        `Şarkı alındı → proje **müzik klibi** (sessiz görüntü). ${data.music.filename} · ${data.music.durationSec}sn → ~${data.music.suggestedShots5}×5sn. Konsept/söz yazıp **Şarkıdan brief**’e bas; yönetmen enerji eğrisine göre shot yazar. Kuyruk bitince **Şarkılı final**.`
+        tf("dir.songReceived", { file: data.music.filename, dur: String(data.music.durationSec), sec: tt("sec"), shots: String(data.music.suggestedShots5) })
       );
-      toast("Şarkı hazır — Şarkıdan brief");
+      tToast("toast.songReadyBrief");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -4050,15 +4065,15 @@
     if (!state.directorOnline) {
       await refreshDirectorStatus();
       if (!state.directorOnline) {
-        toast("Yönetmen LLM kapalı — sağ üst Ayarlar’dan key ekle");
+      tToast("dir.llmOfflineFull");
         return;
       }
     }
     state.directorBusy = true;
-    setDirectorUi(true, "Şarkı analiz ediliyor…");
+    setDirectorUi(true, tt("toast.songAnalyzing"));
     $("btn-music-analyze").disabled = true;
     try {
-      toast("Şarkı ölçülüyor + SCENE brief (uzun sürebilir)…");
+      tToast("toast.songMeasuring");
       const r = await fetch("/api/music/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4080,12 +4095,12 @@
       state.projectPurpose = "music_video";
       state.projectSilent = true;
       syncProjectChips();
-      appendDirectorMsg("assistant", data.reply || "Brief hazır");
+      appendDirectorMsg("assistant", data.reply || tt("dir.briefReady"));
       syncDirectorBriefFromResponse(data);
       setDirectorTab("plan");
       setDirectorReadyUi(true, data.shot_count);
-      setDirectorUi(true, `Brief hazır · ${data.shot_count || "?"} shot — Shot’ları gör`);
-      toast(`${data.shot_count || "?"} shot — kuyruğa al, bitince Şarkılı final`);
+      setDirectorUi(true, tf("dir.briefReadyStatus", { n: data.shot_count || "?" }));
+      tToast("toast.songBriefReady", { n: String(data.shot_count || "?") });
     } catch (e) {
       appendDirectorMsg("assistant", String(e.message || e));
       toast(String(e.message || e));
@@ -4095,14 +4110,14 @@
       await refreshDirectorStatus();
       if (state.directorReady) {
         setDirectorReadyUi(true);
-        setDirectorUi(true, "Brief hazır — kuyruğa al");
+        setDirectorUi(true, tt("dir.briefQueueStatus"));
       }
     }
   }
 
   async function muxMusicFinal() {
     if (!state.musicId) {
-      toast("Önce şarkı yükle");
+      tToast("toast.uploadSongFirst");
       return;
     }
     try {
@@ -4111,24 +4126,22 @@
       const done = Number(m.linked_done || 0);
       const pending = Number(m.linked_pending || 0);
       if (!done && pending) {
-        toast(`Bu şarkı için ${pending} klip hâlâ üretiliyor — bitmesini bekle`);
+        tToast("toast.songClipsPending", { n: String(pending) });
         appendDirectorMsg(
           "assistant",
-          `Şarkılı final eski galeriyi birleştirmez. Bu şarkıya özel ${pending} klip kuyrukta/çalışıyor — bitince tekrar bas.`
+          tf("toast.songMuxOldWarn", { n: String(pending) })
         );
         return;
       }
       if (!done) {
-        toast("Önce yeni sahneleri kuyruğa al ve üret");
+        tToast("toast.songQueueFirst");
         appendDirectorMsg(
           "assistant",
-          "Şarkılı final = sadece **bu şarkı için yeni üretilen** klipler + şarkı. "
-            + "Sıra: **Şarkıdan brief** → **Tüm shot’ları kuyruğa al** → bitince **Şarkılı final**. "
-            + "Eski klipler kullanılmaz."
+          tt("toast.songMuxHelp")
         );
         return;
       }
-      toast(`Bu şarkının ${done} yeni klibi + şarkı birleştiriliyor…`);
+      toast(tf("toast.songMuxWorking", { n: String(done) }));
       $("btn-music-mux").disabled = true;
       const r = await fetch("/api/music/mux", {
         method: "POST",
@@ -4144,9 +4157,9 @@
       updateMusicMuxUi();
       appendDirectorMsg(
         "assistant",
-        `Şarkılı final hazır — bu şarkıya özel ${data.clip_count} yeni klip + şarkı.`
+        tf("toast.songFinalReady", { n: String(data.clip_count) })
       );
-      toast("Final hazır");
+      tToast("toast.finalReady");
       if (data.final_url) window.open(data.final_url, "_blank");
     } catch (e) {
       toast(String(e.message || e));
@@ -4263,7 +4276,7 @@
     setQuality(state.quality);
     if (!quiet) {
       const n = state.queueItems.length;
-      toast(n ? `Üretim yüklendi · ${n} prompt` : "Üretim ayarları yüklendi");
+      tToast(n ? "toast.prodLoaded" : "toast.prodSettingsLoaded", n ? { n: String(n) } : {});
     }
     return true;
   }
@@ -4292,7 +4305,7 @@
       if (!r.ok) throw new Error(errDetail(data));
       if (data.production) applyProductionState({ ...snap, ...data.production }, { quiet: true });
       if (!quiet) {
-        toast(`Üretim kaydedildi · ${snap.queueItems.length} prompt`);
+        tToast("toast.prodSaved", { n: String(snap.queueItems.length) });
       }
       return true;
     } catch (e) {
@@ -4321,13 +4334,13 @@
       const serverAt = Number(snap && snap.saved_at) || 0;
       if (localSnap && (!snap || localAt > serverAt)) snap = localSnap;
       if (!snap) {
-        if (!quiet) toast("Kayıtlı üretim yok");
+        if (!quiet) tToast("toast.noSavedProd");
         return false;
       }
       if (
         force ||
         !state.queueItems.length ||
-        confirm("Kayıtlı üretimi yükle? Mevcut prompt listesi / ayarlar değişir (Comfy kuyruğu kalır).")
+        tConfirm("confirm.loadSavedProd")
       ) {
         applyProductionState(snap, { quiet });
         return true;
@@ -4346,7 +4359,7 @@
   function addQueuePrompt(text) {
     const t = (text || "").trim();
     if (!t) {
-      toast("Boş prompt eklenmez");
+      tToast("toast.emptyPromptNoAdd");
       return false;
     }
     state.queueItems.push({
@@ -4354,7 +4367,7 @@
       text: t,
     });
     renderQueue();
-    toast(`Prompt ${state.queueItems.length} eklendi`);
+    toast(tf("toast.promptAdded", { n: String(state.queueItems.length) }));
     return true;
   }
 
@@ -4382,7 +4395,7 @@
 
   async function applyBrief(queue) {
     if (!state.directorSessionId) {
-      toast("Önce yönetmenle konuş");
+      tToast("toast.directorTalkFirst");
       return;
     }
     const queueBtns = [$("btn-queue-brief"), $("btn-plan-queue")].filter(Boolean);
@@ -4396,11 +4409,11 @@
       setProdLane(inCinema ? "director" : "scene");
       toast(
         inCinema
-          ? "Shot’lar Direktör kuyruğuna alınıyor…"
-          : "Shot’lar Sahne kuyruğuna alınıyor…"
+          ? tt("toast.queueDirectorLane")
+          : tt("toast.queueSceneLane")
       );
     } else {
-      toast("Shot listesi aktarılıyor…");
+      tToast("toast.shotListTransfer");
     }
     try {
       const knobs = collectGenerateKnobs();
@@ -4440,8 +4453,8 @@
       if (queue) setProdLane(lane === "director" ? "director" : "scene");
       toast(
         queue
-          ? `Üretim: ${n} iş sıraya alındı (${lane === "director" ? "Direktör" : "Sahne"})${total}`
-          : `${n} shot listede${total}`
+          ? tf("toast.prodQueued", { n: String(n), lane: lane === "director" ? tt("prod.laneDirector") : tt("prod.laneScene"), total: a.total_duration_sec ? tf("toast.prodQueuedTotal", { sec: String(a.total_duration_sec), unit: tt("sec") }) : "" })
+          : tf("toast.shotListed", { n: String(n), total: a.total_duration_sec ? ` · ${a.total_duration_sec}${tt("sec")}` : "" })
       );
       if (queue) {
         setDirectorOpen(false);
@@ -4499,7 +4512,7 @@
       $("sys-disk").textContent =
         s.disk_free_gb != null ? `${s.disk_free_gb}G` : "—";
       if ($("sys-disk") && s.disk_free_gb != null) {
-        $("sys-disk").title = `${s.disk_free_gb} GB boş`;
+        $("sys-disk").title = tf("sys.diskFree", { gb: String(s.disk_free_gb) });
       }
       $("sys-comfy").textContent = s.comfy_online ? "on" : "off";
       $("sys-comfy-item")?.classList.toggle("comfy-on", !!s.comfy_online);
@@ -4511,12 +4524,10 @@
         seam.disabled = !state.multishot;
         if (state.multishot && seam.dataset.userSet !== "1") seam.checked = true;
         if (!state.multishot) seam.checked = false;
-        seam.title = state.multishot
-          ? "H3MultishotSampler: tek take, kesiksiz ses (en fazla 8 shot)"
-          : "Paket yok — Pinokio: Download Models → H3 Multishot, sonra Stop → Start";
+        seam.title = state.multishot ? tt("cinema.seamlessTitleOn") : tt("cinema.seamlessTitleOff");
       }
       if (seamHint && !state.multishot) {
-        seamHint.title = "Önce Multishot paketini kur";
+        seamHint.title = tt("cinema.multishotInstallTitle");
       }
     } catch {
       /* ignore */
@@ -4525,7 +4536,7 @@
 
   function selectJob(job, { play = true } = {}) {
     state.selectedJobId = job.id;
-    const meta = `${job.duration || "?"}sn · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`;
+    const meta = `${job.duration || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`;
     setClipPrompt(job.prompt || "", meta, job.seed);
     if (play && job.output?.url) {
       showPlayerVideo(job.output.url, job.id, job.prompt || "");
@@ -4537,8 +4548,8 @@
     }
     toast(
       job.status === "done"
-        ? `Hazır · ${job.duration}sn · seed ${job.seed}`
-        : `${job.status} · ${job.progress || 0}%`
+        ? tf("job.metaReady", { dur: String(job.duration), sec: tt("sec"), seed: String(job.seed) })
+        : tf("job.metaProgress", { status: job.status, pct: String(job.progress || 0) })
     );
   }
 
@@ -4619,7 +4630,7 @@
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration || "?"}sn · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
+            `${j.duration || "?"}${tt("sec")} · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
             j.seed
           );
         };
@@ -4634,7 +4645,7 @@
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration || "?"}sn · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
+            `${j.duration || "?"}${tt("sec")} · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
             j.seed
           );
         };
@@ -4682,7 +4693,7 @@
       } else if (j.batch_index) {
         right.textContent = `${j.batch_index}/${j.batch_total}`;
       } else if (activeOrder.has(j.id)) {
-        right.textContent = `sıra ${activeOrder.get(j.id)}/${active.length}`;
+        right.textContent = tf("job.order", { i: String(activeOrder.get(j.id)), total: String(active.length) });
       }
       li.appendChild(left);
       li.appendChild(right);
@@ -4705,9 +4716,9 @@
       if (step != null && stepMax > 0) {
         clipPct = Math.max(0, Math.min(100, Math.round((100 * Number(step)) / Number(stepMax))));
       }
-      let clipLabel = job.progress_label || "Comfy…";
+      let clipLabel = job.progress_label || tt("prod.comfyProgress");
       if (step != null && stepMax > 0 && !/örnekleme\s+\d+\/\d+/i.test(clipLabel)) {
-        clipLabel = `örnekleme ${step}/${stepMax}`;
+        clipLabel = tf("job.sampling", { step: String(step), max: String(stepMax) });
       }
       const bits = [];
       if (bi > 0 && bt > 0) bits.push(`${bi}/${bt}`);
@@ -4719,7 +4730,7 @@
         const doneCount = sameBatch.filter((j) => j.status === "done").length;
         const completed = Math.max(doneCount, bi - 1);
         const overall = ((completed + clipPct / 100) / bt) * 100;
-        bits.push(`seri ~${Math.round(overall)}%`);
+        bits.push(tf("job.batchSeries", { pct: String(Math.round(overall)) }));
       }
       return {
         pct: Math.max(1, clipPct || 1),
@@ -4737,7 +4748,7 @@
       const batch = running.batch_index ? ` ${running.batch_index}/${running.batch_total}` : "";
       const res =
         running.width && running.height ? ` · ${running.width}×${running.height}` : "";
-      toast(`Üretiliyor${batch}${res}`);
+      toast(tf("toast.rendering", { batch, res }));
       const bar = productionBar(running);
       setProgress(bar.pct, bar.label, true);
     } else if (queued) {
@@ -4752,9 +4763,9 @@
         : siraN
           ? ` #${siraN}`
           : "";
-      toast(`Sırada${idx} · ${queued} iş`);
+      toast(tf("toast.queuedN", { idx, n: String(queued) }));
       const bar = productionBar(next);
-      setProgress(Math.max(0.5, bar.pct), bar.label || "sırada bekliyor", true);
+      setProgress(Math.max(0.5, bar.pct), bar.label || tt("prod.wait"), true);
     } else {
       // Idle: no running / queued — resolve last transition, then clear sticky bar
       const finishedId = state.lastRunningId;
@@ -4773,9 +4784,9 @@
         }
         if (j?.status === "done") {
           toast(
-            `Hazır · ${j.duration}sn · ${j.width || "?"}×${j.height || "?"} · seed ${j.seed}`
+            tf("job.metaReady", { dur: String(j.duration), sec: tt("sec"), seed: String(j.seed) }) + (j.width ? ` · ${j.width}×${j.height}` : "")
           );
-          setProgress(100, "bitti", true);
+          setProgress(100, tt("prod.done"), true);
           scheduleHideProgress(2200);
           if (
             j.output?.url &&
@@ -4786,17 +4797,17 @@
           }
           fillContinueSource();
         } else if (j?.status === "cancelled") {
-          toast("Durduruldu");
-          setProgress(0, "iptal edildi", true);
+          tToast("toast.stopped");
+          setProgress(0, tt("job.cancelled"), true);
           scheduleHideProgress(1400);
         } else if (j?.status === "error") {
-          toast(`Hata · ${String(j.error || "").slice(0, 80)}`);
+          toast(tf("toast.errorShort", { msg: String(j.error || "").slice(0, 80) }));
           setProgress(0, "hata", true);
           scheduleHideProgress(2200);
         } else {
           // Job removed from list (geçmiş temiz / reset)
           hideProgressNow();
-          toast("Hazır");
+          tToast("prod.ready");
         }
       } else if (!state.progressHideTimer) {
         // Nothing active and not in brief post-finish display — kill sticky bar
@@ -4805,8 +4816,8 @@
           setProgress(0, "", false);
         }
         const pt = $("prod-text");
-        if (pt && /^(İptal istendi|Üretiliyor|Sırada|Durduruldu)/.test(pt.textContent || "")) {
-          toast("Hazır");
+        if (pt && /^(İptal|Üret|Sirada|Sırada|Stopped|Rendering|Queued|Cancel)/i.test(pt.textContent || "")) {
+          toast(tt("prod.ready"));
         }
       }
     }
@@ -4815,14 +4826,14 @@
   async function renderGallery() {
     const grid = $("gallery-grid");
     if (!grid) return;
-    grid.innerHTML = `<p class="muted">Yükleniyor…</p>`;
+    grid.innerHTML = `<p class="muted">${tt("gallery.loading")}</p>`;
     let done = [];
     try {
       const data = await fetch("/api/gallery").then((r) => r.json());
       done = (data.items || []).slice();
       state.galleryItems = done;
     } catch {
-      grid.innerHTML = `<p class="muted">Galeri yüklenemedi.</p>`;
+      grid.innerHTML = `<p class="muted">${tt("gallery.fail")}</p>`;
       return;
     }
     // Newest finished first (left) → oldest right
@@ -4833,7 +4844,7 @@
       return (Number(b.batch_index) || 0) - (Number(a.batch_index) || 0);
     });
     if (!done.length) {
-      grid.innerHTML = `<p class="muted">Henüz arşivlenmiş video yok. Üretilen her klip burada kalır (temiz başlat silmez).</p>`;
+      grid.innerHTML = `<p class="muted">${tt("gallery.empty")}</p>`;
       return;
     }
     grid.innerHTML = "";
@@ -4847,7 +4858,7 @@
           : `#${done.length - i}`;
       const when = j.done_at || j.created_at;
       const clock = when
-        ? new Date(Number(when) * 1000).toLocaleString("tr-TR", {
+        ? new Date(Number(when) * 1000).toLocaleString(uiLang() === "en" ? "en-US" : "tr-TR", {
             day: "2-digit",
             month: "2-digit",
             hour: "2-digit",
@@ -4863,23 +4874,23 @@
       }
       if (rs != null && Number.isFinite(Number(rs))) {
         const sec = Math.max(0, Math.round(Number(rs)));
-        if (sec < 60) renderLabel = `<1dk`;
+        if (sec < 60) renderLabel = tt("gallery.renderUnderMin");
         else {
           const h = Math.floor(sec / 3600);
           const m = Math.floor((sec % 3600) / 60);
-          renderLabel = h > 0 ? `${h}s ${m}dk` : `${m}dk`;
+          renderLabel = h > 0 ? tf("gallery.renderHM", { h: String(h), m: String(m) }) : tf("gallery.renderM", { m: String(m) });
         }
       }
       card.innerHTML = `
-        <div class="gallery-ord">${i === 0 ? "Yeni · " : ""}${ord}</div>
-        <button type="button" class="gallery-del" title="Galeriden sil" aria-label="Sil">×</button>
+        <div class="gallery-ord">${i === 0 ? tt("gallery.newPrefix") : ""}${ord}</div>
+        <button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button>
         <div class="gallery-thumb">
           <video src="${url}" muted preload="metadata"></video>
-          ${j.prompt ? `<button type="button" class="gallery-prompt" title="Promptu aç">P</button>` : ""}
-          <button type="button" class="gallery-cont" title="Bu videodan devam">Devam</button>
-          <button type="button" class="gallery-still btn-ghost" title="Son kareyi karaktere still">Still</button>
+          ${j.prompt ? `<button type="button" class="gallery-prompt" title="${tt("gallery.promptTitle")}">P</button>` : ""}
+          <button type="button" class="gallery-cont" title="${tt("gallery.contTitle")}">${tt("gallery.contBtn")}</button>
+          <button type="button" class="gallery-still btn-ghost" title="${tt("gallery.stillTitle")}">${tt("gallery.stillBtn")}</button>
         </div>
-        <div class="meta">${j.duration != null ? j.duration + "sn · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
+        <div class="meta">${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
       const delBtn = card.querySelector(".gallery-del");
       if (delBtn) {
         delBtn.onclick = (e) => {
@@ -4895,7 +4906,7 @@
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration != null ? j.duration + "sn · " : ""}${j.width || "?"}×${j.height || "?"}`,
+            `${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`,
             j.seed
           );
         };
@@ -4918,13 +4929,13 @@
       }
       card.onclick = () => {
         const live = state.jobs.find((x) => x.id === j.id && x.status === "done");
-        const meta = `${j.duration != null ? j.duration + "sn · " : ""}${j.width || "?"}×${j.height || "?"}`;
+        const meta = `${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`;
         if (live) {
           selectJob(live);
         } else {
           showPlayerVideo(url, j.id, j.prompt || "");
           setClipPrompt(j.prompt || "", meta, j.seed);
-          toast(`Arşiv · ${meta}`);
+          toast(tf("gallery.archiveMeta", { meta }));
         }
         $("view-gallery").classList.add("hidden");
         closePromptView();
@@ -4935,7 +4946,7 @@
 
   async function deleteGalleryItem(itemId) {
     if (!itemId) return;
-    if (!confirm("Bu video galeriden silinsin mi?")) return;
+    if (!tConfirm("confirm.deleteGalleryVideo")) return;
     if (state.selectedJobId === itemId) clearPlayer();
     document.querySelectorAll("#gallery-grid video").forEach((v) => {
       const src = v.getAttribute("src") || v.src || "";
@@ -4954,7 +4965,7 @@
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      toast("Galeriden silindi");
+      tToast("toast.galleryDeleted");
       await renderGallery();
     } catch (e) {
       toast(String(e.message || e));
@@ -5009,7 +5020,7 @@
       thumb.onload = () => $("continue-box")?.classList.remove("hidden");
       thumb.onerror = () => {
         $("continue-box")?.classList.add("hidden");
-        toast("Last frame alınamadı — video dosyası eksik olabilir");
+        tToast("toast.lastFrameFail");
       };
       thumb.src = url;
       thumb.alt = "last frame";
@@ -5041,7 +5052,7 @@
   async function useClipAsContinue(clip) {
     const jobId = typeof clip === "string" ? clip : clip && clip.id;
     if (!jobId) {
-      toast("Önce bir video seç");
+      tToast("toast.pickVideoFirst");
       return false;
     }
     if (!(state.galleryItems || []).length) {
@@ -5073,7 +5084,7 @@
       if (![...sel.options].some((o) => o.value === jobId)) {
         const opt = document.createElement("option");
         opt.value = jobId;
-        opt.textContent = `galeri · ${(job.prompt || jobId).slice(0, 42)}`;
+        opt.textContent = tf("cont.galleryOption", { label: (job.prompt || jobId).slice(0, 42) });
         sel.appendChild(opt);
       }
       sel.value = jobId;
@@ -5093,7 +5104,7 @@
     }
     const status = job?.status || (job ? "done" : "");
     if (!job || !["done", "running", "queued", "archive"].includes(status)) {
-      if (!silent) toast("Devam için kuyrukta / bitmiş bir video seç");
+      if (!silent) tToast("toast.continuePickJob");
       return false;
     }
     state.continueFrom = jobId;
@@ -5105,16 +5116,16 @@
       lab.textContent =
         status === "done" || status === "archive"
           ? `Son kare · ${(job.prompt || "").slice(0, 40)}`
-          : `Sıra sonrası · ${status} · ${(job.prompt || "").slice(0, 32)}`;
+          : tf("toast.continueAfterJob", { status, preview: (job.prompt || "").slice(0, 32) });
     }
     if (status === "done" || status === "archive") {
       $("continue-box")?.classList.remove("hidden");
-      if (!silent) toast("Last frame hazırlanıyor…");
+      if (!silent) tToast("toast.continueFramePrep");
       await ensureLastFrame(jobId);
-      if (!silent) toast("Devam kaynağı hazır");
+      if (!silent) tToast("toast.continueSourceReady");
     } else {
       $("continue-box")?.classList.add("hidden");
-      if (!silent) toast("Devam kuyruğa eklenecek — önceki bitince üretilir");
+      if (!silent) tToast("toast.continueWillQueue");
     }
     return true;
   }
@@ -5122,13 +5133,13 @@
   async function submitGenerate() {
     const prompt = $("prompt").value.trim();
     if (!prompt) {
-      toast("Prompt yaz");
+      tToast("toast.writePrompt");
       return false;
     }
     const mode = state.produceMode;
     if (mode === "cinema" || mode === "storyboard") {
       openCinemaStudio();
-      toast("Direktör stüdyosundan filmi kuyruğa al");
+      tToast("toast.cinemaQueueFromStudio");
       return false;
     }
     const isContinue = mode === "continue";
@@ -5144,21 +5155,21 @@
         if (tip) await setContinueMode(tip.id, { silent: true });
       }
       if (!state.continueFrom) {
-        toast("Devam için kaynak yok — video seç veya önce üret");
+        tToast("toast.continueNoSource");
         fillContinueSource();
         return false;
       }
     }
     if (isRef && !state.refImages.length) {
-      toast("Referans için en az 1 görsel yükle");
+      tToast("toast.refNeedImage");
       return false;
     }
     if (isFace && !state.faceImages.length) {
-      toast("Yüz referansı için en az 1 portre yükle");
+      tToast("toast.faceNeedPortrait");
       return false;
     }
     if (isV2v && !state.v2vVideos.length && !state.v2vImages.length) {
-      toast("V2V için en az 1 video veya görsel yükle");
+      tToast("toast.v2vNeedMedia");
       return false;
     }
 
@@ -5228,15 +5239,15 @@
       setProdLane("scene");
       const queuedLabel = isContinue
         ? faceLockOn
-          ? "Devam + yüz kilidi sıraya alındı"
-          : "Devam sıraya alındı (önceki bitince)"
+          ? tt("toast.continueFaceQueued")
+          : tt("toast.continueQueued")
         : isFace
-          ? "Yüz referansı kuyruğa alındı (sonraki kliplerde kilitlenebilir)"
+          ? tt("toast.faceRefQueued")
           : isRef
-            ? "Referans kuyruğa alındı"
+            ? tt("toast.refQueued")
             : data.prompt_rewritten
-              ? "Yeni video kuyruğa alındı (LLM düzenleme)"
-              : "Yeni video kuyruğa alındı";
+              ? tt("toast.newVideoQueuedRewrite")
+              : tt("toast.newVideoQueued");
       toast(queuedLabel);
       setDirectorOpen(false);
       await refreshJobs();
@@ -5263,7 +5274,7 @@
       setQuality("720");
       const steps = $("steps");
       if (steps) steps.value = "15";
-      toast("Hızlı: 5sn · 720p · 15 step");
+      tToast("toast.quickPreset");
     }
   }
 
@@ -5429,9 +5440,9 @@
     if (!spec?.id || !spec.file) return spec;
     if (spec.ready) return spec;
     if (!spec.downloadable) {
-      throw new Error("Bu LoRA’nın indirme linki yok — dosyayı LoRA ekle ile yükle");
+      throw new Error(tt("err.loraNoUrl"));
     }
-    toast(`${spec.label} indiriliyor…`);
+    toast(tf("toast.loraDownloadingLabel", { label: spec.label }));
     const r = await fetch("/api/loras/download", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5459,9 +5470,9 @@
         return now;
       }
       fillLoraShop();
-      if (i % 5 === 0) toast(`${spec.label} iniyor…`);
+      if (i % 5 === 0) toast(tf("toast.loraDownloadingProgress", { label: spec.label }));
     }
-    throw new Error("LoRA hâlâ inmiyor — Pinokio → Download Models");
+    throw new Error(tt("err.loraStillDownloadingPinokio"));
   }
 
   async function applyLora() {
@@ -5474,7 +5485,7 @@
       if ($("scheduler")) $("scheduler").value = "simple";
       state.loraStrength = 1;
       updateLoraHint();
-      toast("LoRA kapatıldı · 20 step · süre chip aynı");
+      tToast("toast.loraOff");
       return;
     }
     if (!spec.ready) {
@@ -5494,11 +5505,11 @@
       samp.appendChild(opt);
     }
     const stepsNow = $("steps") ? $("steps").value : "?";
-    const rec = spec.steps ? `önerilen ${spec.steps}` : "";
+    const rec = spec.steps ? tf("toast.loraRec", { steps: String(spec.steps) }) : "";
     toast(
       rec
-        ? `LoRA uygulandı · ${spec.label} · ${stepsNow} step (kutu) · ${rec}`
-        : `LoRA uygulandı · ${spec.label} · ${stepsNow} step`
+        ? tf("toast.loraAppliedRec", { label: spec.label, steps: String(stepsNow), rec })
+        : tf("toast.loraApplied", { label: spec.label, steps: String(stepsNow) })
     );
     state.loraApplied = true;
     state.loraStrength = spec.strength;
@@ -5510,10 +5521,10 @@
   async function uploadLoraFile(file) {
     if (!file) return;
     if (!/\.safetensors$/i.test(file.name || "")) {
-      toast("Sadece .safetensors");
+      tToast("toast.safetensorsOnly");
       return;
     }
-    toast(`LoRA yükleniyor · ${file.name}`);
+    toast(tf("toast.loraUploading", { name: file.name }));
     const fd = new FormData();
     fd.append("file", file);
     try {
@@ -5526,7 +5537,7 @@
       if ($("lora-select")) $("lora-select").value = id;
       state.loraId = id;
       updateLoraHint();
-      toast("LoRA eklendi — Uygula’ya bas");
+      tToast("toast.loraAdded");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -5535,11 +5546,11 @@
   async function importLoraFromUrl() {
     const url = ($("lora-url")?.value || "").trim();
     if (!url) {
-      toast("Hugging Face resolve veya doğrudan .safetensors URL’si yapıştır");
+      tToast("toast.loraUrlHint");
       return;
     }
     try {
-      toast("LoRA indiriliyor…");
+      tToast("toast.loraDownloadingUrl");
       const r = await fetch("/api/loras/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5551,7 +5562,7 @@
       if (data.ready) {
         await loadLoras();
         if (want && $("lora-select")) $("lora-select").value = want;
-        toast("LoRA hazır — Uygula’ya bas");
+        tToast("toast.loraReadyApply");
         return;
       }
       let ready = false;
@@ -5567,10 +5578,10 @@
           ready = true;
           break;
         }
-        if (i % 5 === 0) toast("LoRA indiriliyor…");
+        if (i % 5 === 0) tToast("toast.loraDownloadingUrl");
       }
-      if (!ready) toast("LoRA hâlâ inmiyor — URL’yi ve dosya adını kontrol et");
-      else toast("LoRA hazır — Uygula’ya bas");
+      if (!ready) tToast("toast.loraStillDownloading");
+      else tToast("toast.loraReadyApply");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -5603,12 +5614,12 @@
     state.loraId = id;
     updateLoraHint();
     if (spec.ready) {
-      toast(`${spec.label} seçildi — üretim Ayarlar’dan Uygula`);
+      toast(tf("toast.loraSelectedSettings", { label: spec.label }));
       return;
     }
     try {
       spec = await downloadCatalogLora(spec);
-      toast(`${spec.label} indirildi — üretim Ayarlar’dan Uygula`);
+      toast(tf("toast.loraDownloadedSettings", { label: spec.label }));
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -5675,7 +5686,7 @@
     const btn = $("btn-prompt-rewrite");
     if (btn) btn.disabled = true;
     try {
-      toast(tt("prompt.rewriting") || "LLM düzenliyor…");
+      toast(tt("prompt.rewriting"));
       const r = await fetch("/api/prompt/rewrite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5688,7 +5699,7 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       if (data.prompt) $("prompt").value = data.prompt;
-      toast(data.rewritten ? tt("prompt.rewritten") || "Prompt düzenlendi" : tt("prompt.unchanged") || "Değişiklik yok");
+      toast(data.rewritten ? tt("prompt.rewritten") : tt("prompt.unchanged"));
     } catch (e) {
       toast(String(e.message || e));
     } finally {
@@ -5732,7 +5743,7 @@
       locations,
     };
     try {
-      toast("Direktör brief üretiliyor…");
+      tToast("toast.directorBriefGenerating");
       const r = await fetch("/api/director/bible/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5815,6 +5826,19 @@
     );
     e.target.value = "";
   });
+  async function refreshPromptRewriterStatus() {
+    const status = $("prompt-rewriter-status");
+    if (!status) return;
+    try {
+      const data = await fetch("/api/prompt-rewriter/status").then((r) => r.json());
+      status.textContent = data.available ? tt("prompt.optimizeReady") : tt("prompt.optimizeOffline");
+      const toggle = $("prompt-rewriter-enabled");
+      if (toggle) toggle.disabled = !data.available;
+    } catch {
+      status.textContent = tt("prompt.optimizeStatusFail");
+    }
+  }
+
   $("btn-open-cinema")?.addEventListener("click", () => void openCinemaStudio());
   $("btn-cinema")?.addEventListener("click", () => {
     setProduceMode("cinema");
@@ -5827,18 +5851,7 @@
     void saveProduction({ quiet: true });
   });
   (async () => {
-    const status = $("prompt-rewriter-status");
-    if (!status) return;
-    try {
-      const data = await fetch("/api/prompt-rewriter/status").then((r) => r.json());
-      status.textContent = data.available
-        ? (tt("prompt.optimizeReady") || "Yönetmen LLM hazır — Rewrite ile düzenleyebilirsin")
-        : (tt("prompt.optimizeOffline") || "Yönetmen LLM kapalı — Ayarlar’dan model/key aç");
-      const toggle = $("prompt-rewriter-enabled");
-      if (toggle) toggle.disabled = !data.available;
-    } catch {
-      status.textContent = tt("prompt.optimizeStatusFail") || "Prompt düzenleme durumu alınamadı";
-    }
+    await refreshPromptRewriterStatus();
   })();
   $("cinema-role-script")?.addEventListener("change", () => {
     ensureCinema().role_script = $("cinema-role-script").value || "";
@@ -6114,12 +6127,12 @@
     const ta = $("prompt");
     if (ta) ta.value = t;
     closePromptView();
-    toast("Prompt sahneye alındı");
+    tToast("toast.promptToScene");
   });
   $("btn-use-in-continue")?.addEventListener("click", async () => {
     const id = state.selectedJobId || $("continue-source")?.value || "";
     if (!id) {
-      toast("Önce galeriden veya player’dan bir video seç");
+      tToast("toast.pickFromGallery");
       return;
     }
     const job =
@@ -6139,13 +6152,13 @@
   $("btn-batch-clear")?.addEventListener("click", () => {
     state.queueItems = [];
     renderQueue();
-    toast("Liste temizlendi");
+    tToast("toast.listCleared");
   });
 
   $("btn-batch")?.addEventListener("click", async () => {
     const lines = state.queueItems.map((x) => x.text.trim()).filter(Boolean);
     if (!lines.length) {
-      toast("Önce Prompt / Sahne’den Sıraya ekle");
+      tToast("toast.batchAddFirst");
       return;
     }
     state.queueItems.forEach((item, i) => {
@@ -6184,12 +6197,12 @@
       if (!r.ok) throw new Error(errDetail(data));
       toast(
         faceLockOn
-          ? `${data.count} iş sıraya + yüz kilidi`
+          ? tf("toast.batchFaceLock", { n: String(data.count) })
           : tip
-            ? `${data.count} iş sıraya eklendi (önceki son kareden continue)`
+            ? tf("toast.batchContinueChain", { n: String(data.count) })
             : data.count > 1
-              ? `${data.count} iş: 1 yeni → 2–${data.count} continue`
-              : `${data.count} iş kuyrukta`
+              ? tf("toast.batchMixed", { n: String(data.count) })
+              : tf("toast.batchQueued", { n: String(data.count) })
       );
       setDirectorOpen(false);
       await refreshJobs();
@@ -6202,12 +6215,12 @@
     try {
       // Only stop the running clip — keep the rest of the batch queued
       await fetch("/api/interrupt", { method: "POST" });
-      toast("Durduruldu");
+      tToast("toast.stopped");
       // If nothing was running, clear sticky bar immediately
       const hadRunning = state.jobs.some((j) => j.status === "running");
       if (!hadRunning && !state.jobs.some((j) => j.status === "queued")) {
         hideProgressNow();
-        toast("Hazır");
+        toast(tt("prod.ready"));
       }
       await refreshJobs();
     } catch (e) {
@@ -6224,7 +6237,7 @@
         clearPlayer();
       }
       if (state.continueFrom === jobId) clearContinueMode();
-      toast("Kayıt silindi");
+      tToast("toast.recordDeleted");
       await refreshJobs();
     } catch (e) {
       toast(String(e.message || e));
@@ -6235,11 +6248,11 @@
     const lane = state.prodLane === "director" ? "director" : "scene";
     const laneLabel = lane === "director" ? tt("prod.laneDirector") : tt("prod.laneScene");
     const labels = {
-      errors: "hatalı / iptal kayıtları",
-      finished: "bitmiş + hatalı geçmişi",
-      done: "başarılı klipleri",
+      errors: tt("clearScope.errors"),
+      finished: tt("clearScope.finished"),
+      done: tt("clearScope.done"),
     };
-    if (!confirm(`${laneLabel}: ${labels[scope] || scope} silinsin mi?`)) return;
+    if (!tConfirm("confirm.clearScope", { lane: laneLabel, scope: labels[scope] || scope })) return;
     try {
       const r = await fetch("/api/jobs/clear", {
         method: "POST",
@@ -6248,7 +6261,7 @@
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      toast(data.removed ? `${data.removed} kayıt temizlendi` : "Silinecek kayıt yok");
+      tToast(data.removed ? "toast.recordsCleared" : "toast.nothingToClear", data.removed ? { n: String(data.removed) } : {});
       if (!state.jobs.some((j) => j.status === "running" || j.status === "queued")) {
         hideProgressNow();
       }
@@ -6268,7 +6281,7 @@
   $("btn-reset-production")?.addEventListener("click", async () => {
     if (
       !confirm(
-        "Temiz başlat: kuyruk, çalışma klipleri ve last-frame dosyaları silinecek.\nGaleri arşivi ve yönetmen sohbeti kalır. Devam?"
+        tt("confirm.resetProd")
       )
     ) {
       return;
@@ -6285,7 +6298,7 @@
       renderQueue();
       clearPlayer();
       hideProgressNow();
-      toast("Sıfırlandı — temizden üretebilirsin");
+      tToast("toast.resetDone");
       await refreshJobs();
     } catch (e) {
       toast(String(e.message || e));
@@ -6299,7 +6312,7 @@
       if (!r.ok) throw new Error(errDetail(data));
       const w = window.open("", "h3-studio-logs", "width=900,height=640");
       if (!w) {
-        toast(data.file || "Log açılamadı (popup engeli?)");
+        toast(data.file || tt("toast.logPopupBlocked"));
         return;
       }
       const esc = (s) =>
@@ -6312,8 +6325,8 @@
         <style>body{margin:0;background:#140f0c;color:#f2e6d8;font:12px/1.45 ui-monospace,Consolas,monospace}
         header{padding:10px 14px;border-bottom:1px solid #3a2e24;color:#c4a574}
         pre{margin:0;padding:14px;white-space:pre-wrap;word-break:break-word}</style>
-        <header>${esc(data.file)} · son ${esc(data.lines)} satır · errors için /api/logs?which=errors</header>
-        <pre>${esc(data.text) || "(boş — henüz log yok, Studio’yu yeniden başlat)"}</pre>`
+        <header>${esc(tf("logs.header", { file: data.file, lines: String(data.lines) }))}</header>
+        <pre>${esc(data.text) || tt("logs.empty")}</pre>`
       );
       w.document.close();
     } catch (e) {
@@ -6402,13 +6415,13 @@
     if ($("notify-tg-token")) {
       $("notify-tg-token").value = "";
       $("notify-tg-token").placeholder = s.telegram_bot_token_masked
-        ? `kayıtlı: ${s.telegram_bot_token_masked}`
-        : "AkiFactory’den aktar veya yapıştır";
+        ? tf("notify.tokenSaved", { mask: s.telegram_bot_token_masked })
+        : tt("notify.tokenPlaceholder");
     }
     if ($("notify-tg-token-hint")) {
       $("notify-tg-token-hint").textContent = s.telegram_configured
-        ? `Hazır · chat ${s.telegram_chat_id || "?"}${s.telegram_bot_username ? ` · @${s.telegram_bot_username}` : ""}`
-        : "Boş bırakırsan kayıtlı token korunur";
+        ? tf("notify.tgReady", { chat: s.telegram_chat_id || "?", user: s.telegram_bot_username ? tf("notify.tgUser", { user: s.telegram_bot_username }) : "" })
+        : tt("notify.tokenKeep");
     }
     if ($("notify-server")) $("notify-server").value = s.ntfy_server || "https://ntfy.sh";
     if ($("notify-topic")) $("notify-topic").value = s.ntfy_topic || "";
@@ -6418,18 +6431,18 @@
     const hint = $("notify-subscribe-hint");
     if (hint) {
       hint.textContent = s.subscribe_url
-        ? `Telefonda abone ol: ${s.subscribe_url}`
-        : "Abone URL kayıttan sonra";
+        ? tf("notify.subscribeReady", { url: s.subscribe_url })
+        : tt("notify.subscribe");
     }
     const sh = $("notify-settings-hint");
     if (sh) {
-      if (!s.enabled) sh.textContent = "Kapalı";
+      if (!s.enabled) sh.textContent = tt("notify.off");
       else if ((s.provider || "telegram") === "telegram") {
         sh.textContent = s.telegram_configured
-          ? `Telegram açık · Test mesajı gönder`
-          : "Telegram eksik — AkiFactory’den aktar";
+          ? tt("notify.tgOn")
+          : tt("notify.tgMissing");
       } else {
-        sh.textContent = s.subscribe_url ? `ntfy · ${s.subscribe_url}` : "ntfy konu kaydet";
+        sh.textContent = s.subscribe_url ? `ntfy · ${s.subscribe_url}` : tt("notify.ntfyTopic");
       }
     }
     syncNotifyProviderUi();
@@ -6468,9 +6481,9 @@
       fillNotifySettings(data);
       if (quiet) {
         const sh = $("notify-settings-hint");
-        if (sh) sh.textContent = "Bildirim ayarları kaydedildi";
+        if (sh) sh.textContent = tt("notify.saved");
       } else {
-        toast("Bildirim ayarları kaydedildi");
+        tToast("notify.saved");
       }
     } catch (e) {
       toast(String(e.message || e));
@@ -6498,7 +6511,7 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       fillNotifySettings(data);
-      toast("AkiFactory Telegram aktarıldı");
+      tToast("toast.akiImported");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -6510,7 +6523,7 @@
       const r = await fetch("/api/notify/test", { method: "POST" });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      toast("Test mesajı gönderildi — Telegram’a bak");
+      tToast("toast.testSent");
       if ($("notify-settings-hint")) {
         $("notify-settings-hint").textContent =
           "Test gitti — gelmediyse bota /start yazıp chat id kontrol et";
@@ -6685,7 +6698,7 @@
 
   async function newDirectorSession() {
     if (state.directorBusy) {
-      toast("Yönetmen yanıt verirken yeni sohbet açılamaz");
+      tToast("toast.directorBusyNewChat");
       return;
     }
     try {
@@ -6693,7 +6706,7 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       const sid = directorSessionIdFrom(data);
-      if (!sid) throw new Error("Oturum oluşturulamadı");
+      if (!sid) throw new Error(tt("err.sessionCreate"));
       state.directorSessionCounter += 1;
       const sess = {
         id: sid,
@@ -6708,7 +6721,7 @@
       setDirectorOpen(true);
       setDirectorTab("chat");
       $("director-msg")?.focus();
-      toast("Yeni sohbet açıldı");
+      tToast("toast.newChatOpened");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -6716,7 +6729,7 @@
 
   function switchDirectorTab(sid) {
     if (state.directorBusy) {
-      toast("Yönetmen yanıt verirken sekme değiştirilemez");
+      tToast("toast.directorBusyTab");
       return;
     }
     state.directorSessionId = sid;
@@ -6734,7 +6747,7 @@
 
   async function closeDirectorTab(sid) {
     if (state.directorBusy) {
-      toast("Yönetmen yanıt verirken sekme kapatılamaz");
+      tToast("toast.directorBusyClose");
       return;
     }
     const idx = state.directorSessions.findIndex((s) => s.id === sid);
@@ -6761,7 +6774,7 @@
 
   async function resetDirectorSession() {
     if (state.directorBusy) {
-      toast("Yönetmen yanıt verirken sıfırlanamaz");
+      tToast("toast.directorBusyReset");
       return;
     }
     if (
@@ -6785,7 +6798,7 @@
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       const sid = directorSessionIdFrom(data);
-      if (!sid) throw new Error("Yeni oturum oluşturulamadı");
+      if (!sid) throw new Error(tt("err.sessionCreate"));
       if (!oldSid) state.directorSessionCounter += 1;
       const sess = {
         id: sid,
@@ -6800,7 +6813,7 @@
       setDirectorOpen(true);
       setDirectorTab("chat");
       $("director-msg")?.focus();
-      toast("Sohbet sıfırlandı");
+      tToast("toast.chatReset");
     } catch (e) {
       toast(String(e.message || e));
     }
@@ -6850,6 +6863,15 @@
     updateLoraHint();
     renderJobs();
     renderQueue();
+    if (state.directorBrief?.shots?.length) {
+      renderDirectorShotPanel(state.directorBrief, { open: !!$("director-shot-panel")?.open });
+    }
+    if (state.directorReady) {
+      setDirectorReadyUi(true, state.directorBrief?.shots?.length || 0);
+    }
+    if (state.musicMeta) updateMusicMetaUi();
+    void refreshPromptRewriterStatus();
+    if ($("gallery-grid")) void renderGallery();
     if (typeof syncLlmSettingsUi === "function") {
       const prov = _selectedLlmProvider();
       syncLlmSettingsUi({ ...(state.llmPub || {}), provider: prov }, { provider: prov });

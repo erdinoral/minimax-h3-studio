@@ -1798,16 +1798,16 @@ async def batch(body: BatchBody):
         prompts = rewritten_prompts
     shot_modes = [str(m or "").strip().lower() for m in (body.modes or [])]
     use_per_shot = bool(shot_modes)
-    # Chain: 2+ always; 1+ append_to_chain when tip exists; else link_continue flag
-    link_continue = True if len(prompts) > 1 else bool(body.link_continue)
-    tip = _chain_tip() if (link_continue or body.append_to_chain) else None
-    # Later adds → continue from tip; empty queue → 1st t2v then continue
-    if tip and body.append_to_chain:
-        link_continue = True
+    # Global chain tip = optional; within-batch chain = shots 2+ continue from shot 1…N-1
+    intra_batch = len(prompts) > 1
+    append_global = bool(body.link_continue) and bool(body.append_to_chain)
+    tip = _chain_tip() if append_global else None
+    chain_next = intra_batch or append_global
     if use_per_shot:
         # Mixed New Video / Continue: do not auto-continue from the global chain tip
         tip = None
-        link_continue = True
+        append_global = False
+        chain_next = True
     policy = {
         "purpose": purpose or ("music_video" if silent else "short_film"),
         "silentAudio": silent,
@@ -1831,7 +1831,7 @@ async def batch(body: BatchBody):
                 face_refs = inh
                 face_sz = inh_sz or "max"
     created = []
-    parent: Optional[str] = tip["id"] if (tip and link_continue) else None
+    parent: Optional[str] = tip["id"] if tip else None
     start_from_tip = bool(parent)
     async with _lock:
         for i, text in enumerate(prompts):
@@ -1840,7 +1840,9 @@ async def batch(body: BatchBody):
             if use_per_shot:
                 m = shot_modes[i] if i < len(shot_modes) else "t2v"
                 want_continue = m in ("continue", "devam", "i2v", "last_frame")
-            elif link_continue and (i > 0 or start_from_tip):
+            elif intra_batch and i > 0:
+                want_continue = True
+            elif append_global and i == 0 and start_from_tip:
                 want_continue = True
             if want_continue:
                 if not parent:
@@ -1947,13 +1949,14 @@ async def batch(body: BatchBody):
                 job["score_id"] = body.score_id
             _jobs.append(job)
             created.append(job)
-            if link_continue:
+            if chain_next or use_per_shot:
                 parent = job["id"]
         _save_jobs()
     slog.info(
         "batch queued",
         count=len(created),
-        link_continue=link_continue,
+        append_global=append_global,
+        intra_batch=intra_batch,
         append_tip=(tip or {}).get("id", "")[:8] if tip else "",
         face_lock=len(face_refs),
         size=f"{w}x{h}",
@@ -4340,7 +4343,7 @@ async def director_commit(body: DirectorCommitBody):
             sampler=sampler,
             scheduler=scheduler,
             link_continue=bool(link),
-            append_to_chain=bool(body.append_to_chain),
+            append_to_chain=bool(link),
             music_id=music_id,
             silent_audio=silent,
             purpose=brief.get("purpose"),

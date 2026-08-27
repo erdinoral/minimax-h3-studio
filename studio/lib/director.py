@@ -354,11 +354,14 @@ def format_brief_board(brief: Optional[dict[str, Any]], *, full: bool = False) -
     if not isinstance(brief, dict):
         return ""
     shots = brief.get("shots") or []
-    if not isinstance(shots, list) or not shots:
+    outline = brief.get("shotOutline") or []
+    if (not isinstance(shots, list) or not shots) and (
+        not isinstance(outline, list) or not outline
+    ):
         return ""
     clip = brief.get("clipDurationSec") or ""
     total = brief.get("totalDurationSec") or ""
-    need = brief.get("expectedShotCount") or len(shots)
+    need = brief.get("expectedShotCount") or len(shots) or len(outline)
     logline = _clip_text(brief.get("logline") or brief.get("title") or "", 240)
     chars = brief.get("characters") or []
     char_bits = []
@@ -374,11 +377,21 @@ def format_brief_board(brief: Optional[dict[str, Any]], *, full: bool = False) -
         "# GÜNCEL SHOT TAHTASI (kaynak gerçeklik)",
         f"logline: {logline or '(yok)'}",
         f"purpose={brief.get('purpose') or '-'} visualStyle={brief.get('visualStyle') or '-'}",
-        f"clipDurationSec={clip} totalDurationSec={total} shots={len(shots)}/{need}",
+        f"clipDurationSec={clip} totalDurationSec={total} shots={len(shots) if isinstance(shots, list) else 0}/{need}",
     ]
     if char_bits:
         lines.append("characters: " + " | ".join(char_bits[:8]))
-    for i, shot in enumerate(shots):
+    if isinstance(outline, list) and outline:
+        lines.append("\n## shotOutline (FAZ A)")
+        for row in outline[: int(need) if need else len(outline)]:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                f"- {row.get('index')}: {row.get('title') or '?'} — "
+                f"{_clip_text(row.get('beat'), 160)} "
+                f"[{_clip_text(row.get('camera'), 80)}]"
+            )
+    for i, shot in enumerate(shots if isinstance(shots, list) else []):
         if not isinstance(shot, dict):
             lines.append(f"\n## Shot {i + 1}\n{_clip_text(shot, prompt_cap)}")
             continue
@@ -781,6 +794,16 @@ def skeleton_brief_from_text(text: str) -> Optional[dict[str, Any]]:
             )
 
     shots = brief.get("shots") if isinstance(brief.get("shots"), list) else []
+    outline = brief.get("shotOutline") if isinstance(brief.get("shotOutline"), list) else []
+    if not outline:
+        om = re.search(r'"shotOutline"\s*:\s*(\[[\s\S]*?\])\s*,\s*"', raw)
+        if not om:
+            om = re.search(r'"shotOutline"\s*:\s*(\[[\s\S]*?\])', raw)
+        if om:
+            try:
+                outline = json.loads(repair_json_text(om.group(1)))
+            except Exception:
+                outline = []
     out = {
         "purpose": purpose,
         "visualStyle": style if style in VISUAL_STYLES else "realistic",
@@ -788,12 +811,14 @@ def skeleton_brief_from_text(text: str) -> Optional[dict[str, Any]]:
         "aspect": brief.get("aspect") or brief.get("aspectRatio") or "16:9",
         "logline": logline,
         "totalDurationSec": int(total or (need or 1) * clip),
-        "expectedShotCount": int(need or max(1, len(shots))),
+        "expectedShotCount": int(need or max(1, len(shots) or len(outline) or 1)),
         "characters": chars,
         "shots": shots,
         "silentAudio": purpose == "music_video",
         "shotsIncomplete": True,
     }
+    if outline:
+        out["shotOutline"] = outline
     return out
 
 
@@ -1274,6 +1299,9 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
         dur = 5
     brief["clipDurationSec"] = dur
     brief["aspect"] = brief.get("aspect") or "16:9"
+    brief["visualStyle"] = normalize_style(brief.get("visualStyle"))
+    if brief.get("purpose"):
+        brief["purpose"] = normalize_purpose(brief.get("purpose"))
 
     total = brief.get("totalDurationSec")
     if total is not None:
@@ -1304,6 +1332,16 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
         brief["expectedShotCount"] = need
         if not brief.get("totalDurationSec"):
             brief["totalDurationSec"] = need * dur
+
+    # Preserve / normalize FAZ A outline (even when shots empty)
+    outline = normalize_shot_outline(brief)
+    if outline:
+        brief["shotOutline"] = outline
+        if not need:
+            need = len(outline)
+            brief["expectedShotCount"] = need
+            if not brief.get("totalDurationSec"):
+                brief["totalDurationSec"] = need * dur
 
     raw_shots = brief.get("shots") or []
     cleaned = []
@@ -1381,23 +1419,25 @@ def opening_message(lang: Any = None) -> str:
     if normalize_ui_lang(lang) == "en":
         return (
             "Hi — I'm **H3 Director**. Pick a project from the chips.\n\n"
-            "I write each shot as a **cinematic SCENE screenplay**, not a short keyword prompt "
-            "(character card, micro-action, camera, atmosphere).\n"
+            "Workflow: we lock the idea → I give you an **N-shot outline** (titles + beats) "
+            "→ then each shot is written as a full **cinematic SCENE** one by one "
+            "(character card, micro-action, camera — not keyword soup).\n"
             "**music video** = silent picture + song mux at the end.\n"
             "Type: short film / ad / trailer / social / documentary / intro / outro.\n"
             "Look: realistic, anime, disney, game, 3D CGI, comic, illustration, oil paint, clay, found footage.\n"
-            "Give duration + story + character/location; then **Queue for production**.\n"
+            "Give duration + story + character/location; say when the idea is locked.\n"
             "The **Plan** tab lets you read and edit every shot.\n\n"
             "What are we making? Look and total duration in seconds?"
         )
     return (
         "Merhaba — ben **H3 Yönetmen**. Chip’ten proje seç.\n\n"
-        "Her shot’u kısa prompt değil, **sinematik SCENE senaryosu** yazarım "
-        "(karakter kartı, mikro eylem, kamera, atmosfer — Arrival/Shadow kalitesi).\n"
+        "Akış: fikri kilitle → ben **N shot’lık iskelet** (başlık + beat) çıkarırım "
+        "→ sonra her shot’u **tek tek** sinematik SCENE olarak yazarım "
+        "(karakter kartı, mikro eylem, kamera — keyword soup yok).\n"
         "**müzik klibi** = sessiz görüntü + finalde şarkı mux.\n"
         "Tür: kısa film / reklam / trailer / sosyal / belgesel / intro / outro.\n"
         "Tarz: gerçekçi, anime, disney, oyun, 3D CGI, çizgi roman, illüstrasyon, yağlı boya, kil, found footage.\n"
-        "Süre + hikâye + karakter/lokasyon ver; bitince **Üretime al**.\n"
+        "Süre + hikâye + karakter/lokasyon ver; “tamam / N shot / fikrimiz bu” de.\n"
         "**Plan** sekmesinde tüm shot metinlerini görüp düzenleyebilirsin.\n\n"
         "Şimdi: ne üretiyoruz? Tarz ve toplam süre kaç sn?"
     )
@@ -1473,25 +1513,246 @@ def fallback_director_reply(sess: dict[str, Any], user_msg: str = "", lang: Any 
     )
 
 
+MIN_H3_PROMPT_CHARS = 1100
+
+
+def format_project_bible(brief: dict[str, Any]) -> str:
+    """Locked cast / locations / style for per-shot writing (deterministic continuity)."""
+    brief = brief or {}
+    chars = brief.get("characters") or []
+    locs = brief.get("locations") or []
+    style = normalize_style(brief.get("visualStyle"))
+    lines = [
+        "PROJECT BIBLE (lock — do not change identity/wardrobe/location across shots):",
+        f"purpose={brief.get('purpose') or '-'} visualStyle={style}",
+        f"craft={style_craft_line(style)}",
+        f"logline={brief.get('logline') or '-'}",
+        f"clipDurationSec={brief.get('clipDurationSec') or 5} "
+        f"totalDurationSec={brief.get('totalDurationSec') or '-'} "
+        f"expectedShotCount={brief.get('expectedShotCount') or '-'}",
+        f"silentAudio={_is_silent_brief(brief)}",
+        "characters:",
+    ]
+    if isinstance(chars, list) and chars:
+        for c in chars:
+            if isinstance(c, dict):
+                lines.append(
+                    f"- {(c.get('name') or 'Character').strip()}: "
+                    f"{(c.get('description') or '').strip()}"
+                )
+            else:
+                lines.append(f"- {c}")
+    else:
+        lines.append("- (none listed — invent once and keep identical)")
+    lines.append("locations:")
+    if isinstance(locs, list) and locs:
+        for loc in locs:
+            if isinstance(loc, dict):
+                lines.append(
+                    f"- {(loc.get('name') or 'Location').strip()}: "
+                    f"{(loc.get('description') or '').strip()}"
+                )
+            else:
+                lines.append(f"- {loc}")
+    else:
+        lines.append("- (derive from logline; keep identical)")
+    return "\n".join(lines)
+
+
+def normalize_shot_outline(
+    brief: dict[str, Any],
+    *,
+    pad: bool = False,
+) -> list[dict[str, Any]]:
+    """Return outline rows from shotOutline or thin shots. Optionally pad to N."""
+    brief = brief or {}
+    need = int(brief.get("expectedShotCount") or 0)
+    shots = brief.get("shots") if isinstance(brief.get("shots"), list) else []
+    raw = brief.get("shotOutline") if isinstance(brief.get("shotOutline"), list) else []
+    out: list[dict[str, Any]] = []
+    if raw:
+        for i, row in enumerate(raw):
+            if not isinstance(row, dict):
+                continue
+            idx = int(row.get("index") or (i + 1))
+            out.append(
+                {
+                    "index": idx,
+                    "title": str(row.get("title") or f"Shot {idx}").strip(),
+                    "beat": str(
+                        row.get("beat") or row.get("action") or row.get("title") or ""
+                    ).strip(),
+                    "camera": str(
+                        row.get("camera") or "eye-level medium, subtle push-in, 35mm"
+                    ).strip(),
+                }
+            )
+    elif shots:
+        for i, s in enumerate(shots):
+            if not isinstance(s, dict):
+                continue
+            action = str(s.get("action") or "").strip()
+            prompt = str(s.get("h3Prompt") or "").strip()
+            # Skip empty placeholders — they are not a real outline
+            if not action and len(prompt) < 80:
+                continue
+            out.append(
+                {
+                    "index": i + 1,
+                    "title": str(s.get("title") or action or f"Shot {i + 1}")[:80],
+                    "beat": action or (prompt[:160] if prompt else ""),
+                    "camera": str(
+                        s.get("camera") or "eye-level medium, subtle push-in, 35mm"
+                    ).strip(),
+                }
+            )
+    if pad and need and len(out) < need:
+        while len(out) < need:
+            i = len(out) + 1
+            out.append(
+                {
+                    "index": i,
+                    "title": f"Beat {i}",
+                    "beat": (
+                        f"Continue the story beat for shot {i} of {need}; "
+                        f"logline: {brief.get('logline') or 'progress the scene'}"
+                    ),
+                    "camera": "eye-level medium, subtle push-in, 35mm",
+                }
+            )
+    if need and len(out) > need:
+        out = out[:need]
+    for i, row in enumerate(out):
+        row["index"] = i + 1
+    return out
+
+
+def score_h3_prompt(
+    text: str,
+    *,
+    index: int = 0,
+    silent: bool = False,
+) -> dict[str, Any]:
+    """Heuristic quality gate for director-level SCENE bodies."""
+    p = (text or "").strip()
+    reasons: list[str] = []
+    n = len(p)
+    if n < MIN_H3_PROMPT_CHARS:
+        reasons.append(f"too_short:{n}<{MIN_H3_PROMPT_CHARS}")
+    paras = [x for x in re.split(r"\n\s*\n", p) if x.strip()]
+    if len(paras) < 6:
+        reasons.append(f"few_paragraphs:{len(paras)}")
+    plow = p.lower()
+    if index > 0 and not plow.startswith("continue directly"):
+        reasons.append("missing_continue_opener")
+    if "one continuous shot" not in plow:
+        reasons.append("missing_continuous_lock")
+    if n < 400 and ("," in p) and p.count("\n") < 3:
+        reasons.append("keyword_soup")
+    vague = ("they interact", "cinematic shot of", "dark mood, 35mm")
+    if any(v in plow for v in vague):
+        reasons.append("vague_beat")
+    if not silent and re.search(r"\b(bgm|soundtrack|underscore|phonk bed)\b", plow):
+        if "no bgm" not in plow and "no music" not in plow and "silent" not in plow:
+            reasons.append("bgm_bleed")
+    hard_prefixes = (
+        "too_short",
+        "missing_continue_opener",
+        "keyword_soup",
+        "few_paragraphs",
+    )
+    hard_hit = [r for r in reasons if any(r.startswith(h) for h in hard_prefixes)]
+    ok = len(hard_hit) == 0 and n >= MIN_H3_PROMPT_CHARS
+    return {"ok": ok, "chars": n, "reasons": reasons, "paragraphs": len(paras)}
+
+
+def outline_generation_user_prompt(brief: dict[str, Any]) -> str:
+    need = int(brief.get("expectedShotCount") or 12)
+    dur = int(brief.get("clipDurationSec") or 5)
+    return (
+        f"FAZ A only. Build a shot OUTLINE for exactly {need} shots "
+        f"({dur}s each). Do NOT write h3Prompt bodies.\n"
+        f"{format_project_bible(brief)}\n"
+        "Return ONLY JSON:\n"
+        "{\n"
+        '  "ready": false,\n'
+        '  "phase": "outline",\n'
+        '  "brief": {\n'
+        f'    "expectedShotCount": {need},\n'
+        '    "logline": "...",\n'
+        '    "characters": [...],\n'
+        '    "locations": [...],\n'
+        '    "shotOutline": [\n'
+        '      {"index": 1, "title": "...", "beat": "...", "camera": "..."},\n'
+        f"      ... exactly {need} items\n"
+        "    ],\n"
+        '    "shots": []\n'
+        "  }\n"
+        "}\n"
+        "Each beat must be a concrete micro-action for that clip only. "
+        "Titles unique. No markdown."
+    )
+
+
+def single_shot_user_prompt(
+    brief: dict[str, Any],
+    *,
+    index: int,
+    need: int,
+    outline_row: dict[str, Any],
+    prev_shot: Optional[dict[str, Any]] = None,
+) -> str:
+    """FAZ B — write exactly one GOLD STANDARD h3Prompt."""
+    dur = int(brief.get("clipDurationSec") or 5)
+    link = "standalone" if index == 0 else "continue"
+    title = (outline_row or {}).get("title") or f"Shot {index + 1}"
+    beat = (outline_row or {}).get("beat") or title
+    camera = (outline_row or {}).get("camera") or "eye-level medium, subtle push-in, 35mm"
+    prev_snip = ""
+    if prev_shot and isinstance(prev_shot, dict):
+        prev_body = (prev_shot.get("h3Prompt") or "")[:900]
+        prev_snip = (
+            f"PREVIOUS SHOT ending (continue from this moment):\n{prev_body}\n"
+        )
+    return (
+        f"FAZ B — write ONLY shot {index + 1} of {need} "
+        f"({dur} seconds, linkToPrev={link}).\n"
+        f"{H3_PROMPT_GUIDE}\n"
+        f"{format_project_bible(brief)}\n"
+        f"OUTLINE for this shot: title={title!r} beat={beat!r} camera={camera!r}\n"
+        f"{prev_snip}"
+        "Return ONLY JSON: "
+        '{"shot":{'
+        f'"durationSec":{dur},"camera":"...","action":"...","dialogue":[],'
+        '"soundscape":"...","music":"none","linkToPrev":'
+        f'"{link}","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
+        "}}\n"
+        "Rules: English SCENE screenplay; character cards on shot 1; "
+        "shot 2+ MUST start with 'Continue directly from the previous shot.' "
+        "+ Same X, same Y, identical clothing; micro-actions only; "
+        "no keyword soup; no BGM unless silent music-video lock."
+    )
+
+
 def expand_shots_user_prompt(brief: dict[str, Any], start: int, end: int, need: int) -> str:
+    """Legacy chunk expand — prefer single_shot_user_prompt / outline flow."""
     chars = brief.get("characters") or []
     prev = brief.get("shots") or []
     prev_tail = prev[-2:] if prev else []
+    outline = normalize_shot_outline(brief)
+    slice_out = [o for o in outline if start <= int(o.get("index") or 0) <= end]
     return (
         f"Create shots {start}-{end} of {need} for this music video / film. "
         f"Each shot {brief.get('clipDurationSec', 5)} seconds. Continue chain.\n"
         f"{H3_PROMPT_GUIDE}\n"
-        f"purpose={brief.get('purpose')} style={brief.get('visualStyle')} "
-        f"aspect={brief.get('aspect')} logline={brief.get('logline')}\n"
+        f"{format_project_bible(brief)}\n"
+        f"shotOutline_slice={json.dumps(slice_out, ensure_ascii=False)}\n"
         f"characters={json.dumps(chars, ensure_ascii=False)}\n"
         f"previous_shots_tail={json.dumps(prev_tail, ensure_ascii=False)}\n"
         "Return ONLY valid JSON: {\"shots\":[...]} with exactly "
         f"{end - start + 1} shots. Each shot needs camera, action, dialogue[], "
         "soundscape, music, and a FULL cinematic SCENE screenplay as h3Prompt "
-        "(≥1100 chars, multi-paragraph beat-by-beat — NOT keyword prompts). "
-        "Write like director shot notes: character cards, micro-actions, camera moves, "
-        "atmosphere, technical close, 'One continuous shot, no cuts'. "
-        "Each h3Prompt must be ≥1100 chars with 8+ short paragraphs — never keyword soup. "
+        f"(≥{MIN_H3_PROMPT_CHARS} chars, multi-paragraph beat-by-beat — NOT keyword prompts). "
         "Continue shots MUST start with 'Continue directly from the previous shot.' "
         "Keep character age/wardrobe identical. No vague one-liners."
     )

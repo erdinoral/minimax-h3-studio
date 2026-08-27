@@ -37,6 +37,7 @@ from lib.comfy import (
     enhance_ref_prompt,
     MULTISHOT_MAX_SHOTS,
 )
+from lib import h3_models
 from lib.loras import (
     LORAS_DIR,
     dest_for,
@@ -50,17 +51,21 @@ from lib.loras import (
 from lib.director import (
     apply_audio_policy,
     apply_shot_patches,
+    build_scene_placeholder_shot,
     ensure_shot_count_sync,
-    expand_shots_user_prompt,
     extract_json_object,
     fallback_director_reply,
     format_brief_board,
     format_cinema_board,
     infer_duration_and_shots,
+    normalize_shot_outline,
     opening_message,
+    outline_generation_user_prompt,
     PLAN_MODE_ADDENDUM,
     CINEMA_STUDIO_ADDENDUM,
     ready_shots_reply,
+    score_h3_prompt,
+    single_shot_user_prompt,
     skeleton_brief_from_text,
     system_prompt,
     ui_lang_addendum,
@@ -69,6 +74,7 @@ from lib.director import (
     _clean_shot,
     force_continue_chain,
     expected_shot_count,
+    MIN_H3_PROMPT_CHARS,
 )
 from lib.frames import duration_to_length, extract_last_frame, resize_image, strip_audio
 from lib.music import (
@@ -221,22 +227,73 @@ ASPECT_PRESETS = {
     "4:3": (1440, 1080),
 }
 
-# Official Comfy MiniMax H3 table (multiple=32).
-# Keys stay 480/720/1080 for API compat; pixels are real H3 sizes (736 / 1088).
+# Official Comfy MiniMax H3 Size Settings Reference (ResolutionSelector, multiple=32).
+# Six practical MP tiers; legacy 720/1080 alias to 736/1088.
+# Sizes from: total=mp*1024², scale=sqrt(total/(wr*hr)), round to ×32.
 H3_QUALITY_SIZES = {
-    "16:9": {"480": (864, 480), "720": (1280, 736), "1080": (1920, 1088)},
-    "9:16": {"480": (480, 864), "720": (736, 1280), "1080": (1088, 1920)},
-    "1:1": {"480": (480, 480), "720": (736, 736), "1080": (1088, 1088)},
-    "21:9": {"480": (1024, 448), "720": (1536, 672), "1080": (2176, 960)},
-    "4:3": {"480": (640, 480), "720": (960, 736), "1080": (1440, 1088)},
+    "16:9": {
+        "352": (608, 352),
+        "480": (864, 480),
+        "608": (1056, 608),
+        "736": (1280, 736),
+        "768": (1344, 768),
+        "1088": (1920, 1088),
+    },
+    "9:16": {
+        "352": (352, 608),
+        "480": (480, 864),
+        "608": (608, 1056),
+        "736": (736, 1280),
+        "768": (768, 1344),
+        "1088": (1088, 1920),
+    },
+    "1:1": {
+        "352": (448, 448),
+        "480": (640, 640),
+        "608": (800, 800),
+        "736": (960, 960),
+        "768": (1024, 1024),
+        "1088": (1440, 1440),
+    },
+    "21:9": {
+        "352": (704, 288),
+        "480": (992, 416),
+        "608": (1216, 512),
+        "736": (1472, 640),
+        "768": (1536, 672),
+        "1088": (2208, 960),
+    },
+    "4:3": {
+        "352": (544, 384),
+        "480": (736, 576),
+        "608": (928, 672),
+        "736": (1120, 832),
+        "768": (1184, 864),
+        "1088": (1664, 1248),
+    },
 }
 
-# Marketing tier → H3 short-edge (×32), not literal 720/1080
+QUALITY_ALIASES = {"720": "736", "1080": "1088"}
+QUALITY_KEYS = ("352", "480", "608", "736", "768", "1088")
+
+# Canonical key → short-edge label (16:9); used for fallback scaling
 QUALITY_SHORT_EDGE = {
+    "352": 352,
     "480": 480,
+    "608": 608,
+    "736": 736,
+    "768": 768,
+    "1088": 1088,
+    # legacy
     "720": 736,
     "1080": 1088,
 }
+
+
+def normalize_quality(quality: str) -> str:
+    q = str(quality or "736").strip()
+    q = QUALITY_ALIASES.get(q, q)
+    return q if q in QUALITY_KEYS else "736"
 
 
 def snap32(v: float) -> int:
@@ -248,9 +305,13 @@ def snap_h3_size(width: int, height: int) -> tuple[int, int]:
     return snap32(width), snap32(height)
 
 
-def resolve_size(aspect: str, quality: str = "720") -> tuple[int, int]:
-    q = str(quality)
+def resolve_size(aspect: str, quality: str = "736") -> tuple[int, int]:
+    q = normalize_quality(quality)
     preset = H3_QUALITY_SIZES.get(aspect, {}).get(q)
+    if preset:
+        return preset
+    # Legacy alias keys may still sit in the table under canonical form only
+    preset = H3_QUALITY_SIZES.get(aspect, {}).get(QUALITY_ALIASES.get(str(quality), q))
     if preset:
         return preset
     base_w, base_h = ASPECT_PRESETS.get(aspect, (1920, 1080))
@@ -839,7 +900,7 @@ class GenerateBody(BaseModel):
     prompt: str = Field(..., min_length=1)
     duration: int = Field(5, description="4 | 5 | 6 | 8 | 10 | 15")
     aspect: str = "16:9"
-    quality: str = Field("720", description="480 | 720 | 1080")
+    quality: str = Field("736", description="352 | 480 | 608 | 736 | 768 | 1088 (aliases: 720->736, 1080->1088)")
     seed: int = -1
     steps: int = 20
     sampler: str = "res_multistep"
@@ -892,7 +953,7 @@ class BatchBody(BaseModel):
     prompts: list[str]
     duration: int = 5
     aspect: str = "16:9"
-    quality: str = "720"
+    quality: str = "736"
     steps: int = 20
     link_continue: bool = True
     # True: first prompt continues from last queued/running/done (append chain)
@@ -928,7 +989,7 @@ class CinemaProduceBody(BaseModel):
     setup: Optional[dict[str, Any]] = None
     duration: int = 5
     aspect: str = "16:9"
-    quality: str = "720"
+    quality: str = "736"
     steps: int = 20
     seed: int = -1
     silent_audio: bool = False
@@ -961,7 +1022,7 @@ class StoryboardBody(BaseModel):
     shared_prompt: str = ""
     duration: int = 5
     aspect: str = "16:9"
-    quality: str = "720"
+    quality: str = "736"
     steps: int = 20
     seed: int = -1
     silent_audio: bool = False
@@ -1013,7 +1074,7 @@ class DirectorCommitBody(BaseModel):
     queue: bool = False
     link_continue: Optional[bool] = None
     append_to_chain: bool = True
-    quality: str = "720"
+    quality: str = "736"
     aspect: Optional[str] = None
     silent_audio: Optional[bool] = None
     purpose: Optional[str] = None
@@ -1048,6 +1109,9 @@ def _looks_like_finished_plan(text: str) -> bool:
         "expectedshotcount",
         '"ready": true',
         '"ready":true',
+        '"phase": "outline"',
+        '"phase":"outline"',
+        "shotoutline",
         "scene-style",
         "h3prompt",
         "shot 1",
@@ -1073,12 +1137,18 @@ async def _brief_from_director_text(
     if parsed:
         if isinstance(parsed.get("brief"), dict):
             brief_src = parsed["brief"]
+            # Carry phase / outline flags from outer envelope
+            if parsed.get("phase") and not brief_src.get("phase"):
+                brief_src["phase"] = parsed.get("phase")
         elif isinstance(parsed.get("shots"), list) or parsed.get("expectedShotCount"):
+            brief_src = parsed
+        elif isinstance(parsed.get("shotOutline"), list):
             brief_src = parsed
     if not isinstance(brief_src, dict) or (
         not (brief_src.get("shots") or [])
         and not brief_src.get("expectedShotCount")
         and not brief_src.get("characters")
+        and not (brief_src.get("shotOutline") or [])
     ):
         brief_src = skeleton_brief_from_text(content)
     if not isinstance(brief_src, dict):
@@ -1097,8 +1167,22 @@ async def _brief_from_director_text(
     brief = _apply_session_timing(validate_brief(brief_src), sess)
     need = brief.get("expectedShotCount") or 0
     have = len(brief.get("shots") or [])
-    if expand and need and have < need:
+    outline = normalize_shot_outline(brief)
+    # FAZ A only (outline, no full shots yet) OR incomplete shots → FAZ B fill
+    if expand and need and (have < need or (outline and have == 0)):
         brief = await _expand_brief_shots(brief, model)
+    elif expand and need and have >= need:
+        # Quality-upgrade thin shots still using outline when present
+        thin = sum(
+            1
+            for s in (brief.get("shots") or [])
+            if isinstance(s, dict)
+            and len(str(s.get("h3Prompt") or "")) < MIN_H3_PROMPT_CHARS
+        )
+        if thin:
+            brief = await _expand_brief_shots(brief, model)
+        else:
+            brief = ensure_shot_count_sync(brief)
     else:
         brief = ensure_shot_count_sync(brief)
     return brief if brief.get("shots") else None
@@ -1148,59 +1232,204 @@ def _apply_session_timing(brief: dict, sess: Optional[dict] = None) -> dict:
     return validate_brief(brief)
 
 
+def _emit_director_status(text: str) -> None:
+    progress = _director_progress.get()
+    if not progress:
+        return
+    try:
+        progress({"type": "status", "text": text})
+    except Exception:
+        pass
+
+
+async def _generate_shot_outline(brief: dict, model: str) -> dict:
+    """FAZ A — ask LLM for title/beat list only (no h3Prompts)."""
+    brief = validate_brief(brief)
+    need = int(brief.get("expectedShotCount") or 0)
+    if not need:
+        return brief
+    existing = normalize_shot_outline(brief)
+    if len(existing) >= need:
+        brief["shotOutline"] = existing[:need]
+        return brief
+    _emit_director_status(f"FAZ A — {need} shot başlığı yazılıyor…")
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt()
+            + "\n\nFAZ A only: return shotOutline JSON. No h3Prompt. No chat.",
+        },
+        {"role": "user", "content": outline_generation_user_prompt(brief)},
+    ]
+    try:
+        content = await llm.chat(
+            model, messages, temperature=0.4, format_json=True, num_predict=3072
+        )
+    except Exception as e:
+        print(f"outline generate fail: {e}", flush=True)
+        brief["shotOutline"] = normalize_shot_outline(brief, pad=True)
+        return brief
+    parsed = extract_json_object(content) or {}
+    src = parsed.get("brief") if isinstance(parsed.get("brief"), dict) else parsed
+    if isinstance(src, dict):
+        for key in ("logline", "characters", "locations", "purpose", "visualStyle"):
+            if src.get(key) and not brief.get(key):
+                brief[key] = src[key]
+        if isinstance(src.get("shotOutline"), list) and src["shotOutline"]:
+            brief["shotOutline"] = src["shotOutline"]
+    brief = validate_brief(brief)
+    outline = normalize_shot_outline(brief, pad=True)
+    brief["shotOutline"] = outline
+    return brief
+
+
+async def _write_one_shot_from_outline(
+    brief: dict,
+    model: str,
+    *,
+    index: int,
+    need: int,
+    outline_row: dict,
+    prev_shot: Optional[dict],
+) -> Optional[dict]:
+    """FAZ B — one GOLD STANDARD h3Prompt with one quality retry."""
+    dur = int(brief.get("clipDurationSec") or 5)
+    silent = bool(brief.get("silentAudio"))
+    feedback = ""
+    best: Optional[dict] = None
+    for attempt in range(2):
+        user = single_shot_user_prompt(
+            brief,
+            index=index,
+            need=need,
+            outline_row=outline_row,
+            prev_shot=prev_shot,
+        )
+        if feedback:
+            user += f"\n\nPREVIOUS DRAFT FAILED QA: {feedback}. Rewrite denser."
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    system_prompt()
+                    + "\n\nFAZ B: write exactly ONE shot JSON. No chat. "
+                    f"h3Prompt ≥{MIN_H3_PROMPT_CHARS} chars."
+                ),
+            },
+            {"role": "user", "content": user},
+        ]
+        try:
+            content = await llm.chat(
+                model,
+                messages,
+                temperature=0.5 if attempt == 0 else 0.35,
+                format_json=True,
+                num_predict=4096,
+            )
+        except Exception as e:
+            print(f"shot {index + 1} write fail: {e}", flush=True)
+            break
+        parsed = extract_json_object(content) or {}
+        raw_shot = None
+        if isinstance(parsed.get("shot"), dict):
+            raw_shot = parsed["shot"]
+        elif isinstance(parsed.get("shots"), list) and parsed["shots"]:
+            raw_shot = parsed["shots"][0]
+        elif isinstance(parsed, dict) and parsed.get("h3Prompt"):
+            raw_shot = parsed
+        if not isinstance(raw_shot, dict):
+            feedback = "missing shot object"
+            continue
+        # Stamp outline fields if model omitted them
+        raw_shot.setdefault("action", outline_row.get("beat") or outline_row.get("title"))
+        raw_shot.setdefault("camera", outline_row.get("camera"))
+        raw_shot["linkToPrev"] = "standalone" if index == 0 else "continue"
+        cleaned = _clean_shot(raw_shot, index, dur, brief=brief, total_shots=need)
+        if not cleaned:
+            feedback = "empty shot"
+            continue
+        score = score_h3_prompt(
+            cleaned.get("h3Prompt") or "",
+            index=index,
+            silent=silent,
+        )
+        best = cleaned
+        if score["ok"]:
+            return cleaned
+        feedback = ",".join(score.get("reasons") or ["weak"])
+        print(
+            f"shot {index + 1} QA fail attempt={attempt + 1}: {feedback}",
+            flush=True,
+        )
+    return best
+
+
 async def _expand_brief_shots(brief: dict, model: str) -> dict:
-    """Fill shots to expectedShotCount via Ollama chunks, then placeholder pad."""
+    """FAZ A outline (if needed) → FAZ B write each shot one-by-one → pad leftovers."""
     brief = validate_brief(brief)
     need = brief.get("expectedShotCount")
     shots = list(brief.get("shots") or [])
     if not need:
         return ensure_shot_count_sync(brief)
-    if len(shots) >= need:
+
+    # Keep strong existing shots; rewrite only missing/thin slots
+    strong: list[Optional[dict]] = [None] * int(need)
+    for i, s in enumerate(shots[: int(need)]):
+        if not isinstance(s, dict):
+            continue
+        body = str(s.get("h3Prompt") or "")
+        sc = score_h3_prompt(
+            body, index=i, silent=bool(brief.get("silentAudio"))
+        )
+        if sc["ok"]:
+            strong[i] = s
+
+    if all(strong) and len(strong) >= int(need):
+        brief["shots"] = [s for s in strong if s]
         return ensure_shot_count_sync(brief)
 
-    dur = int(brief.get("clipDurationSec") or 5)
-    chunk = 4
-    stagnant = 0
-    while len(shots) < need and stagnant < 3:
-        start = len(shots) + 1
-        end = min(need, len(shots) + chunk)
-        before = len(shots)
-        messages = [
-            {
-                "role": "system",
-                "content": system_prompt()
-                + "\n\nŞu an sadece eksik shot JSON üret. Sohbet etme. "
-                f"Tam olarak {end - start + 1} shot döndür.",
-            },
-            {"role": "user", "content": expand_shots_user_prompt(brief, start, end, need)},
-        ]
-        try:
-            content = await llm.chat(
-                model, messages, temperature=0.55, format_json=True
-            )
-        except Exception as e:
-            print(f"shot expand fail: {e}", flush=True)
-            break
-        parsed = extract_json_object(content) or {}
-        batch = parsed.get("shots") if isinstance(parsed, dict) else None
-        if not isinstance(batch, list) or not batch:
-            stagnant += 1
+    outline = normalize_shot_outline(brief)
+    if len(outline) < int(need):
+        brief = await _generate_shot_outline(brief, model)
+        outline = normalize_shot_outline(brief, pad=True)
+    else:
+        brief["shotOutline"] = outline
+        outline = normalize_shot_outline(brief, pad=True)
+
+    final: list[dict] = []
+    for i in range(int(need)):
+        if strong[i] is not None:
+            final.append(strong[i])  # type: ignore[arg-type]
             continue
-        for s in batch:
-            c = _clean_shot(s, len(shots), dur, brief=brief, total_shots=need)
-            if c:
-                shots.append(c)
-        brief["shots"] = shots
-        if len(shots) <= before:
-            stagnant += 1
+        row = outline[i] if i < len(outline) else {
+            "index": i + 1,
+            "title": f"Beat {i + 1}",
+            "beat": brief.get("logline") or f"Shot {i + 1}",
+            "camera": "eye-level medium, subtle push-in, 35mm",
+        }
+        _emit_director_status(
+            f"FAZ B — shot {i + 1}/{need} SCENE yazılıyor… ({row.get('title') or ''})"
+        )
+        prev = final[-1] if final else None
+        written = await _write_one_shot_from_outline(
+            brief,
+            model,
+            index=i,
+            need=int(need),
+            outline_row=row,
+            prev_shot=prev,
+        )
+        if written:
+            final.append(written)
         else:
-            stagnant = 0
+            final.append(
+                build_scene_placeholder_shot(index=i, total=int(need), brief=brief)
+            )
 
-    brief["shots"] = force_continue_chain(shots[:need])
-    brief["expectedShotCount"] = need
-    # Always pad remaining slots so commit never queues only 1 shot
+    brief["shots"] = force_continue_chain(final[: int(need)])
+    brief["expectedShotCount"] = int(need)
+    brief["shotOutline"] = outline[: int(need)]
     return ensure_shot_count_sync(brief)
-
 
 @app.on_event("startup")
 async def startup():
@@ -1551,7 +1780,7 @@ async def generate(body: GenerateBody):
     if body.duration not in ALLOWED_DURATIONS:
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
-        raise HTTPException(400, "quality must be 480, 720, or 1080")
+        raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
 
@@ -1732,7 +1961,7 @@ async def generate(body: GenerateBody):
         "prompt": prompt_txt,
         "duration": body.duration,
         "aspect": body.aspect,
-        "quality": str(body.quality),
+        "quality": normalize_quality(body.quality),
         "width": w,
         "height": h,
         "seed": seed,
@@ -1758,6 +1987,7 @@ async def generate(body: GenerateBody):
         "sage_attention": _sage_mode(body),
         "lane": "director" if (body.lane or "").strip().lower() == "director" else "scene",
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
+        "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
         **_lora_fields(lora_src),
     }
     async with _lock:
@@ -1779,7 +2009,7 @@ async def batch(body: BatchBody):
     if body.duration not in ALLOWED_DURATIONS:
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
-        raise HTTPException(400, "quality must be 480, 720, or 1080")
+        raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı")
     await _free_llm_for_production()
@@ -1895,7 +2125,7 @@ async def batch(body: BatchBody):
                 "prompt": shot_text,
                 "duration": body.duration,
                 "aspect": body.aspect,
-                "quality": str(body.quality),
+                "quality": normalize_quality(body.quality),
                 "width": w,
                 "height": h,
                 "seed": seed,
@@ -1928,6 +2158,7 @@ async def batch(body: BatchBody):
                     if (body.lane or "").strip().lower() == "director" or body.cinema_batch
                     else "scene"
                 ),
+                "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
                 **_lora_fields(lora_src),
             }
             if mode == "face" and shot_refs:
@@ -2691,7 +2922,7 @@ async def _queue_cinema_seamless(
         "script": script,
         "duration": body.duration,
         "aspect": body.aspect,
-        "quality": str(body.quality),
+        "quality": normalize_quality(body.quality),
         "width": w,
         "height": h,
         "seed": seed,
@@ -2749,7 +2980,7 @@ async def cinema_produce(body: CinemaProduceBody):
     lib["shots"] = parsed
     lib["script"] = "\n\n---\n\n".join(s["text"] for s in parsed)
     lib["duration"] = body.duration
-    lib["quality"] = str(body.quality)
+    lib["quality"] = normalize_quality(body.quality)
     lib["steps"] = body.steps if body.steps and body.steps > 0 else 20
     look = cinema.setup_preamble(lib.get("setup") or {})
     purpose = (body.purpose or "").strip()
@@ -3027,7 +3258,7 @@ async def storyboard(body: StoryboardBody):
     if body.duration not in ALLOWED_DURATIONS:
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
-        raise HTTPException(400, "quality must be 480, 720, or 1080")
+        raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı")
     images = [str(x) for x in (body.image_names or []) if x]
@@ -3078,7 +3309,7 @@ async def storyboard(body: StoryboardBody):
             "prompt": piece,
             "duration": body.duration,
             "aspect": body.aspect,
-            "quality": str(body.quality),
+            "quality": normalize_quality(body.quality),
             "width": w,
             "height": h,
             "seed": (seed_base + i) % (2**53),
@@ -3103,6 +3334,7 @@ async def storyboard(body: StoryboardBody):
             "batch_index": i + 1,
             "batch_total": n_clips,
             "storyboard": True,
+            "h3_models": h3_models.resolve("fl2va"),
             **_lora_fields(body),
         }
         created.append(job)
@@ -3297,6 +3529,47 @@ class LoraImportBody(BaseModel):
 @app.get("/api/loras")
 async def loras_get():
     return {"ok": True, "loras": public_list(), "download": dict(_lora_dl_status)}
+
+
+class H3ModelsBody(BaseModel):
+    unet: Optional[str] = None
+    unet_ref2va: Optional[str] = None
+    clip: Optional[str] = None
+    vae: Optional[str] = None
+    audio_vae: Optional[str] = None
+    reset: bool = False
+
+
+@app.get("/api/h3-models")
+async def h3_models_get():
+    cat = h3_models.list_catalog()
+    return {
+        "ok": True,
+        "selected": h3_models.load(),
+        "defaults": cat["defaults"],
+        "options": cat["options"],
+        "folders": cat["folders"],
+        "resolved": {
+            "fl2va": h3_models.resolve("fl2va"),
+            "ref2va": h3_models.resolve("ref2va"),
+        },
+    }
+
+
+@app.post("/api/h3-models")
+async def h3_models_set(body: H3ModelsBody):
+    if body.reset:
+        selected = h3_models.reset()
+    else:
+        selected = h3_models.save(body.model_dump(exclude={"reset"}))
+    return {
+        "ok": True,
+        "selected": selected,
+        "resolved": {
+            "fl2va": h3_models.resolve("fl2va"),
+            "ref2va": h3_models.resolve("ref2va"),
+        },
+    }
 
 
 @app.post("/api/loras/download")
@@ -3866,7 +4139,7 @@ async def _director_chat_impl(body: DirectorChatBody):
                 prev += m["content"] + "\n"
                 break
         if _looks_like_finished_plan(prev) or extract_json_object(prev):
-            mid = "Senaryo kilitlendi — SCENE prompt’lar tamamlanıyor…"
+            mid = "Senaryo kilitlendi — outline + SCENE’ler shot shot yazılıyor…"
             sess["messages"].append({"role": "assistant", "content": mid})
             _sessions[sid] = sess
             _save_sessions()
@@ -3996,14 +4269,21 @@ async def _director_chat_impl(body: DirectorChatBody):
             brief_cand.get("shots")
             or brief_cand.get("expectedShotCount")
             or brief_cand.get("characters")
+            or brief_cand.get("shotOutline")
             or parsed.get("ready") is True
+            or str(parsed.get("phase") or "").lower() == "outline"
         ):
             should_finalize = True
         elif parsed.get("ready") is True:
             should_finalize = True
+        elif str(parsed.get("phase") or "").lower() == "outline":
+            should_finalize = True
     if not should_finalize and content and (
-        re.search(r'"shots"\s*:\s*\[', content)
-        and re.search(r'"expectedShotCount"\s*:\s*\d+', content)
+        (
+            re.search(r'"shots"\s*:\s*\[', content)
+            and re.search(r'"expectedShotCount"\s*:\s*\d+', content)
+        )
+        or re.search(r'"shotOutline"\s*:\s*\[', content)
     ):
         should_finalize = True
 
@@ -4035,7 +4315,7 @@ async def _director_chat_impl(body: DirectorChatBody):
             and not (isinstance(parsed.get("shots"), list) and parsed.get("shots"))
         ):
             mid = (
-                "Senaryo alındı — SCENE prompt’lar tamamlanıyor, biraz bekle…"
+                "İskelet alındı — önce shot başlıkları, sonra her SCENE tek tek yazılıyor…"
             )
             sess["messages"].append({"role": "assistant", "content": mid})
             _sessions[sid] = sess
@@ -4296,7 +4576,7 @@ async def director_commit(body: DirectorCommitBody):
     if dur not in ALLOWED_DURATIONS:
         dur = 5
     aspect = (body.aspect or "").strip() or brief.get("aspect") or "16:9"
-    quality = str(body.quality or "720")
+    quality = normalize_quality(body.quality or "736")
     silent = bool(brief.get("silentAudio")) or bool(sess.get("music_id"))
     steps = int(body.steps) if body.steps and int(body.steps) > 0 else 20
     sampler = (body.sampler or "res_multistep").strip() or "res_multistep"
@@ -4887,6 +5167,7 @@ async def _run_job(job: dict):
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
         lora_name, lora_strength = _lora_for_graph(job)
+        models = job.get("h3_models") or h3_models.resolve(h3_models.graph_for_mode(mode))
         if mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
@@ -4901,6 +5182,7 @@ async def _run_job(job: dict):
                 sampler=job.get("sampler") or "res_multistep",
                 scheduler=job.get("scheduler") or "simple",
                 shot_count=0,
+                models=models,
                 filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
                 silent_audio=silent,
                 lora_name=lora_name,
@@ -4924,6 +5206,7 @@ async def _run_job(job: dict):
                 sampler=job.get("sampler") or "res_multistep",
                 scheduler=job.get("scheduler") or "simple",
                 ref_image_size=size_mode,
+                models=models,
                 filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
                 silent_audio=silent,
                 include_video_audio=bool(job.get("include_video_audio", True)),
@@ -4962,6 +5245,7 @@ async def _run_job(job: dict):
                 sampler=job.get("sampler") or "res_multistep",
                 scheduler=job.get("scheduler") or "simple",
                 ref_image_size=size_mode,
+                models=models,
                 filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
                 silent_audio=silent,
                 lora_name=lora_name,
@@ -4982,6 +5266,7 @@ async def _run_job(job: dict):
                 scheduler=job.get("scheduler") or "simple",
                 first_frame_name=first,
                 last_frame_name=last_frame,
+                models=models,
                 filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
                 silent_audio=silent,
                 lora_name=lora_name,

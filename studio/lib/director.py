@@ -967,7 +967,13 @@ def build_scene_placeholder_shot(
         name = (c.get("name") or "Character").strip()
         desc = (c.get("description") or "consistent look").strip()
         char_paras.append(
-            f"{name} is {desc}. Keep identical face, age, hair, eyes and wardrobe."
+            f"{name} is {desc}. Keep identical scale, silhouette, markings and materials "
+            "across the continue chain."
+            if re.search(
+                r"\b(dragon|ejder|wyvern|beast|creature|kaiju|robot|mecha)\b",
+                f"{name} {desc}".lower(),
+            )
+            else f"{name} is {desc}. Keep identical face, age, hair, eyes and wardrobe."
         )
         same_bits.append(f"same {name}")
     char_block = "\n\n".join(char_paras) if char_paras else (
@@ -1149,7 +1155,15 @@ def build_rich_h3_prompt(
             continue
         name = (c.get("name") or "Character").strip()
         desc = (c.get("description") or "consistent look, wardrobe continuity").strip()
-        char_paras.append(f"{name}: {desc}. Keep identical face, age, hair and wardrobe.")
+        blob = f"{name} {desc}".lower()
+        if re.search(r"\b(dragon|ejder|wyvern|beast|creature|kaiju|robot|mecha)\b", blob):
+            char_paras.append(
+                f"{name}: {desc}. Keep identical scale, silhouette, markings and materials."
+            )
+        else:
+            char_paras.append(
+                f"{name}: {desc}. Keep identical face, age, hair and wardrobe."
+            )
         same_lock_bits.append(f"same {name}")
     style = normalize_style(brief.get("visualStyle"))
     style_txt = style_craft_line(style)
@@ -1170,7 +1184,8 @@ def build_rich_h3_prompt(
     silent = _is_silent_brief(brief)
 
     # Model already wrote SCENE-density screenplay — keep (ensure continue opener + <d> tags)
-    if len(base) >= 1100:
+    # Reject thin templates even if they are long (boilerplate padding).
+    if len(base) >= MIN_H3_PROMPT_CHARS and not is_thin_template_prompt(base):
         out = base
         if link == "continue" and not base.lower().startswith("continue directly"):
             out = "Continue directly from the previous shot.\n\n" + base
@@ -1244,7 +1259,10 @@ def build_rich_h3_prompt(
         ]
     body = "\n\n".join(p for p in paras if p)
     body = ensure_dialogue_in_h3_prompt(body, dlg, silent=silent)
-    return apply_audio_policy(body, brief)
+    out = apply_audio_policy(body, brief)
+    # Mark so QA never treats this filler as director-level
+    shot["_thin_template"] = True
+    return out
 
 
 def _clean_shot(
@@ -1277,10 +1295,29 @@ def _clean_shot(
         "h3Prompt": prompt or action,
         "linkToPrev": link,
     }
+    if s.get("_placeholder"):
+        shot["_placeholder"] = True
+    if s.get("_thin_template"):
+        shot["_thin_template"] = True
     if brief is not None:
-        shot["h3Prompt"] = build_rich_h3_prompt(
-            shot=shot, index=i, total=total_shots or (i + 1), brief=brief
-        )
+        silent = _is_silent_brief(brief)
+        # Preserve strong LLM SCENE bodies — do not rebuild into filler templates
+        if len(prompt) >= MIN_H3_PROMPT_CHARS and not is_thin_template_prompt(prompt):
+            body = prompt
+            if link == "continue" and not prompt.lower().startswith("continue directly"):
+                body = "Continue directly from the previous shot.\n\n" + prompt
+            shot["h3Prompt"] = apply_audio_policy(
+                ensure_dialogue_in_h3_prompt(body, dlg, silent=silent),
+                brief,
+            )
+            shot["_thin_template"] = False
+            shot["_placeholder"] = False
+        else:
+            shot["h3Prompt"] = build_rich_h3_prompt(
+                shot=shot, index=i, total=total_shots or (i + 1), brief=brief
+            )
+            if is_thin_template_prompt(shot["h3Prompt"]):
+                shot["_thin_template"] = True
     return shot
 
 
@@ -1627,16 +1664,58 @@ def normalize_shot_outline(
     return out
 
 
+_TEMPLATE_FINGERPRINTS = (
+    "across 0–5s:",
+    "across 0-5s:",
+    "across 0–",
+    "body systems activate",
+    "subtle led/glow",
+    "led/glow or muscle",
+    "first deliberate motor movement of a hand or arm",
+    "subject claims space; slow turn",
+    "hold / resolve; subject settles into a strong final pose",
+    "awakening / first awareness",
+    "picture mood only",
+    "visual mood only (silent music video): picture mood only",
+    "keep identical face, age, hair and wardrobe",
+    "keep identical face, age, hair, eyes and wardrobe",
+    "story context remains:",
+    "emotional beat is:",
+)
+
+
+def is_thin_template_prompt(text: str) -> bool:
+    """True when body is the deterministic placeholder / build_rich filler."""
+    plow = (text or "").lower()
+    if not plow:
+        return True
+    hits = sum(1 for fp in _TEMPLATE_FINGERPRINTS if fp in plow)
+    if hits >= 2:
+        return True
+    if any(fp in plow for fp in _BEAT_ARCS):
+        return True
+    # Boilerplate silent lock dominating a short body
+    if "silent visual only for music video" in plow and len(plow) < 1600:
+        if "across 0" in plow or "story context remains" in plow:
+            return True
+    return False
+
+
 def score_h3_prompt(
     text: str,
     *,
     index: int = 0,
     silent: bool = False,
+    shot: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Heuristic quality gate for director-level SCENE bodies."""
     p = (text or "").strip()
     reasons: list[str] = []
     n = len(p)
+    if shot and (shot.get("_placeholder") or shot.get("_thin_template")):
+        reasons.append("placeholder_shot")
+    if is_thin_template_prompt(p):
+        reasons.append("thin_template")
     if n < MIN_H3_PROMPT_CHARS:
         reasons.append(f"too_short:{n}<{MIN_H3_PROMPT_CHARS}")
     paras = [x for x in re.split(r"\n\s*\n", p) if x.strip()]
@@ -1655,11 +1734,23 @@ def score_h3_prompt(
     if not silent and re.search(r"\b(bgm|soundtrack|underscore|phonk bed)\b", plow):
         if "no bgm" not in plow and "no music" not in plow and "silent" not in plow:
             reasons.append("bgm_bleed")
+    # h3Prompt must be English SCENE body (Turkish OK only inside <d> tags)
+    stripped = re.sub(r"<d>.*?</d>", "", p, flags=re.I | re.S)
+    if re.search(r"[ğüşıöçĞÜŞİÖÇ]", stripped):
+        reasons.append("non_english_scene_body")
+    # Creature/fantasy with human skin boilerplate = wrong craft
+    if re.search(r"\b(dragon|ejder|wyvern|beast|creature|kaiju)\b", plow):
+        if "natural skin texture" in plow or "identical face, age, hair" in plow:
+            reasons.append("creature_human_boilerplate")
     hard_prefixes = (
         "too_short",
         "missing_continue_opener",
         "keyword_soup",
         "few_paragraphs",
+        "thin_template",
+        "placeholder_shot",
+        "non_english_scene_body",
+        "creature_human_boilerplate",
     )
     hard_hit = [r for r in reasons if any(r.startswith(h) for h in hard_prefixes)]
     ok = len(hard_hit) == 0 and n >= MIN_H3_PROMPT_CHARS

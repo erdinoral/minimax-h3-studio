@@ -52,12 +52,14 @@ from lib.director import (
     apply_audio_policy,
     apply_shot_patches,
     build_scene_placeholder_shot,
+    ensure_dialogue_in_h3_prompt,
     ensure_shot_count_sync,
     extract_json_object,
     fallback_director_reply,
     format_brief_board,
     format_cinema_board,
     infer_duration_and_shots,
+    is_thin_template_prompt,
     normalize_shot_outline,
     opening_message,
     outline_generation_user_prompt,
@@ -1355,12 +1357,12 @@ async def _write_one_shot_from_outline(
     outline_row: dict,
     prev_shot: Optional[dict],
 ) -> Optional[dict]:
-    """FAZ B — one GOLD STANDARD h3Prompt with one quality retry."""
+    """FAZ B — one GOLD STANDARD h3Prompt with quality retries (no thin templates)."""
     dur = int(brief.get("clipDurationSec") or 5)
     silent = bool(brief.get("silentAudio"))
     feedback = ""
     best: Optional[dict] = None
-    for attempt in range(2):
+    for attempt in range(3):
         user = single_shot_user_prompt(
             brief,
             index=index,
@@ -1369,14 +1371,23 @@ async def _write_one_shot_from_outline(
             prev_shot=prev_shot,
         )
         if feedback:
-            user += f"\n\nPREVIOUS DRAFT FAILED QA: {feedback}. Rewrite denser."
+            user += (
+                f"\n\nPREVIOUS DRAFT FAILED QA: {feedback}. "
+                "Rewrite as a FULL English cinematic SCENE screenplay "
+                f"(≥{MIN_H3_PROMPT_CHARS} chars, 8+ short paragraphs). "
+                "NO template lines like 'Across 0–5s', 'picture mood only', "
+                "'body systems activate', or Turkish outside <d> tags. "
+                "Describe concrete scales, scales/claws/wings/eyes, location, light, "
+                "micro-actions and camera — not wardrobe boilerplate for creatures."
+            )
         messages = [
             {
                 "role": "system",
                 "content": (
                     system_prompt()
                     + "\n\nFAZ B: write exactly ONE shot JSON. No chat. "
-                    f"h3Prompt ≥{MIN_H3_PROMPT_CHARS} chars."
+                    f"h3Prompt ≥{MIN_H3_PROMPT_CHARS} chars, English SCENE only. "
+                    "Never use filler templates."
                 ),
             },
             {"role": "user", "content": user},
@@ -1385,7 +1396,7 @@ async def _write_one_shot_from_outline(
             content = await llm.chat(
                 model,
                 messages,
-                temperature=0.5 if attempt == 0 else 0.35,
+                temperature=0.55 if attempt == 0 else 0.35,
                 format_json=True,
                 num_predict=4096,
             )
@@ -1403,28 +1414,46 @@ async def _write_one_shot_from_outline(
         if not isinstance(raw_shot, dict):
             feedback = "missing shot object"
             continue
-        # Stamp outline fields if model omitted them
         raw_shot.setdefault("action", outline_row.get("beat") or outline_row.get("title"))
         raw_shot.setdefault("camera", outline_row.get("camera"))
         raw_shot["linkToPrev"] = "standalone" if index == 0 else "continue"
+        raw_shot.pop("_placeholder", None)
+        raw_shot.pop("_thin_template", None)
         cleaned = _clean_shot(raw_shot, index, dur, brief=brief, total_shots=need)
         if not cleaned:
             feedback = "empty shot"
             continue
+        # Re-apply without thin rebuild overwriting a good LLM body
+        body = str(cleaned.get("h3Prompt") or "")
+        if is_thin_template_prompt(body) or len(body) < MIN_H3_PROMPT_CHARS:
+            # Keep raw LLM body if _clean_shot/build_rich degraded it
+            raw_body = str(raw_shot.get("h3Prompt") or "")
+            if len(raw_body) >= len(body):
+                cleaned["h3Prompt"] = apply_audio_policy(
+                    ensure_dialogue_in_h3_prompt(
+                        raw_body,
+                        cleaned.get("dialogue") or [],
+                        silent=silent,
+                    ),
+                    brief,
+                )
         score = score_h3_prompt(
             cleaned.get("h3Prompt") or "",
             index=index,
             silent=silent,
+            shot=cleaned,
         )
         best = cleaned
         if score["ok"]:
+            cleaned["_placeholder"] = False
+            cleaned["_thin_template"] = False
             return cleaned
         feedback = ",".join(score.get("reasons") or ["weak"])
         print(
             f"shot {index + 1} QA fail attempt={attempt + 1}: {feedback}",
             flush=True,
         )
-    return best
+    return None  # do NOT return thin best — caller must retry or skip
 
 
 async def _expand_brief_shots(brief: dict, model: str) -> dict:
@@ -1442,14 +1471,18 @@ async def _expand_brief_shots(brief: dict, model: str) -> dict:
             continue
         body = str(s.get("h3Prompt") or "")
         sc = score_h3_prompt(
-            body, index=i, silent=bool(brief.get("silentAudio"))
+            body,
+            index=i,
+            silent=bool(brief.get("silentAudio")),
+            shot=s,
         )
         if sc["ok"]:
             strong[i] = s
 
     if all(strong) and len(strong) >= int(need):
         brief["shots"] = [s for s in strong if s]
-        return ensure_shot_count_sync(brief)
+        brief["shotsIncomplete"] = False
+        return brief
 
     outline = normalize_shot_outline(brief)
     if len(outline) < int(need):
@@ -1460,6 +1493,7 @@ async def _expand_brief_shots(brief: dict, model: str) -> dict:
         outline = normalize_shot_outline(brief, pad=True)
 
     final: list[dict] = []
+    failed = 0
     for i in range(int(need)):
         if strong[i] is not None:
             final.append(strong[i])  # type: ignore[arg-type]
@@ -1482,17 +1516,28 @@ async def _expand_brief_shots(brief: dict, model: str) -> dict:
             outline_row=row,
             prev_shot=prev,
         )
-        if written:
+        if written and score_h3_prompt(
+            written.get("h3Prompt") or "",
+            index=i,
+            silent=bool(brief.get("silentAudio")),
+            shot=written,
+        )["ok"]:
             final.append(written)
         else:
-            final.append(
-                build_scene_placeholder_shot(index=i, total=int(need), brief=brief)
-            )
+            failed += 1
+            # Last resort placeholder — marked thin so UI/cinema can reject
+            ph = build_scene_placeholder_shot(index=i, total=int(need), brief=brief)
+            ph["_placeholder"] = True
+            ph["_thin_template"] = True
+            final.append(ph)
 
     brief["shots"] = force_continue_chain(final[: int(need)])
     brief["expectedShotCount"] = int(need)
     brief["shotOutline"] = outline[: int(need)]
-    return ensure_shot_count_sync(brief)
+    brief["shotsIncomplete"] = failed > 0
+    brief["thinShotCount"] = failed
+    # Do NOT run ensure_shot_count_sync here — it rebuilds thin templates over good SCENEs
+    return validate_brief(brief)
 
 @app.on_event("startup")
 async def startup():
@@ -2846,6 +2891,26 @@ async def _cinema_director_run(body: CinemaDirectorBody, on_status=None) -> dict
 
     if not brief.get("shots"):
         raise HTTPException(502, "Yönetmen shot üretemedi")
+
+    thin = int(brief.get("thinShotCount") or 0)
+    shots = brief.get("shots") or []
+    thin_real = sum(
+        1
+        for i, s in enumerate(shots)
+        if isinstance(s, dict)
+        and not score_h3_prompt(
+            s.get("h3Prompt") or "",
+            index=i,
+            silent=bool(brief.get("silentAudio")),
+            shot=s,
+        )["ok"]
+    )
+    if thin_real > max(1, len(shots) // 3):
+        raise HTTPException(
+            502,
+            f"Yönetmen kalite kapısı: {thin_real}/{len(shots)} shot şablon/zayıf kaldı. "
+            "LLM’i güçlendirip tekrar dene (Ayarlar → model) — ince filler üretime alınmaz.",
+        )
 
     out = cinema.ingest_from_director_brief(brief, role_script=role)
     if brief.get("shotOutline"):

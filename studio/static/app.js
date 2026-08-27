@@ -9,7 +9,7 @@
 
   const state = {
     duration: 5,
-    quality: "720",
+    quality: "736",
     aspect: "16:9",
     produceMode: "t2v", // t2v | continue | ref | face | v2v | cinema
     selectedJobId: null,
@@ -18,6 +18,7 @@
     continueFrom: null,
     pendingContinueChild: null,
     playerCleared: true,
+    jobStatusSnapshot: {},
     jobs: [],
     queueItems: [],
     refImages: [], // { name, url }
@@ -334,7 +335,7 @@
         style: "auto",
       },
       duration: 5,
-      quality: "720",
+      quality: "736",
       steps: 20,
       seed: -1,
       seed_lock: false,
@@ -652,22 +653,65 @@
     if (typeof syncProjectChips === "function") syncProjectChips();
   }
 
-  // Official H3 sizes (multiple of 32). UI "720" key → real 1280×736 (736p).
+  // Official H3 sizes (ResolutionSelector, multiple of 32). Six practical MP tiers.
+  // Legacy UI keys 720/1080 alias to 736/1088.
+  const H3_QUALITY_ALIASES = { 720: "736", 1080: "1088", "720": "736", "1080": "1088" };
+  const H3_QUALITY_KEYS = ["352", "480", "608", "736", "768", "1088"];
   const H3_QUALITY_SIZES = {
-    "16:9": { 480: [864, 480], 720: [1280, 736], 1080: [1920, 1088] },
-    "9:16": { 480: [480, 864], 720: [736, 1280], 1080: [1088, 1920] },
-    "1:1": { 480: [480, 480], 720: [736, 736], 1080: [1088, 1088] },
-    "21:9": { 480: [1024, 448], 720: [1536, 672], 1080: [2176, 960] },
-    "4:3": { 480: [640, 480], 720: [960, 736], 1080: [1440, 1088] },
+    "16:9": {
+      352: [608, 352],
+      480: [864, 480],
+      608: [1056, 608],
+      736: [1280, 736],
+      768: [1344, 768],
+      1088: [1920, 1088],
+    },
+    "9:16": {
+      352: [352, 608],
+      480: [480, 864],
+      608: [608, 1056],
+      736: [736, 1280],
+      768: [768, 1344],
+      1088: [1088, 1920],
+    },
+    "1:1": {
+      352: [448, 448],
+      480: [640, 640],
+      608: [800, 800],
+      736: [960, 960],
+      768: [1024, 1024],
+      1088: [1440, 1440],
+    },
+    "21:9": {
+      352: [704, 288],
+      480: [992, 416],
+      608: [1216, 512],
+      736: [1472, 640],
+      768: [1536, 672],
+      1088: [2208, 960],
+    },
+    "4:3": {
+      352: [544, 384],
+      480: [736, 576],
+      608: [928, 672],
+      736: [1120, 832],
+      768: [1184, 864],
+      1088: [1664, 1248],
+    },
   };
 
+  function normalizeQuality(quality) {
+    let q = String(quality == null ? "736" : quality);
+    q = H3_QUALITY_ALIASES[q] || q;
+    return H3_QUALITY_KEYS.includes(q) ? q : "736";
+  }
+
   function resolveSize(aspect, quality) {
-    const q = Number(quality) || 720;
+    const q = normalizeQuality(quality);
     const preset = H3_QUALITY_SIZES[aspect] && H3_QUALITY_SIZES[aspect][q];
     if (preset) return preset;
     const base = ASPECT_BASE[aspect] || ASPECT_BASE["16:9"];
-    // Map marketing tiers to H3 short-edge (×32): 480→480, 720→736, 1080→1088
-    const shortTarget = { 480: 480, 720: 736, 1080: 1088 }[q] || 736;
+    const shortTarget = { 352: 352, 480: 480, 608: 608, 736: 736, 768: 768, 1088: 1088 }[q] || 736;
     const short = Math.min(base[0], base[1]) || 1;
     const scale = shortTarget / short;
     const snap32 = (v) => Math.max(32, Math.round(v / 32) * 32);
@@ -691,13 +735,12 @@
   }
 
   function setQuality(q) {
-    const v = String(q);
-    if (!["480", "720", "1080"].includes(v)) return;
+    const v = normalizeQuality(q);
     state.quality = v;
     const aspect = state.aspect || "16:9";
     document.querySelectorAll("#quality-chips .chip, #quality-chips-cont .chip").forEach((b) => {
-      b.classList.toggle("on", b.dataset.q === v);
-      // Show real H3 short edge (736p / 1088p), not marketing 720/1080
+      const key = normalizeQuality(b.dataset.q);
+      b.classList.toggle("on", key === v);
       b.textContent = qualityChipLabel(b.dataset.q, aspect);
     });
     const [w, h] = resolveSize(aspect, v);
@@ -960,7 +1003,7 @@
         setup: { ...base.setup, ...(data.setup || {}) },
         audio: { ...base.audio, ...(data.audio || {}) },
         duration: data.duration || 5,
-        quality: String(data.quality || "720"),
+        quality: normalizeQuality(data.quality || "736"),
         steps: data.steps || 20,
         seed: data.seed != null ? data.seed : -1,
         seed_lock: !!data.seed_lock,
@@ -1024,7 +1067,7 @@
       setup: c.setup || {},
       audio: c.audio || {},
       duration: c.duration || 5,
-      quality: c.quality || "720",
+      quality: normalizeQuality(c.quality || "736"),
       steps: c.steps || 20,
       film_id: c.film_id || "",
       seed: Number.isFinite(Number(c.seed)) ? Number(c.seed) : -1,
@@ -1498,15 +1541,15 @@
     if (seed && document.activeElement !== seed && !lock?.checked) {
       seed.value = String(c.seed != null && c.seed !== "" ? c.seed : -1);
     }
+    const q = normalizeQuality(c.quality || "736");
+    const st = Number(c.steps || 20);
     const speed = $("cinema-speed-chips");
     if (speed) {
-      const q = String(c.quality || "720");
-      const st = Number(c.steps || 20);
       speed.querySelectorAll("button").forEach((btn) => {
         const on =
           btn.dataset.speed === "draft"
-            ? q === "480" && st <= 12
-            : q === "720" && st >= 18;
+            ? (q === "352" || q === "480") && st <= 12
+            : (q === "736" || q === "768") && st >= 18;
         btn.classList.toggle("on", on);
       });
     }
@@ -1516,7 +1559,12 @@
         (x) => x.id === $("cinema-lora-select")?.value
       );
       const graphs = spec && spec.file ? (spec.graphs || ["fl2va", "ref2va"]).join("+") : "";
-      const vram = q === "1080" ? tt("quality.vramHigh") : q === "480" ? tt("quality.vramLow") : tt("quality.vramMid");
+      const vram =
+        q === "1088" || q === "768"
+          ? tt("quality.vramHigh")
+          : q === "352" || q === "480"
+            ? tt("quality.vramLow")
+            : tt("quality.vramMid");
       hint.textContent = graphs
         ? tf("cinema.prodHintLora", { graphs, vram, q, st })
         : tf("cinema.prodHint", { vram, q, st });
@@ -1524,7 +1572,8 @@
     const chips = $("cinema-quality-chips");
     if (chips) {
       chips.querySelectorAll("button").forEach((btn) => {
-        btn.classList.toggle("on", btn.dataset.quality === String(c.quality || "720"));
+        btn.classList.toggle("on", normalizeQuality(btn.dataset.quality) === q);
+        btn.textContent = qualityChipLabel(btn.dataset.quality, state.aspect || "16:9");
       });
     }
   }
@@ -1777,7 +1826,7 @@
       c.steps = 10;
       c.duration = Number($("cinema-duration")?.value) || c.duration || 5;
     } else {
-      c.quality = "720";
+      c.quality = "736";
       c.steps = 20;
     }
     if ($("steps")) $("steps").value = String(c.steps);
@@ -2209,6 +2258,83 @@
     }
   }
 
+  async function runCinemaDirector() {
+    const btn = $("btn-cinema-director");
+    if (btn) btn.disabled = true;
+    try {
+      await saveCinema(true);
+      const c = ensureCinema();
+      const chars = (c.characters || []).filter((x) => String(x.name || "").trim());
+      const locs = (c.locations || []).filter((x) => String(x.name || "").trim());
+      const role = String(c.role_script || $("cinema-role-script")?.value || "").trim();
+      if (!chars.length && !locs.length && role.length < 40) {
+        toast(tt("cinema.needCastOrRole"));
+        return;
+      }
+      toast(tt("cinema.directorRunning"));
+      const clip = Number($("cinema-duration")?.value) || c.duration || state.duration || 5;
+      const r = await fetch("/api/cinema/director", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({
+          stream: true,
+          duration: clip,
+          logline: (c.title || "").trim() || null,
+          prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
+        }),
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(errDetail(data) || tt("err.directorStream"));
+      }
+      const reader = r.body?.getReader();
+      if (!reader) throw new Error(tt("err.directorStream"));
+      const dec = new TextDecoder();
+      let buf = "";
+      let result = null;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() || "";
+        for (const block of parts) {
+          const line = block.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          let ev;
+          try {
+            ev = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (ev.type === "status" && ev.text) {
+            toast(String(ev.text));
+          } else if (ev.type === "error") {
+            throw new Error(ev.detail || tt("err.directorStream"));
+          } else if (ev.type === "result" && ev.data) {
+            result = ev.data;
+          }
+        }
+      }
+      if (!result || !result.cinema) {
+        throw new Error(tt("cinema.directorFailed"));
+      }
+      const base = emptyCinema();
+      state.cinema = {
+        ...base,
+        ...result.cinema,
+        setup: { ...base.setup, ...(result.cinema.setup || {}) },
+        audio: { ...base.audio, ...(result.cinema.audio || {}) },
+      };
+      renderCinema();
+      toast(tf("cinema.directorDone", { n: result.shot_count || 0 }));
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function produceCinema() {
     const btn = $("btn-cinema-produce");
     if (btn) btn.disabled = true;
@@ -2271,7 +2397,7 @@
           audio,
           duration: Number($("cinema-duration")?.value) || cine.duration || 5,
           aspect: state.aspect || "16:9",
-          quality: cine.quality || state.quality || "720",
+          quality: normalizeQuality(cine.quality || state.quality || "736"),
           steps: Number($("cinema-steps")?.value) || cine.steps || 20,
           seed,
           sage_attention: "disabled",
@@ -2299,6 +2425,8 @@
               : tf("cinema.produceSilent", { n: data.count || 0 })
       );
       renderCinemaShots();
+      fillPromptFromShots(shots.map((s) => s.text));
+      setQueueFromTexts(shots.map((s) => s.text));
       setProdLane("director");
       await refreshJobs();
     } catch (e) {
@@ -4393,6 +4521,27 @@
     renderQueue();
   }
 
+  /** Show shot package in Prompt / Sahne so director → produce is visible there too. */
+  function fillPromptFromShots(texts) {
+    const list = (texts || [])
+      .map((t) => (t || "").trim())
+      .filter(Boolean);
+    const el = $("prompt");
+    if (!el || !list.length) return;
+    el.value = list.join("\n\n---\n\n");
+    el.rows = Math.min(14, Math.max(3, 2 + list.length * 2));
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function promptsFromBrief(brief) {
+    const shots = (brief && Array.isArray(brief.shots) ? brief.shots : []) || [];
+    return shots.map(_shotPromptText).filter(Boolean);
+  }
+
   async function applyBrief(queue) {
     if (!state.directorSessionId) {
       tToast("toast.directorTalkFirst");
@@ -4404,6 +4553,12 @@
     });
     const inCinema =
       !!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden");
+    // Immediate UX: mirror local plan shots into Prompt / Sahne before commit returns
+    const localPrompts = promptsFromBrief(state.directorBrief);
+    if (localPrompts.length) {
+      fillPromptFromShots(localPrompts);
+      setQueueFromTexts(localPrompts);
+    }
     if (queue) {
       // Show the right production tab immediately (don't wait for slow commit)
       setProdLane(inCinema ? "director" : "scene");
@@ -4439,14 +4594,22 @@
       const data = await r.json();
       if (!r.ok) throw new Error(errDetail(data));
       const a = data.applied || {};
-      const prompts = Array.isArray(a.prompts)
-        ? a.prompts
+      if (data.brief) state.directorBrief = data.brief;
+      let prompts = Array.isArray(a.prompts)
+        ? a.prompts.map((s) => String(s || "").trim()).filter(Boolean)
         : String(a.batch_prompts || "")
             .split(/\n\s*---\s*\n/)
             .map((s) => s.trim())
             .filter(Boolean);
-      if (a.prompt) $("prompt").value = a.prompt;
-      if (prompts.length) setQueueFromTexts(prompts);
+      if (!prompts.length) {
+        prompts = promptsFromBrief(data.brief || state.directorBrief);
+      }
+      if (prompts.length) {
+        fillPromptFromShots(prompts);
+        setQueueFromTexts(prompts);
+      } else if (a.prompt) {
+        fillPromptFromShots([a.prompt]);
+      }
       const n = a.shot_count || prompts.length || (data.queued && data.queued.count) || 0;
       const total = a.total_duration_sec ? ` · ${a.total_duration_sec}sn` : "";
       const lane = a.lane || (inCinema ? "director" : "scene");
@@ -4458,6 +4621,7 @@
       );
       if (queue) {
         setDirectorOpen(false);
+        state.playerCleared = false;
         await refreshJobs();
       }
     } catch (e) {
@@ -4534,8 +4698,9 @@
     }
   }
 
-  function selectJob(job, { play = true } = {}) {
+  function selectJob(job, { play = true, quiet = false } = {}) {
     state.selectedJobId = job.id;
+    state.playerCleared = false;
     const meta = `${job.duration || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`;
     setClipPrompt(job.prompt || "", meta, job.seed);
     if (play && job.output?.url) {
@@ -4546,11 +4711,32 @@
       if (sel) sel.value = job.id;
       void setContinueMode(job.id, { silent: true });
     }
-    toast(
-      job.status === "done"
-        ? tf("job.metaReady", { dur: String(job.duration), sec: tt("sec"), seed: String(job.seed) })
-        : tf("job.metaProgress", { status: job.status, pct: String(job.progress || 0) })
-    );
+    if (!quiet) {
+      toast(
+        job.status === "done"
+          ? tf("job.metaReady", { dur: String(job.duration), sec: tt("sec"), seed: String(job.seed) })
+          : tf("job.metaProgress", { status: job.status, pct: String(job.progress || 0) })
+      );
+    }
+  }
+
+  /** When a job flips to done, put that clip in the player (latest finish wins). */
+  function autoPlayNewestFinished(prevStatus) {
+    const newly = [];
+    for (const j of state.jobs || []) {
+      const was = prevStatus[j.id];
+      if (j.status === "done" && j.output?.url && was && was !== "done") {
+        newly.push(j);
+      }
+    }
+    if (!newly.length) return;
+    newly.sort((a, b) => {
+      const ta = Number(a.done_at || a.created_at || 0);
+      const tb = Number(b.done_at || b.created_at || 0);
+      if (tb !== ta) return tb - ta;
+      return (Number(b.batch_index) || 0) - (Number(a.batch_index) || 0);
+    });
+    selectJob(newly[0], { play: true, quiet: true });
   }
 
   function jobLane(j) {
@@ -4788,12 +4974,8 @@
           );
           setProgress(100, tt("prod.done"), true);
           scheduleHideProgress(2200);
-          if (
-            j.output?.url &&
-            !state.playerCleared &&
-            (!state.selectedJobId || state.selectedJobId === finishedId)
-          ) {
-            selectJob(j);
+          if (j.output?.url) {
+            selectJob(j, { play: true, quiet: true });
           }
           fillContinueSource();
         } else if (j?.status === "cancelled") {
@@ -4975,8 +5157,13 @@
   async function refreshJobs() {
     try {
       const data = await fetch("/api/jobs").then((r) => r.json());
+      const prevStatus = state.jobStatusSnapshot || {};
       state.jobs = data.jobs || [];
+      state.jobStatusSnapshot = Object.fromEntries(
+        (state.jobs || []).map((j) => [j.id, j.status])
+      );
       renderJobs();
+      autoPlayNewestFinished(prevStatus);
       fillContinueSource();
       if (!$("view-cinema")?.classList.contains("hidden")) {
         syncCinemaShotJobs();
@@ -4986,7 +5173,7 @@
         const j = state.jobs.find((x) => x.id === state.selectedJobId);
         if (j?.status === "done" && j.output?.url) {
           const player = $("player");
-          if (player && !player.src.includes(j.id)) selectJob(j);
+          if (player && !player.src.includes(j.id)) selectJob(j, { quiet: true });
         }
       }
     } catch {
@@ -5271,7 +5458,7 @@
     }
     if (kind === "quick") {
       setDuration(5);
-      setQuality("720");
+      setQuality("736");
       const steps = $("steps");
       if (steps) steps.value = "15";
       tToast("toast.quickPreset");
@@ -5423,6 +5610,77 @@
       dur,
       sec: tt("sec"),
     });
+  }
+
+  async function loadH3Models() {
+    const status = $("h3-models-status");
+    try {
+      const data = await fetch("/api/h3-models").then((r) => r.json());
+      if (!data || !data.ok) throw new Error(data?.detail || "fail");
+      const selected = data.selected || {};
+      const defaults = data.defaults || {};
+      const options = data.options || {};
+      const slots = [
+        ["h3-unet", "unet"],
+        ["h3-unet-ref2va", "unet_ref2va"],
+        ["h3-clip", "clip"],
+        ["h3-vae", "vae"],
+        ["h3-audio-vae", "audio_vae"],
+      ];
+      slots.forEach(([elId, key]) => {
+        const sel = $(elId);
+        if (!sel) return;
+        const files = options[key] || [];
+        const cur = selected[key] || "";
+        const def = defaults[key] || "";
+        sel.innerHTML = "";
+        const opt0 = document.createElement("option");
+        opt0.value = "";
+        opt0.textContent = def
+          ? `${tt("settings.h3Default")} (${def})`
+          : tt("settings.h3Default");
+        sel.appendChild(opt0);
+        files.forEach((name) => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name === def ? `${name} ★` : name;
+          sel.appendChild(opt);
+        });
+        if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
+        else sel.value = "";
+      });
+      if (status) status.textContent = "";
+    } catch (e) {
+      if (status) status.textContent = String(e.message || e);
+    }
+  }
+
+  async function saveH3Models(reset) {
+    const status = $("h3-models-status");
+    try {
+      const body = reset
+        ? { reset: true }
+        : {
+            unet: $("h3-unet")?.value || "",
+            unet_ref2va: $("h3-unet-ref2va")?.value || "",
+            clip: $("h3-clip")?.value || "",
+            vae: $("h3-vae")?.value || "",
+            audio_vae: $("h3-audio-vae")?.value || "",
+          };
+      const r = await fetch("/api/h3-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data) || tt("settings.h3Fail"));
+      await loadH3Models();
+      toast(reset ? tt("settings.h3ResetOk") : tt("settings.h3Saved"));
+      if (status) status.textContent = reset ? tt("settings.h3ResetOk") : tt("settings.h3Saved");
+    } catch (e) {
+      toast(String(e.message || e));
+      if (status) status.textContent = String(e.message || e);
+    }
   }
 
   async function loadLoras() {
@@ -5846,6 +6104,7 @@
   });
   $("btn-cinema-close")?.addEventListener("click", () => closeCinemaStudio());
   $("btn-cinema-ingest")?.addEventListener("click", () => void ingestCinemaRole());
+  $("btn-cinema-director")?.addEventListener("click", () => void runCinemaDirector());
   $("btn-cinema-generate-shots")?.addEventListener("click", () => void generateCinemaShots());
   $("prompt-rewriter-enabled")?.addEventListener("change", () => {
     void saveProduction({ quiet: true });
@@ -5886,7 +6145,7 @@
   $("cinema-quality-chips")?.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-quality]");
     if (!btn) return;
-    ensureCinema().quality = btn.dataset.quality;
+    ensureCinema().quality = normalizeQuality(btn.dataset.quality);
     renderCinemaKnobs();
     void saveCinema(true);
   });
@@ -6205,6 +6464,7 @@
               : tf("toast.batchQueued", { n: String(data.count) })
       );
       setDirectorOpen(false);
+      state.playerCleared = false;
       await refreshJobs();
     } catch (e) {
       toast(String(e.message || e));
@@ -6579,7 +6839,10 @@
     void refreshDirectorStatus();
     void refreshNotifySettings();
     void loadLoras();
+    void loadH3Models();
   });
+  $("btn-h3-models-save")?.addEventListener("click", () => void saveH3Models(false));
+  $("btn-h3-models-reset")?.addEventListener("click", () => void saveH3Models(true));
   $("btn-settings-close")?.addEventListener("click", () => {
     void saveNotifySettings({ quiet: true });
     $("view-settings")?.classList.add("hidden");

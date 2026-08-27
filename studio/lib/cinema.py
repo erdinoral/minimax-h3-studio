@@ -338,6 +338,11 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
         "locations": [_clean_asset(x, "location") for x in (data.get("locations") or [])],
         "updated_at": _now(),
     }
+    outline = data.get("shotOutline")
+    if outline is None:
+        outline = prev.get("shotOutline")
+    if isinstance(outline, list) and outline:
+        out["shotOutline"] = outline
     CINEMA_FILE.parent.mkdir(parents=True, exist_ok=True)
     CINEMA_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     _archive_film(out)

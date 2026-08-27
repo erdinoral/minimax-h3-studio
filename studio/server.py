@@ -2625,6 +2625,241 @@ class CinemaGenerateShotsBody(BaseModel):
     prompt_rewriter_enabled: bool = False
 
 
+class CinemaDirectorBody(BaseModel):
+    """Studio-native director: FAZ A outline → FAZ B per-shot SCENE → cinema.shots."""
+    model: Optional[str] = None
+    duration: Optional[int] = None
+    shot_count: Optional[int] = None
+    total_seconds: Optional[int] = None
+    logline: Optional[str] = None
+    prompt_rewriter_enabled: bool = False
+    stream: bool = True
+
+
+def _brief_from_cinema_board(
+    lib: dict,
+    *,
+    clip: int,
+    shot_count: int,
+    total_seconds: Optional[int] = None,
+    logline: str = "",
+) -> dict:
+    """Map cinema cards → FilmBrief seed for two-phase director."""
+    chars = []
+    for c in lib.get("characters") or []:
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name") or "").strip()
+        if not name:
+            continue
+        desc = str(c.get("notes") or c.get("description") or c.get("card") or "").strip()
+        chars.append({"name": name, "description": desc or "consistent look and wardrobe"})
+    locs = []
+    for loc in lib.get("locations") or []:
+        if not isinstance(loc, dict):
+            continue
+        name = str(loc.get("name") or "").strip()
+        if not name:
+            continue
+        desc = str(loc.get("notes") or loc.get("description") or "").strip()
+        locs.append({"name": name, "description": desc or "consistent set lighting"})
+    setup = lib.get("setup") if isinstance(lib.get("setup"), dict) else {}
+    purpose = str(setup.get("purpose") or lib.get("purpose") or "short_film").strip()
+    if purpose in ("auto", ""):
+        purpose = "short_film"
+    style = str(setup.get("style") or lib.get("visualStyle") or "realistic").strip()
+    if style in ("auto", ""):
+        style = "realistic"
+    silent = bool(
+        (lib.get("audio") or {}).get("mode") == "silent"
+        or purpose in ("music_video", "music-video")
+    )
+    ll = (
+        logline
+        or str(lib.get("logline") or "").strip()
+        or str(lib.get("title") or "").strip()
+        or "Cinema studio film from locked cast and locations."
+    )
+    need = max(1, int(shot_count))
+    total = int(total_seconds) if total_seconds else need * clip
+    brief = {
+        "purpose": purpose,
+        "visualStyle": style,
+        "clipDurationSec": clip,
+        "aspect": "16:9",
+        "logline": ll,
+        "totalDurationSec": total,
+        "expectedShotCount": need,
+        "characters": chars,
+        "locations": locs,
+        "shots": [],
+        "shotOutline": [],
+        "silentAudio": silent,
+    }
+    role = str(lib.get("role_script") or lib.get("script") or "").strip()
+    if role and len(role) > 40:
+        brief["roleHint"] = role[:6000]
+    return validate_brief(brief)
+
+
+async def _cinema_director_run(body: CinemaDirectorBody, on_status=None) -> dict:
+    """Run FAZ A + FAZ B against cinema board; write full SCENE shots into cinema.json."""
+    lib = cinema.load()
+    chars = [
+        c
+        for c in (lib.get("characters") or [])
+        if isinstance(c, dict) and str(c.get("name") or "").strip()
+    ]
+    locs = [
+        c
+        for c in (lib.get("locations") or [])
+        if isinstance(c, dict) and str(c.get("name") or "").strip()
+    ]
+    role = str(lib.get("role_script") or "").strip()
+    if not chars and not locs and len(role) < 40:
+        raise HTTPException(
+            400,
+            "Önce karakter/mekan kartı ekle veya rol metni yapıştır",
+        )
+    if not await llm.healthy():
+        raise HTTPException(503, "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan key ekle")
+    model = await llm.resolve_model(body.model or _director_model)
+    clip = int(body.duration or lib.get("duration") or 5)
+    if clip not in ALLOWED_DURATIONS:
+        clip = 5
+    n = int(body.shot_count or 0)
+    if n < 1:
+        if body.total_seconds:
+            n = expected_shot_count(int(body.total_seconds), clip)
+        else:
+            n = max(4, min(24, 6 + len(chars) * 2))
+    n = max(1, min(40, n))
+
+    def _status(text: str) -> None:
+        if on_status:
+            try:
+                on_status({"type": "status", "text": text})
+            except Exception:
+                pass
+        _emit_director_status(text)
+
+    _status(f"Stüdyo yönetmeni — {n} shot iskeleti hazırlanıyor…")
+    brief = _brief_from_cinema_board(
+        lib,
+        clip=clip,
+        shot_count=n,
+        total_seconds=body.total_seconds,
+        logline=str(body.logline or "").strip(),
+    )
+    # If no cast yet but role text exists, seed characters via outline LLM
+    if not brief.get("characters") and role:
+        brief["logline"] = brief.get("logline") or role[:240]
+
+    # Temporarily bind progress sink for FAZ B status lines
+    token = None
+    if on_status:
+        token = _director_progress.set(on_status)
+    try:
+        brief = await _expand_brief_shots(brief, model)
+    finally:
+        if token is not None:
+            _director_progress.reset(token)
+
+    if not brief.get("shots"):
+        raise HTTPException(502, "Yönetmen shot üretemedi")
+
+    out = cinema.ingest_from_director_brief(brief, role_script=role)
+    if brief.get("shotOutline"):
+        data = cinema.load()
+        data["shotOutline"] = brief["shotOutline"]
+        out = cinema.save(data)
+    slog.info(
+        "cinema director",
+        shots=len(out.get("shots") or []),
+        outline=len(brief.get("shotOutline") or []),
+        chars=len(out.get("characters") or []),
+    )
+    return {
+        "ok": True,
+        "cinema": out,
+        "brief": brief,
+        "shot_count": len(out.get("shots") or []),
+        "outline": brief.get("shotOutline") or [],
+    }
+
+
+@app.post("/api/cinema/director")
+async def cinema_director(body: CinemaDirectorBody):
+    """One-click studio director: outline → per-shot SCENE → fill cinema shot list."""
+    if body.stream:
+        q: asyncio.Queue = asyncio.Queue()
+
+        def on_progress(ev: dict[str, Any]) -> None:
+            try:
+                q.put_nowait(ev if isinstance(ev, dict) else {"type": "status", "text": str(ev)})
+            except Exception:
+                pass
+
+        async def produce() -> None:
+            try:
+                result = await _cinema_director_run(body, on_status=on_progress)
+                await q.put({"type": "result", "data": result})
+            except HTTPException as e:
+                await q.put(
+                    {"type": "error", "detail": e.detail, "status": e.status_code}
+                )
+            except Exception as e:
+                await q.put({"type": "error", "detail": str(e)})
+            finally:
+                await q.put(None)
+
+        async def event_gen():
+            task = asyncio.create_task(produce())
+            yield (
+                "data: "
+                + json.dumps(
+                    {"type": "status", "text": "Stüdyo yönetmeni başlıyor…"},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    yield (
+                        "data: "
+                        + json.dumps({"type": "heartbeat", "t": int(time.time())})
+                        + "\n\n"
+                    )
+                    if task.done():
+                        while not q.empty():
+                            ev = q.get_nowait()
+                            if ev is None:
+                                break
+                            yield "data: " + json.dumps(ev, ensure_ascii=False) + "\n\n"
+                        break
+                    continue
+                if ev is None:
+                    break
+                yield "data: " + json.dumps(ev, ensure_ascii=False) + "\n\n"
+            try:
+                await task
+            except Exception:
+                pass
+
+        return StreamingResponse(
+            event_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    return await _cinema_director_run(body)
+
+
 @app.post("/api/cinema/generate-shots")
 async def cinema_generate_shots(body: CinemaGenerateShotsBody):
     """LLM writes shot list from existing cinema cast/locations only (studio production)."""

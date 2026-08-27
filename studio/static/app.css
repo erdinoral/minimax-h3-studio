@@ -547,6 +547,30 @@ body.director-modal-open .director-llm-tab {
   letter-spacing: 0.02em;
   color: var(--text);
 }
+.h3-models-advanced {
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding-top: 0.75rem;
+}
+.h3-models-advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+  margin-bottom: 0.5rem;
+}
+.h3-models-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.h3-models-advanced > summary::before {
+  content: "▸ ";
+  opacity: 0.7;
+}
+.h3-models-advanced[open] > summary::before {
+  content: "▾ ";
+}
+.h3-models-advanced select {
+  width: 100%;
+  max-width: 100%;
+}
 .settings-panel label {
   display: block;
   margin-top: 10px;
@@ -2267,7 +2291,12 @@ button.cinema-fold-toggle:hover {
   min-height: 120px;
   resize: vertical;
 }
-#btn-cinema-ingest {
+#btn-cinema-ingest,
+#btn-cinema-director {
+  width: 100%;
+  margin-bottom: 8px;
+}
+#btn-cinema-generate-shots {
   width: 100%;
   margin-bottom: 8px;
 }

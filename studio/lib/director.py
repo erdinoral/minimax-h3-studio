@@ -1669,10 +1669,13 @@ def score_h3_prompt(
 def outline_generation_user_prompt(brief: dict[str, Any]) -> str:
     need = int(brief.get("expectedShotCount") or 12)
     dur = int(brief.get("clipDurationSec") or 5)
+    role = str(brief.get("roleHint") or brief.get("_roleHint") or "").strip()
+    role_bit = f"\nRole / screenplay tone (optional):\n{role[:4000]}\n" if role else ""
     return (
         f"FAZ A only. Build a shot OUTLINE for exactly {need} shots "
         f"({dur}s each). Do NOT write h3Prompt bodies.\n"
         f"{format_project_bible(brief)}\n"
+        f"{role_bit}"
         "Return ONLY JSON:\n"
         "{\n"
         '  "ready": false,\n'

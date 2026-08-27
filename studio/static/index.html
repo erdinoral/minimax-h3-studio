@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>H3 Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=cinema64" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema68" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -110,11 +110,14 @@
           </div>
           <label id="scene-quality-label">Kalite / çözünürlük (H3 ×32)</label>
           <div class="chips" id="quality-chips">
+            <button type="button" data-q="352" class="chip">352p</button>
             <button type="button" data-q="480" class="chip">480p</button>
-            <button type="button" data-q="720" class="chip on">736p</button>
-            <button type="button" data-q="1080" class="chip warn">1088p</button>
+            <button type="button" data-q="608" class="chip">608p</button>
+            <button type="button" data-q="736" class="chip on">736p</button>
+            <button type="button" data-q="768" class="chip">768p</button>
+            <button type="button" data-q="1088" class="chip warn">1088p</button>
           </div>
-          <div class="muted" id="quality-hint">1280×736 · H3 resmi tablo</div>
+          <div class="muted" id="quality-hint">1280×736 · H3 (×32)</div>
         </div>
 
         <div id="panel-mode-ref" class="hidden">
@@ -182,9 +185,12 @@
           </div>
           <label id="cont-quality-label">Kalite (H3 ×32)</label>
           <div class="chips" id="quality-chips-cont">
+            <button type="button" data-q="352" class="chip">352p</button>
             <button type="button" data-q="480" class="chip">480p</button>
-            <button type="button" data-q="720" class="chip on">736p</button>
-            <button type="button" data-q="1080" class="chip warn">1088p</button>
+            <button type="button" data-q="608" class="chip">608p</button>
+            <button type="button" data-q="736" class="chip on">736p</button>
+            <button type="button" data-q="768" class="chip">768p</button>
+            <button type="button" data-q="1088" class="chip warn">1088p</button>
           </div>
           <div class="muted" id="quality-hint-cont">1280×736</div>
           <label id="cont-which-label">Hangi videodan devam?</label>
@@ -494,9 +500,12 @@
             <button type="button" class="chip" data-speed="final" id="cinema-speed-final">Final</button>
           </div>
           <div class="chips cinema-quality-chips" id="cinema-quality-chips">
+            <button type="button" class="chip" data-quality="352">352p</button>
             <button type="button" class="chip" data-quality="480">480p</button>
-            <button type="button" class="chip" data-quality="720">720p</button>
-            <button type="button" class="chip" data-quality="1080">1080p</button>
+            <button type="button" class="chip" data-quality="608">608p</button>
+            <button type="button" class="chip" data-quality="736">736p</button>
+            <button type="button" class="chip" data-quality="768">768p</button>
+            <button type="button" class="chip" data-quality="1088">1088p</button>
           </div>
           <label><span id="cinema-steps-label">Adım</span>
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
@@ -573,8 +582,10 @@
             <textarea id="cinema-role-script" rows="6" placeholder="Tüm rol metnini / senaryoyu buraya yapıştır…"></textarea>
           </label>
           <button type="button" class="cta" id="btn-cinema-ingest">LLM ile film altyapısı kur</button>
+          <button type="button" class="cta" id="btn-cinema-director">Yönetmen · iskelet + SCENE</button>
           <button type="button" class="btn-secondary" id="btn-cinema-generate-shots">LLM ile sahneleri yaz</button>
           <p class="muted mode-hint" id="cinema-role-hint">Yönetmen metni okur; karakter, mekan ve shot listesini doldurur. Mevcut görseller silinmez.</p>
+          <p class="muted mode-hint" id="cinema-director-hint">Stüdyo yönetmeni: önce N shot başlığı (iskelet), sonra her SCENE’i tek tek yazar — sohbet şart değil.</p>
           <p class="muted mode-hint" id="cinema-shots-llm-hint">Kartlar doluyken: LLM yalnızca stüdyo board’undaki karakter/mekanlarla shot yazar. Ana Sahne bu board’u görmez.</p>
           <p class="muted mode-hint" id="cinema-script-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder. Portreli karakter = yüz kilidi zinciri.</p>
           <textarea id="cinema-shot-draft" rows="4" placeholder="Shot metnini yaz… örn. Ada walks into Rooftop at dusk, coat catching wind."></textarea>
@@ -773,11 +784,36 @@
           <button type="button" class="btn-ghost" id="btn-lora-url">URL’den al</button>
         </label>
         <p class="muted mode-hint" id="settings-lora-hint">PC’de yoksa tek tık indirir (Hugging Face). Hazır olanlar yeşil. Üretim Ayarlar’dan seçip Uygula. SDXL/Pony/Wan/Flux listede yok.</p>
+
+        <details class="h3-models-advanced" id="h3-models-advanced" style="margin-top:1.25rem">
+          <summary id="h3-models-summary">Gelişmiş · H3 modelleri</summary>
+          <p class="muted mode-hint" id="h3-models-hint">Comfy’deki Load Diffusion / CLIP / VAE seçimleri. Yanlış dosya üretimi bozar. Boş = Studio varsayılanı.</p>
+          <label><span id="h3-unet-label">Diffusion · FL2VA (Yeni video / Continue)</span>
+            <select id="h3-unet"></select>
+          </label>
+          <label><span id="h3-unet-ref-label">Diffusion · Ref2VA (Referans / Yüz / V2V)</span>
+            <select id="h3-unet-ref2va"></select>
+          </label>
+          <label><span id="h3-clip-label">CLIP / Text encoder</span>
+            <select id="h3-clip"></select>
+          </label>
+          <label><span id="h3-vae-label">Video VAE</span>
+            <select id="h3-vae"></select>
+          </label>
+          <label><span id="h3-audio-vae-label">Audio VAE</span>
+            <select id="h3-audio-vae"></select>
+          </label>
+          <div class="chips wrap" style="margin-top:8px;gap:8px">
+            <button type="button" class="btn-secondary" id="btn-h3-models-save">Model seçimini kaydet</button>
+            <button type="button" class="btn-ghost" id="btn-h3-models-reset">Varsayılana dön</button>
+          </div>
+          <p class="muted mode-hint" id="h3-models-status"></p>
+        </details>
       </div>
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema64"></script>
-  <script src="/static/app.js?v=cinema64"></script>
+  <script src="/static/i18n.js?v=cinema68"></script>
+  <script src="/static/app.js?v=cinema68"></script>
 </body>
 </html>

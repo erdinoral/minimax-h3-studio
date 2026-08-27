@@ -4820,11 +4820,20 @@ async def director_recover(body: DirectorRecoverBody):
     else:
         brief = ensure_shot_count_sync(brief)
     if not brief.get("shots"):
-        # Still empty — force expand from skeleton even if expected missing
+        # Still empty — derive N from duration/clip; never hardcode a magic shot count
         if not brief.get("expectedShotCount"):
-            brief["expectedShotCount"] = 12
-            brief["totalDurationSec"] = brief.get("totalDurationSec") or 60
-            brief["clipDurationSec"] = brief.get("clipDurationSec") or 5
+            clip = int(brief.get("clipDurationSec") or 5)
+            if clip not in ALLOWED_DURATIONS:
+                clip = 5
+            total = int(brief.get("totalDurationSec") or 0)
+            if total <= 0:
+                raise HTTPException(
+                    400,
+                    "Shot sayısı / süre yok — yönetmene toplam sn veya ‘N shot’ söyleyip tekrar dene",
+                )
+            brief["clipDurationSec"] = clip
+            brief["totalDurationSec"] = total
+            brief["expectedShotCount"] = expected_shot_count(total, clip)
         if body.expand:
             brief = await _expand_brief_shots(brief, model)
         else:
@@ -4833,7 +4842,7 @@ async def director_recover(body: DirectorRecoverBody):
         raise HTTPException(
             400,
             "Shot listesi boş — Ollama shot üretemedi. Yönetmene yaz: "
-            "“12 shot’luk ready:true JSON brief ver, her h3Prompt ≥900 karakter”.",
+            "toplam süre + klip sn ile ready brief (ör. 30sn / 5sn → 6 shot).",
         )
     sess["brief"] = brief
     sess["ready"] = True

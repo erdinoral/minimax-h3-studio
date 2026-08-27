@@ -751,7 +751,7 @@ def skeleton_brief_from_text(text: str) -> Optional[dict[str, Any]]:
         if m:
             need = int(m.group(1))
     if not need:
-        need = 12 if total and total >= 60 else None
+        need = expected_shot_count(int(total), clip) if total else None
     if not need and not brief.get("characters") and not brief.get("logline"):
         return None
 
@@ -1758,8 +1758,21 @@ def score_h3_prompt(
 
 
 def outline_generation_user_prompt(brief: dict[str, Any]) -> str:
-    need = int(brief.get("expectedShotCount") or 12)
     dur = int(brief.get("clipDurationSec") or 5)
+    if dur not in CLIP_DURATIONS:
+        dur = 5
+    need = brief.get("expectedShotCount")
+    try:
+        need = int(need) if need is not None else 0
+    except (TypeError, ValueError):
+        need = 0
+    if need < 1:
+        total = brief.get("totalDurationSec")
+        try:
+            total_i = int(total) if total is not None else 0
+        except (TypeError, ValueError):
+            total_i = 0
+        need = expected_shot_count(total_i, dur) if total_i > 0 else 1
     role = str(brief.get("roleHint") or brief.get("_roleHint") or "").strip()
     role_bit = f"\nRole / screenplay tone (optional):\n{role[:4000]}\n" if role else ""
     return (

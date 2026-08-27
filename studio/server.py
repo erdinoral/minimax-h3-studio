@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import httpx
 import psutil  # Moved from _acquire_single_instance for consistency
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -117,6 +117,68 @@ NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
 PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
+
+
+def _slug_clip(text: str, *, max_len: int = 36) -> str:
+    """ASCII-ish slug from prompt / title for download filenames."""
+    t = (text or "").strip().lower()
+    t = re.sub(r"[^\w\s\-]+", "", t, flags=re.UNICODE)
+    t = re.sub(r"[\s_]+", "-", t).strip("-")
+    if not t:
+        return "clip"
+    return t[:max_len].rstrip("-") or "clip"
+
+
+def video_download_name(meta: Optional[dict] = None, *, item_id: str = "") -> str:
+    """Unique download filename — never generic 'video.mp4'."""
+    m = meta if isinstance(meta, dict) else {}
+    jid = str(m.get("id") or item_id or "").strip() or uuid.uuid4().hex[:8]
+    short = jid.replace("-", "")[:8]
+    prompt = str(m.get("prompt") or m.get("title") or m.get("logline") or "").strip()
+    # Prefer first meaningful line / outline title vibe
+    first = ""
+    for line in prompt.splitlines():
+        line = line.strip()
+        if len(line) >= 8 and not line.lower().startswith("continue directly"):
+            first = line
+            break
+    if not first:
+        first = prompt[:80]
+    slug = _slug_clip(first)
+    bi = m.get("batch_index")
+    shot = ""
+    try:
+        if bi is not None and int(bi) > 0:
+            shot = f"_s{int(bi):02d}"
+    except (TypeError, ValueError):
+        shot = ""
+    purpose = str(m.get("purpose") or "").strip().lower().replace(" ", "-")
+    pur = f"_{purpose}" if purpose and purpose not in ("short_film", "auto", "") else ""
+    return f"h3{pur}_{slug}{shot}_{short}.mp4"
+
+
+def _video_file_response(
+    path: Path,
+    *,
+    meta: Optional[dict] = None,
+    item_id: str = "",
+    download: bool = False,
+) -> FileResponse:
+    name = video_download_name(meta, item_id=item_id or (meta or {}).get("id") or "")
+    if download:
+        return FileResponse(
+            path,
+            media_type="video/mp4",
+            filename=name,
+            content_disposition_type="attachment",
+        )
+    # Inline for <video src> — still expose a real filename for Save As
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        filename=name,
+        content_disposition_type="inline",
+    )
 
 
 def _prompt_optimize_instruction(enabled: bool) -> str:
@@ -744,6 +806,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "render_sec": render_sec,
         "url": f"/api/gallery/{jid}/video",
         "local_path": str(dest),
+        "download_name": video_download_name(job, item_id=jid),
     }
     _gallery = [g for g in _gallery if g.get("id") != jid]
     _gallery.append(entry)
@@ -1681,7 +1744,13 @@ async def system_stats():
 @app.get("/api/jobs")
 async def list_jobs():
     _ensure_queue_loop()
-    return {"jobs": list(reversed(_jobs[-200:]))}
+    jobs = []
+    for j in reversed(_jobs[-200:]):
+        row = dict(j)
+        if row.get("status") == "done" and not row.get("download_name"):
+            row["download_name"] = video_download_name(row, item_id=str(row.get("id") or ""))
+        jobs.append(row)
+    return {"jobs": jobs}
 
 
 @app.get("/api/gallery")
@@ -1692,19 +1761,26 @@ async def list_gallery():
         key=lambda g: float(g.get("done_at") or g.get("created_at") or 0),
         reverse=True,
     )
-    return {"items": items, "count": len(items)}
+    out = []
+    for g in items:
+        row = dict(g)
+        if not row.get("download_name"):
+            row["download_name"] = video_download_name(row, item_id=str(row.get("id") or ""))
+        out.append(row)
+    return {"items": out, "count": len(out)}
 
 
 @app.get("/api/gallery/{item_id}/video")
-async def gallery_video(item_id: str):
+async def gallery_video(item_id: str, dl: int = Query(0)):
     path = GALLERY / f"{item_id}.mp4"
+    entry = next((g for g in _gallery if g.get("id") == item_id), None)
     if not path.exists():
-        entry = next((g for g in _gallery if g.get("id") == item_id), None)
         if entry and entry.get("local_path") and Path(entry["local_path"]).exists():
             path = Path(entry["local_path"])
         else:
             raise HTTPException(404, "galeri videosu yok")
-    return FileResponse(path, media_type="video/mp4", filename=f"h3_{item_id[:8]}.mp4")
+    meta = entry or {"id": item_id}
+    return _video_file_response(path, meta=meta, item_id=item_id, download=bool(dl))
 
 
 @app.delete("/api/gallery/{item_id}")
@@ -2401,16 +2477,19 @@ async def interrupt(cancel_queued: bool = False):
 
 
 @app.get("/api/clips/{job_id}/video")
-async def clip_video(job_id: str):
+async def clip_video(job_id: str, dl: int = Query(0)):
     for j in _jobs:
         if j["id"] == job_id and j.get("local_path"):
             p = Path(j["local_path"])
             if p.exists():
-                return FileResponse(p, media_type="video/mp4")
+                return _video_file_response(p, meta=j, item_id=job_id, download=bool(dl))
     # Fall back to permanent gallery if working clip was wiped
     gal = GALLERY / f"{job_id}.mp4"
     if gal.exists():
-        return FileResponse(gal, media_type="video/mp4")
+        entry = next((g for g in _gallery if g.get("id") == job_id), None)
+        return _video_file_response(
+            gal, meta=entry or {"id": job_id}, item_id=job_id, download=bool(dl)
+        )
     raise HTTPException(404, "video yok")
 
 
@@ -5626,6 +5705,7 @@ async def _run_job(job: dict):
                     "url": f"/api/clips/{job['id']}/video",
                 }
                 job["local_path"] = str(dest)
+                job["download_name"] = video_download_name(job, item_id=job["id"])
                 job["progress"] = 98
                 job["progress_label"] = "last frame çıkarılıyor"
                 _save_jobs()

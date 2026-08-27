@@ -2652,7 +2652,7 @@
     return String(a.id || "").localeCompare(String(b.id || ""));
   }
 
-  function showPlayerVideo(url, jobId, prompt) {
+  function showPlayerVideo(url, jobId, prompt, downloadName) {
     const player = $("player");
     const stage = document.querySelector(".player-stage");
     if (!player || !url) return;
@@ -2662,9 +2662,25 @@
     stage?.classList.remove("cleared");
     stage?.classList.add("has-video");
     $("btn-player-close")?.classList.remove("hidden");
-    player.src = url + (url.includes("?") ? "&" : "?") + "t=" + Date.now();
-    $("btn-download").href = url;
-    $("btn-download").removeAttribute("aria-disabled");
+    const playUrl = url.split("?")[0];
+    player.src = playUrl + (playUrl.includes("?") ? "&" : "?") + "t=" + Date.now();
+    const job =
+      (jobId && state.jobs && state.jobs.find((j) => j.id === jobId)) ||
+      (jobId && state.galleryItems && state.galleryItems.find((j) => j.id === jobId)) ||
+      null;
+    const name =
+      downloadName ||
+      job?.download_name ||
+      (jobId
+        ? `h3_clip_${String(jobId).replace(/-/g, "").slice(0, 8)}.mp4`
+        : "h3_clip.mp4");
+    const dl = $("btn-download");
+    if (dl) {
+      const base = playUrl.split("?")[0];
+      dl.href = base + (base.includes("?") ? "&" : "?") + "dl=1";
+      dl.setAttribute("download", name);
+      dl.removeAttribute("aria-disabled");
+    }
   }
 
   function appendDirectorMsg(role, content) {
@@ -5115,7 +5131,7 @@
         if (live) {
           selectJob(live);
         } else {
-          showPlayerVideo(url, j.id, j.prompt || "");
+          showPlayerVideo(url, j.id, j.prompt || "", j.download_name || "");
           setClipPrompt(j.prompt || "", meta, j.seed);
           toast(tf("gallery.archiveMeta", { meta }));
         }

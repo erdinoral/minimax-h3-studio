@@ -44,15 +44,20 @@ from lib.loras import (
     file_ready,
     filename_from_url,
     find_spec,
+    is_adult_lora,
     is_h3_lora_name,
     public_list,
     spec_ready,
 )
 from lib.director import (
     apply_audio_policy,
+    apply_directives_to_outline,
     apply_shot_patches,
     build_scene_placeholder_shot,
+    camera_for_outline_index,
+    diversify_outline_cameras,
     ensure_dialogue_in_h3_prompt,
+    ensure_camera_in_h3_prompt,
     ensure_shot_count_sync,
     extract_json_object,
     fallback_director_reply,
@@ -60,6 +65,7 @@ from lib.director import (
     format_cinema_board,
     infer_duration_and_shots,
     is_thin_template_prompt,
+    merge_session_directives,
     normalize_shot_outline,
     opening_message,
     outline_generation_user_prompt,
@@ -116,9 +122,54 @@ GALLERY_FILE = DATA / "gallery.json"
 SESSIONS_FILE = DATA / "director_sessions.json"
 LLM_SETTINGS_FILE = DATA / "llm_settings.json"
 NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
+STUDIO_SETTINGS_FILE = DATA / "studio_settings.json"
 PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
+
+
+def _load_studio_settings() -> dict[str, Any]:
+    if not STUDIO_SETTINGS_FILE.is_file():
+        return {"adult_content_enabled": False}
+    try:
+        raw = json.loads(STUDIO_SETTINGS_FILE.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            return {"adult_content_enabled": False}
+        return raw
+    except Exception:
+        return {"adult_content_enabled": False}
+
+
+def _save_studio_settings(patch: dict[str, Any]) -> dict[str, Any]:
+    DATA.mkdir(parents=True, exist_ok=True)
+    cur = _load_studio_settings()
+    for key, val in patch.items():
+        if val is None:
+            continue
+        cur[key] = val
+    STUDIO_SETTINGS_FILE.write_text(
+        json.dumps(cur, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return cur
+
+
+def _adult_content_enabled() -> bool:
+    return bool(_load_studio_settings().get("adult_content_enabled"))
+
+
+def _enforce_adult_policy(*, purpose: Optional[str] = None, lora_id: str = "", lora_name: str = "") -> None:
+    """Block adult LoRA / purpose until +18 is enabled in Studio settings."""
+    adult_use = (purpose or "").strip().lower() in ("adult", "18+", "nsfw", "mature")
+    if is_adult_lora(lora_id=lora_id or "", file=lora_name or ""):
+        adult_use = True
+    if not adult_use:
+        return
+    if not _adult_content_enabled():
+        raise HTTPException(
+            403,
+            "Yetişkin içerik kapalı — Ayarlar → +18 bölümünü açın (ErosMax / yetişkin türü)",
+        )
 
 
 def _slug_clip(text: str, *, max_len: int = 36) -> str:
@@ -1066,6 +1117,7 @@ class CinemaProduceBody(BaseModel):
     lora_strength: Optional[float] = None
     sage_attention: Optional[str] = "auto"
     link_continue: bool = True
+    append_to_chain: bool = False
     audio: Optional[dict[str, Any]] = None
     seamless: bool = False
 
@@ -1230,6 +1282,7 @@ async def _brief_from_director_text(
     ):
         brief_src["silentAudio"] = True
     brief = _apply_session_timing(validate_brief(brief_src), sess)
+    brief = merge_session_directives(brief, sess)
     need = brief.get("expectedShotCount") or 0
     have = len(brief.get("shots") or [])
     outline = normalize_shot_outline(brief)
@@ -1327,8 +1380,18 @@ async def _generate_shot_outline(brief: dict, model: str) -> dict:
         {"role": "user", "content": outline_generation_user_prompt(brief)},
     ]
     try:
-        content = await llm.chat(
-            model, messages, temperature=0.4, format_json=True, num_predict=3072
+        content = await asyncio.wait_for(
+            llm.chat(
+                model,
+                messages,
+                temperature=0.4,
+                format_json=True,
+                think=False,
+                retries=1,
+                num_predict=3072,
+                on_progress=_director_progress.get(),
+            ),
+            timeout=60.0,
         )
     except Exception as e:
         print(f"outline generate fail: {e}", flush=True)
@@ -1360,9 +1423,10 @@ async def _write_one_shot_from_outline(
     """FAZ B — one GOLD STANDARD h3Prompt with quality retries (no thin templates)."""
     dur = int(brief.get("clipDurationSec") or 5)
     silent = bool(brief.get("silentAudio"))
+    progress = _director_progress.get()
     feedback = ""
-    best: Optional[dict] = None
-    for attempt in range(3):
+    # 2 attempts max — with Gemini thinking off this is enough; 3× hung streams = UI freeze
+    for attempt in range(2):
         user = single_shot_user_prompt(
             brief,
             index=index,
@@ -1393,13 +1457,23 @@ async def _write_one_shot_from_outline(
             {"role": "user", "content": user},
         ]
         try:
-            content = await llm.chat(
-                model,
-                messages,
-                temperature=0.55 if attempt == 0 else 0.35,
-                format_json=True,
-                num_predict=4096,
+            content = await asyncio.wait_for(
+                llm.chat(
+                    model,
+                    messages,
+                    temperature=0.55 if attempt == 0 else 0.35,
+                    format_json=True,
+                    think=False,
+                    retries=1,
+                    num_predict=4096,
+                    on_progress=progress,
+                ),
+                timeout=70.0,
             )
+        except asyncio.TimeoutError:
+            print(f"shot {index + 1} write timeout attempt={attempt + 1}", flush=True)
+            feedback = "llm_timeout"
+            continue
         except Exception as e:
             print(f"shot {index + 1} write fail: {e}", flush=True)
             break
@@ -1416,7 +1490,11 @@ async def _write_one_shot_from_outline(
             continue
         raw_shot.setdefault("action", outline_row.get("beat") or outline_row.get("title"))
         raw_shot.setdefault("camera", outline_row.get("camera"))
-        raw_shot["linkToPrev"] = "standalone" if index == 0 else "continue"
+        # Prefer model link; final force_continue_chain(brief) will hard-cut on cast gaps
+        if index == 0:
+            raw_shot["linkToPrev"] = "standalone"
+        elif not raw_shot.get("linkToPrev"):
+            raw_shot["linkToPrev"] = "continue"
         raw_shot.pop("_placeholder", None)
         raw_shot.pop("_thin_template", None)
         cleaned = _clean_shot(raw_shot, index, dur, brief=brief, total_shots=need)
@@ -1443,10 +1521,16 @@ async def _write_one_shot_from_outline(
             silent=silent,
             shot=cleaned,
         )
-        best = cleaned
         if score["ok"]:
             cleaned["_placeholder"] = False
             cleaned["_thin_template"] = False
+            cam = str(cleaned.get("camera") or outline_row.get("camera") or "").strip()
+            if cam:
+                cleaned["h3Prompt"] = ensure_camera_in_h3_prompt(
+                    cleaned.get("h3Prompt") or "",
+                    cam,
+                    force=True,
+                )
             return cleaned
         feedback = ",".join(score.get("reasons") or ["weak"])
         print(
@@ -1485,6 +1569,11 @@ async def _expand_brief_shots(brief: dict, model: str) -> dict:
         return brief
 
     outline = normalize_shot_outline(brief)
+    directives = brief.get("directorDirectives")
+    if outline:
+        outline = apply_directives_to_outline(outline, directives, int(need))
+        outline = diversify_outline_cameras(outline, directives)
+        brief["shotOutline"] = outline
     if len(outline) < int(need):
         brief = await _generate_shot_outline(brief, model)
         outline = normalize_shot_outline(brief, pad=True)
@@ -1494,15 +1583,37 @@ async def _expand_brief_shots(brief: dict, model: str) -> dict:
 
     final: list[dict] = []
     failed = 0
+    # Hard wall so chat never hangs forever (12 shots × retries was unbounded)
+    deadline = time.monotonic() + max(90.0, min(360.0, float(need) * 25.0))
     for i in range(int(need)):
         if strong[i] is not None:
             final.append(strong[i])  # type: ignore[arg-type]
             continue
+        if time.monotonic() > deadline:
+            print(
+                f"FAZ B deadline — filling remaining shots {i + 1}–{need} as placeholders",
+                flush=True,
+            )
+            _emit_director_status(
+                f"FAZ B süre doldu — kalan shot’lar placeholder ({i + 1}/{need})"
+            )
+            for j in range(i, int(need)):
+                if strong[j] is not None:
+                    final.append(strong[j])  # type: ignore[arg-type]
+                else:
+                    failed += 1
+                    ph = build_scene_placeholder_shot(
+                        index=j, total=int(need), brief=brief
+                    )
+                    ph["_placeholder"] = True
+                    ph["_thin_template"] = True
+                    final.append(ph)
+            break
         row = outline[i] if i < len(outline) else {
             "index": i + 1,
             "title": f"Beat {i + 1}",
             "beat": brief.get("logline") or f"Shot {i + 1}",
-            "camera": "eye-level medium, subtle push-in, 35mm",
+            "camera": camera_for_outline_index(i, directives=directives),
         }
         _emit_director_status(
             f"FAZ B — shot {i + 1}/{need} SCENE yazılıyor… ({row.get('title') or ''})"
@@ -1531,7 +1642,7 @@ async def _expand_brief_shots(brief: dict, model: str) -> dict:
             ph["_thin_template"] = True
             final.append(ph)
 
-    brief["shots"] = force_continue_chain(final[: int(need)])
+    brief["shots"] = force_continue_chain(final[: int(need)], brief)
     brief["expectedShotCount"] = int(need)
     brief["shotOutline"] = outline[: int(need)]
     brief["shotsIncomplete"] = failed > 0
@@ -1905,6 +2016,13 @@ async def generate(body: GenerateBody):
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
 
+    lora_bits = _lora_fields(body)
+    _enforce_adult_policy(
+        purpose=body.purpose,
+        lora_id=lora_bits.get("lora_id") or "",
+        lora_name=lora_bits.get("lora_name") or "",
+    )
+
     if body.prompt_rewriter_enabled:
         rewritten = await _rewrite_scene_text(
             body.prompt, enabled=True, context=f"mode={body.mode or 't2v'}"
@@ -2135,6 +2253,12 @@ async def batch(body: BatchBody):
         raise HTTPException(503, "ComfyUI kapalı")
     await _free_llm_for_production()
     purpose = (body.purpose or "").strip() or None
+    lora_bits = _lora_fields(body)
+    _enforce_adult_policy(
+        purpose=purpose,
+        lora_id=lora_bits.get("lora_id") or "",
+        lora_name=lora_bits.get("lora_name") or "",
+    )
     silent = bool(body.silent_audio) or bool(body.music_id)
     prompts = [p.strip() for p in body.prompts if p.strip()]
     if not prompts:
@@ -2702,7 +2826,9 @@ async def cinema_ingest(body: CinemaIngestBody):
         '"locations":[{"name":"","notes":"set/time/light"}],'
         '"shots":[{"text":"cinematic SCENE paragraph naming characters and locations","mode":"t2v"|"continue"}]}\n'
         "Rules: keep character names short and unique (Arthur, not The Young Knight). "
-        f"Each shot is one {clip}s H3 clip. First shot mode t2v, later shots continue. "
+        f"Each shot is one {clip}s H3 clip. First shot mode t2v, later shots continue "
+        f"ONLY when the same cinema character name carries over; cutaway / new cast → t2v. "
+        f"When a character appears, write their cinema card name verbatim.\n"
         "Shot text must mention character and location names exactly as in characters[]. "
         "20–40 shots max. No markdown."
     ) + _prompt_optimize_instruction(body.prompt_rewriter_enabled)
@@ -3030,7 +3156,9 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
         "You are MiniMax H3 Cinema Studio shot writer. "
         "Read the studio board and write ONLY a shot list. Reply with JSON only:\n"
         '{"shots":[{"text":"cinematic SCENE paragraph","mode":"t2v"|"continue"}]}\n'
-        f"Each shot is one {clip}s clip. First shot mode t2v, later shots continue. "
+        f"Each shot is one {clip}s clip. First shot mode t2v, later shots continue "
+        f"ONLY with cast continuity; cutaway or character re-entry → t2v. "
+        f"Use cinema character names exactly as on the board.\n"
         f"Write exactly {n} shots. "
         "Use character and location names EXACTLY as on the board. "
         "Do not invent new characters or locations. Do not modify cast cards. No markdown."
@@ -3145,6 +3273,61 @@ class CinemaMuxBody(BaseModel):
     batch_id: Optional[str] = None
     score_id: Optional[str] = None
     score_volume: Optional[float] = None
+    job_ids: Optional[list[str]] = None
+
+
+class ClipsConcatBody(BaseModel):
+    job_ids: list[str] = Field(..., min_length=2)
+    batch_id: Optional[str] = None
+    title: Optional[str] = None
+
+    @field_validator("job_ids", mode="before")
+    @classmethod
+    def _coerce_job_ids(cls, v):
+        if v is None:
+            return []
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        return []
+
+
+def _job_record(job_id: str) -> Optional[dict]:
+    jid = (job_id or "").strip()
+    if not jid:
+        return None
+    for j in _jobs:
+        if str(j.get("id") or "") == jid:
+            return j
+    for g in _gallery:
+        if str(g.get("id") or "") == jid:
+            return g
+    return None
+
+
+async def _paths_for_job_ids(job_ids: list[str]) -> list[Path]:
+    ids = [str(x).strip() for x in (job_ids or []) if str(x).strip()]
+    if len(ids) < 2:
+        raise HTTPException(400, "en az 2 klip seç")
+    paths: list[Path] = []
+    for jid in ids:
+        rec = _job_record(jid)
+        if not rec:
+            raise HTTPException(404, f"klip bulunamadı: {jid[:8]}")
+        st = str(rec.get("status") or "done").lower()
+        if st in ("queued", "running"):
+            raise HTTPException(400, f"klip hâlâ üretiliyor: {jid[:8]}")
+        if st in ("error", "cancelled"):
+            raise HTTPException(400, f"klip başarısız: {jid[:8]}")
+        try:
+            paths.append(await _ensure_job_video(rec))
+        except Exception:
+            gal = GALLERY / f"{jid}.mp4"
+            if not gal.exists():
+                raise HTTPException(400, f"klip videosu yok: {jid[:8]}")
+            paths.append(gal)
+    return paths
 
 
 def _cinema_batch_items(batch_id: str) -> list[dict]:
@@ -3343,6 +3526,40 @@ async def _queue_cinema_seamless(
     return {"jobs": [job], "count": 1}
 
 
+def _brief_shot_modes(shots: list[dict]) -> list[str]:
+    modes: list[str] = []
+    for i, s in enumerate(shots or []):
+        if not isinstance(s, dict):
+            modes.append("t2v" if i == 0 else "continue")
+            continue
+        link = str(s.get("linkToPrev") or "").strip().lower()
+        if not link:
+            link = "standalone" if i == 0 else "continue"
+        modes.append("t2v" if i == 0 or link == "standalone" else "continue")
+    return modes
+
+
+def _brief_to_cinema_shots(shots: list[dict]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for i, s in enumerate(shots or []):
+        if not isinstance(s, dict):
+            continue
+        text = str(
+            s.get("h3Prompt") or s.get("text") or s.get("prompt") or s.get("action") or ""
+        ).strip()
+        if not text:
+            continue
+        link = str(s.get("linkToPrev") or "").strip().lower()
+        if not link:
+            link = "standalone" if i == 0 else "continue"
+        mode = "t2v" if i == 0 or link == "standalone" else "continue"
+        row: dict[str, Any] = {"text": text, "mode": mode}
+        if s.get("id"):
+            row["id"] = s.get("id")
+        out.append(row)
+    return out
+
+
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
@@ -3366,6 +3583,12 @@ async def cinema_produce(body: CinemaProduceBody):
     setup_purpose = str((lib.get("setup") or {}).get("purpose") or "").strip()
     if setup_purpose and setup_purpose not in ("auto", ""):
         purpose = setup_purpose
+    lora_bits = _lora_fields(body)
+    _enforce_adult_policy(
+        purpose=purpose,
+        lora_id=lora_bits.get("lora_id") or "",
+        lora_name=lora_bits.get("lora_name") or "",
+    )
     silent = audio.get("mode") == "silent" or bool(body.silent_audio)
     if audio.get("mode") == "film":
         silent = False
@@ -3383,28 +3606,21 @@ async def cinema_produce(body: CinemaProduceBody):
         )
         if x
     )
+    # Cutaway / no cast overlap with previous shot → t2v (avoid wrong last-frame drift)
+    parsed = cinema.apply_reentry_modes(parsed, lib)
+    lib["shots"] = parsed
+    cinema.save(lib)
     prompts = [cinema.apply_look(s["text"], head) for s in parsed]
     modes = [s["mode"] for s in parsed]
-    # Seed face lock from cast portraits that appear in any shot (or all char stills)
+    # Face-lock refs: only character portraits named in the shots.
+    # Location plates must not kill Multishot — they are not face lock.
     cast_refs: list[str] = []
     for p in prompts:
-        bound = cinema.bind_prompt(p, lib=lib)
-        for f in bound.get("ref_images") or []:
-            if f and f not in cast_refs:
-                cast_refs.append(str(f))
-    if not cast_refs:
-        for ch in lib.get("characters") or []:
-            if not isinstance(ch, dict):
-                continue
-            for im in ch.get("images") or []:
-                if isinstance(im, dict) and im.get("file"):
-                    f = str(im["file"])
-                    if f not in cast_refs:
-                        cast_refs.append(f)
+        for f in cinema.bound_character_portraits(p, lib):
+            if f not in cast_refs:
+                cast_refs.append(f)
     cast_refs = cast_refs[:9]
-    still_lock = bool(cast_refs) or any(
-        (cinema.bind_prompt(p, lib=lib).get("ref_images") or []) for p in prompts
-    )
+    still_lock = bool(cast_refs)
     want_seamless = bool(body.seamless)
     if want_seamless and still_lock:
         want_seamless = False
@@ -3433,7 +3649,7 @@ async def cinema_produce(body: CinemaProduceBody):
             sampler=body.sampler,
             scheduler=body.scheduler,
             link_continue=bool(body.link_continue or body.seamless),
-            append_to_chain=False,
+            append_to_chain=bool(body.append_to_chain),
             seed=body.seed,
             silent_audio=silent,
             purpose=purpose or "short_film",
@@ -3475,6 +3691,249 @@ async def cinema_produce(body: CinemaProduceBody):
     return queued
 
 
+class CinemaProduceFilmBody(BaseModel):
+    total_sec: int = 60
+    clip_sec: int = 10
+    segment_size: int = 6
+    segment_index: Optional[int] = None
+    advance: bool = False
+    reset_plan: bool = True
+    auto_concat: bool = True
+    shots: Optional[list[Any]] = None
+    setup: Optional[dict[str, Any]] = None
+    aspect: str = "16:9"
+    quality: str = "736"
+    steps: int = 20
+    seed: int = -1
+    silent_audio: bool = False
+    purpose: Optional[str] = None
+    sampler: str = "res_multistep"
+    scheduler: str = "simple"
+    lora_id: Optional[str] = None
+    lora_name: Optional[str] = None
+    lora_strength: Optional[float] = None
+    sage_attention: Optional[str] = "auto"
+    link_continue: bool = True
+    seamless: bool = False
+    brief: Optional[dict[str, Any]] = None
+
+    @field_validator("seed", "steps", mode="before")
+    @classmethod
+    def _coerce_int_steps(cls, v):
+        if v is None or v == "" or (isinstance(v, float) and v != v):
+            return -1
+        try:
+            return int(v)
+        except Exception:
+            return -1
+
+
+def _film_plan_segment_jobs(plan: dict, seg_idx: int) -> list[dict]:
+    batches = plan.get("segment_batches") or []
+    if seg_idx < 0 or seg_idx >= len(batches):
+        return []
+    bid = str(batches[seg_idx] or "").strip()
+    if not bid:
+        return []
+    out: list[dict] = []
+    for j in _jobs:
+        if str(j.get("cinema_batch") or "") == bid:
+            out.append(j)
+    out.sort(key=lambda x: int(x.get("batch_index") or x.get("shot_index") or 0))
+    return out
+
+
+def _segment_jobs_complete(jobs: list[dict]) -> bool:
+    if not jobs:
+        return False
+    return all(str(j.get("status") or "").lower() == "done" for j in jobs)
+
+
+def _film_plan_status(lib: dict) -> dict[str, Any]:
+    plan = lib.get("film_plan")
+    if not isinstance(plan, dict) or not plan.get("segments"):
+        return {"ok": True, "plan": None}
+    plan = cinema._clean_film_plan(plan)
+    seg_count = int(plan.get("segment_count") or 0)
+    cur = int(plan.get("current_segment") or 0)
+    segment_complete = False
+    all_complete = True
+    segment_jobs: list[dict] = []
+    if seg_count > 0 and cur < seg_count:
+        segment_jobs = _film_plan_segment_jobs(plan, cur)
+        if segment_jobs:
+            segment_complete = _segment_jobs_complete(segment_jobs)
+        else:
+            segment_complete = False
+            all_complete = False
+    for i in range(seg_count):
+        jobs = _film_plan_segment_jobs(plan, i)
+        if not jobs or not _segment_jobs_complete(jobs):
+            all_complete = False
+            break
+    return {
+        "ok": True,
+        "plan": plan,
+        "segment_complete": segment_complete,
+        "all_complete": all_complete and seg_count > 0,
+        "segment_jobs": len(segment_jobs),
+        "missing_stills": cinema.characters_missing_stills(lib),
+    }
+
+
+@app.get("/api/cinema/film-plan")
+async def cinema_film_plan_get():
+    lib = cinema.load()
+    return _film_plan_status(lib)
+
+
+@app.post("/api/cinema/produce-film")
+async def cinema_produce_film(body: CinemaProduceFilmBody):
+    """Segmented film production: queue one segment at a time with face lock + chain."""
+    lib = cinema.load()
+    if body.brief:
+        cinema.ingest_from_director_brief(body.brief)
+        lib = cinema.load()
+    clip = int(body.clip_sec or lib.get("duration") or 5)
+    if clip not in ALLOWED_DURATIONS:
+        clip = 5
+    seg_size = max(1, min(8, int(body.segment_size or 6)))
+    total = max(clip, int(body.total_sec or 60))
+    shots_raw = body.shots if body.shots else lib.get("shots") or []
+    shots_clean = _brief_to_cinema_shots(
+        [s if isinstance(s, dict) else {"text": str(s)} for s in shots_raw]
+    )
+    if not shots_clean:
+        shots_clean = _brief_to_cinema_shots(
+            [dict(s) for s in cinema.normalize_produce_shots(None, lib.get("script") or "")]
+        )
+    if not shots_clean:
+        raise HTTPException(400, "Shot yok — önce senaryo / yönetmen planı ekle")
+    plan = lib.get("film_plan")
+    if body.advance:
+        if not isinstance(plan, dict) or not plan.get("segments"):
+            raise HTTPException(400, "Film planı yok — önce Film modu ile başlat")
+        plan = cinema._clean_film_plan(plan)
+    elif body.reset_plan or not isinstance(plan, dict) or not plan.get("segments"):
+        plan = cinema.build_film_plan(
+            shots_clean,
+            total_sec=total,
+            clip_sec=clip,
+            segment_size=seg_size,
+            auto_concat=bool(body.auto_concat),
+        )
+    else:
+        plan = cinema._clean_film_plan(plan)
+    seg_count = int(plan.get("segment_count") or 0)
+    if seg_count < 1:
+        raise HTTPException(400, "Segment yok")
+    seg_idx = (
+        int(body.segment_index)
+        if body.segment_index is not None
+        else int(plan.get("current_segment") or 0)
+    )
+    if body.advance:
+        cur = int(plan.get("current_segment") or 0)
+        jobs = _film_plan_segment_jobs(plan, cur)
+        if jobs and not _segment_jobs_complete(jobs):
+            raise HTTPException(400, "Mevcut segment henüz bitmedi")
+        if cur < seg_count - 1:
+            seg_idx = cur + 1
+        else:
+            seg_idx = cur
+    seg_idx = max(0, min(seg_idx, seg_count - 1))
+    segment = list((plan.get("segments") or [])[seg_idx])
+    if not segment:
+        raise HTTPException(400, f"Segment {seg_idx + 1} boş")
+    append_chain = seg_idx > 0
+    if append_chain and segment and str(segment[0].get("mode") or "") == "continue":
+        first = dict(segment[0])
+        txt = str(first.get("text") or "")
+        if not txt.lower().startswith("continue directly"):
+            first["text"] = "Continue directly from the previous shot.\n\n" + txt
+        segment = [first, *segment[1:]]
+    cp = CinemaProduceBody(
+        shots=segment,
+        setup=body.setup or lib.get("setup"),
+        audio=lib.get("audio"),
+        duration=clip,
+        aspect=body.aspect,
+        quality=normalize_quality(body.quality),
+        steps=body.steps if body.steps > 0 else int(lib.get("steps") or 20),
+        seed=body.seed,
+        silent_audio=body.silent_audio,
+        purpose=body.purpose,
+        sampler=body.sampler,
+        scheduler=body.scheduler,
+        lora_id=body.lora_id,
+        lora_name=body.lora_name,
+        lora_strength=body.lora_strength,
+        sage_attention=_sage_mode(body),
+        link_continue=bool(body.link_continue),
+        append_to_chain=append_chain,
+        seamless=bool(body.seamless) and seg_count == 1 and len(segment) <= MULTISHOT_MAX_SHOTS,
+    )
+    queued = await cinema_produce(cp)
+    batch_id = str(queued.get("cinema_batch") or "")
+    job_ids = [str(j.get("id")) for j in (queued.get("jobs") or []) if j.get("id")]
+    batches = list(plan.get("segment_batches") or [])
+    seg_jobs = list(plan.get("segment_job_ids") or [])
+    while len(batches) <= seg_idx:
+        batches.append("")
+    while len(seg_jobs) <= seg_idx:
+        seg_jobs.append([])
+    batches[seg_idx] = batch_id
+    seg_jobs[seg_idx] = job_ids
+    plan["segment_batches"] = batches
+    plan["segment_job_ids"] = seg_jobs
+    plan["current_segment"] = seg_idx
+    plan["clip_sec"] = clip
+    plan["total_sec"] = total
+    plan["segment_size"] = seg_size
+    plan["status"] = "producing"
+    lib["film_plan"] = plan
+    lib["duration"] = clip
+    lib["shots"] = shots_clean
+    cinema.save(lib)
+    missing = cinema.characters_missing_stills(lib)
+    st = _film_plan_status(cinema.load())
+    return {
+        **queued,
+        "film_plan": plan,
+        "segment_index": seg_idx,
+        "segment_count": seg_count,
+        "missing_stills": missing,
+        "film_status": st,
+    }
+
+
+@app.post("/api/cinema/film-plan/concat")
+async def cinema_film_plan_concat():
+    """Join all segment clips in order (film plan job ids)."""
+    lib = cinema.load()
+    plan = lib.get("film_plan")
+    if not isinstance(plan, dict):
+        raise HTTPException(400, "Film planı yok")
+    plan = cinema._clean_film_plan(plan)
+    ids: list[str] = []
+    for row in plan.get("segment_job_ids") or []:
+        if isinstance(row, list):
+            ids.extend([str(x) for x in row if str(x).strip()])
+    if len(ids) < 2:
+        raise HTTPException(400, "Birleştirmek için en az 2 klip gerekli")
+    batch_id = str(uuid.uuid4())[:8]
+    result = await clips_concat(ClipsConcatBody(job_ids=ids, batch_id=batch_id))
+    plan["concat_done"] = True
+    plan["final_batch_id"] = batch_id
+    plan["status"] = "concat"
+    lib["film_plan"] = plan
+    audio = cinema._clean_audio(lib.get("audio"))
+    audio["last_batch"] = batch_id
+    lib["audio"] = audio
+    cinema.save(lib)
+    return {**result, "film_plan": plan}
+
+
 @app.post("/api/cinema/mux")
 async def cinema_mux(body: CinemaMuxBody):
     """Keep per-shot dialogue/SFX and mix one uploaded film score underneath."""
@@ -3504,6 +3963,13 @@ async def cinema_mux(body: CinemaMuxBody):
 @app.post("/api/cinema/concat")
 async def cinema_concat(body: CinemaMuxBody):
     """Join cinema-batch clips in shot order (keep dialogue)."""
+    if body.job_ids and len(body.job_ids) >= 2:
+        return await clips_concat(
+            ClipsConcatBody(
+                job_ids=body.job_ids,
+                batch_id=body.batch_id,
+            )
+        )
     lib = cinema.load()
     audio = cinema._clean_audio(lib.get("audio"))
     batch_id = (body.batch_id or audio.get("last_batch") or "").strip()
@@ -3523,6 +3989,46 @@ async def cinema_concat(body: CinemaMuxBody):
         "ok": True,
         "batch_id": batch_id,
         "clips": len(paths),
+        "final_url": f"/api/cinema/final/{batch_id}",
+    }
+
+
+@app.post("/api/clips/concat")
+async def clips_concat(body: ClipsConcatBody):
+    """Join user-selected finished clips (keeps each clip's audio)."""
+    ids = [str(x).strip() for x in (body.job_ids or []) if str(x).strip()]
+    if len(ids) < 2:
+        raise HTTPException(400, "en az 2 klip seç")
+    paths = await _paths_for_job_ids(ids)
+    batch_id = (body.batch_id or "").strip()
+    if not batch_id:
+        for jid in ids:
+            rec = _job_record(jid) or {}
+            bid = str(rec.get("cinema_batch") or "").strip()
+            if bid:
+                batch_id = bid
+                break
+    if not batch_id:
+        batch_id = str(uuid.uuid4())[:8]
+    CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
+    out = CINEMA_FINALS / f"{batch_id}_final.mp4"
+    try:
+        concat_keep_audio(video_paths=paths, out_path=out)
+    except Exception as e:
+        raise HTTPException(500, str(e)[-400:])
+    lib = cinema.load()
+    audio = cinema._clean_audio(lib.get("audio"))
+    audio["last_batch"] = batch_id
+    if body.title:
+        audio["last_merge_title"] = body.title.strip()
+    lib["audio"] = audio
+    cinema.save(lib)
+    slog.info("clips concat ok", batch=batch_id, clips=len(paths), ids=len(ids))
+    return {
+        "ok": True,
+        "batch_id": batch_id,
+        "clips": len(paths),
+        "job_ids": ids,
         "final_url": f"/api/cinema/final/{batch_id}",
     }
 
@@ -3907,7 +4413,38 @@ class LoraImportBody(BaseModel):
 
 @app.get("/api/loras")
 async def loras_get():
-    return {"ok": True, "loras": public_list(), "download": dict(_lora_dl_status)}
+    return {
+        "ok": True,
+        "loras": public_list(),
+        "download": dict(_lora_dl_status),
+        "adult_content_enabled": _adult_content_enabled(),
+    }
+
+
+class StudioSettingsBody(BaseModel):
+    adult_content_enabled: Optional[bool] = None
+
+
+@app.get("/api/studio/settings")
+async def studio_settings_get():
+    cfg = _load_studio_settings()
+    return {
+        "ok": True,
+        "adult_content_enabled": bool(cfg.get("adult_content_enabled")),
+    }
+
+
+@app.post("/api/studio/settings")
+async def studio_settings_set(body: StudioSettingsBody):
+    patch: dict[str, Any] = {}
+    if body.adult_content_enabled is not None:
+        patch["adult_content_enabled"] = bool(body.adult_content_enabled)
+    cfg = _save_studio_settings(patch)
+    slog.info("studio settings saved", adult_content_enabled=cfg.get("adult_content_enabled"))
+    return {
+        "ok": True,
+        "adult_content_enabled": bool(cfg.get("adult_content_enabled")),
+    }
 
 
 class H3ModelsBody(BaseModel):
@@ -3956,6 +4493,8 @@ async def loras_download(body: LoraDownloadBody):
     spec = find_spec(lora_id=body.id or "")
     if not spec or not spec.get("file") or not spec.get("url"):
         raise HTTPException(400, "bilinmeyen LoRA")
+    if is_adult_lora(spec=spec) and not _adult_content_enabled():
+        raise HTTPException(403, "Yetişkin LoRA — önce Ayarlar → +18 bölümünü açın")
     if spec_ready(spec):
         return {"ok": True, "ready": True, "id": spec["id"], "file": spec["file"]}
     if _lora_dl_status.get("busy"):
@@ -4252,7 +4791,7 @@ async def director_save_plan(body: DirectorPlanBody):
             if c:
                 cleaned.append(c)
         if cleaned:
-            brief["shots"] = force_continue_chain(cleaned)
+            brief["shots"] = force_continue_chain(cleaned, brief)
             brief["expectedShotCount"] = len(brief["shots"])
             if not brief.get("clipDurationSec"):
                 brief["clipDurationSec"] = clip
@@ -4261,18 +4800,10 @@ async def director_save_plan(body: DirectorPlanBody):
     sess["brief"] = brief
     sess["ready"] = bool(brief.get("shots"))
     cinema_out = None
+    missing_stills: list[str] = []
     if body.apply_cinema and (brief.get("shots") or []):
-        data = cinema.load()
-        data["shots"] = [
-            {
-                "text": str(s.get("h3Prompt") or s.get("prompt") or s.get("text") or "").strip(),
-                "mode": "t2v" if (s.get("linkToPrev") or ("standalone" if i == 0 else "continue")) == "standalone" else "continue",
-            }
-            for i, s in enumerate(brief["shots"])
-        ]
-        if brief.get("logline") and not (data.get("title") or "").strip():
-            data["title"] = str(brief.get("logline"))[:80]
-        cinema_out = cinema.save(data)
+        cinema_out = cinema.ingest_from_director_brief(brief)
+        missing_stills = cinema.characters_missing_stills(cinema_out)
     _sessions[body.session_id] = sess
     _save_sessions()
     slog.info("director plan saved", session=body.session_id[:8], shots=len(brief.get("shots") or []), cinema=bool(cinema_out))
@@ -4283,6 +4814,7 @@ async def director_save_plan(body: DirectorPlanBody):
         "brief": brief,
         "shot_count": len(brief.get("shots") or []),
         "cinema": cinema_out,
+        "missing_stills": missing_stills,
     }
 
 
@@ -4503,6 +5035,8 @@ async def _director_chat_impl(body: DirectorChatBody):
         if sess.get("cinema_studio") and "[sinema stüdyosu]" not in user_msg.lower():
             user_msg = "[sinema stüdyosu] " + user_msg
         sess["messages"].append({"role": "user", "content": user_msg})
+        if isinstance(sess.get("brief"), dict):
+            sess["brief"] = merge_session_directives(sess["brief"], sess)
 
     # Short confirm after a finished plan → finalize previous assistant text (no new LLM wait)
     confirm = re.fullmatch(
@@ -4578,8 +5112,8 @@ async def _director_chat_impl(body: DirectorChatBody):
             model,
             history,
             temperature=0.7,
-            think=False,
-            retries=3,
+            think=True,
+            retries=2,
             num_predict=6144 if plan_mode else 4096,
             on_progress=progress,
         )
@@ -4674,6 +5208,7 @@ async def _director_chat_impl(body: DirectorChatBody):
         )
     )
     if has_patch and isinstance(sess.get("brief"), dict) and (sess["brief"].get("shots") or []):
+        sess["brief"] = merge_session_directives(sess["brief"], sess)
         sess["brief"] = _scrub_brief_removed(apply_shot_patches(sess["brief"], parsed), sess)
         sess["ready"] = True
         ready = True
@@ -4971,6 +5506,11 @@ async def director_commit(body: DirectorCommitBody):
     scheduler = (body.scheduler or "simple").strip() or "simple"
     steps, sampler, scheduler = _with_lora_preset(body, steps, sampler, scheduler)
     lora_bits = _lora_fields(body)
+    _enforce_adult_policy(
+        purpose=brief.get("purpose"),
+        lora_id=lora_bits.get("lora_id") or "",
+        lora_name=lora_bits.get("lora_name") or "",
+    )
 
     applied = {
         "prompt": prompts[0] if prompts else "",
@@ -5001,29 +5541,64 @@ async def director_commit(body: DirectorCommitBody):
     applied["lane"] = commit_lane
 
     queued = None
+    missing_stills: list[str] = []
     if body.queue:
-        bb = BatchBody(
-            prompts=prompts,
-            duration=applied["duration"],
-            aspect=aspect,
-            quality=quality,
-            steps=steps,
-            sampler=sampler,
-            scheduler=scheduler,
-            link_continue=bool(link),
-            append_to_chain=bool(link),
-            music_id=music_id,
-            silent_audio=silent,
-            purpose=brief.get("purpose"),
-            lora_id=lora_bits.get("lora_id") or None,
-            lora_name=lora_bits.get("lora_name") or None,
-            lora_strength=lora_bits.get("lora_strength"),
-            sage_attention=_sage_mode(body),
-            lane=commit_lane,
-        )
-        queued = await batch(bb)
+        if sess.get("cinema_studio"):
+            cinema.ingest_from_director_brief(brief)
+            lib = cinema.load()
+            missing_stills = cinema.characters_missing_stills(lib)
+            cp = CinemaProduceBody(
+                shots=_brief_to_cinema_shots(shots),
+                setup=lib.get("setup"),
+                audio=lib.get("audio"),
+                duration=dur,
+                aspect=aspect,
+                quality=quality,
+                steps=steps,
+                seed=-1,
+                silent_audio=silent,
+                purpose=brief.get("purpose"),
+                sampler=sampler,
+                scheduler=scheduler,
+                lora_id=lora_bits.get("lora_id") or None,
+                lora_name=lora_bits.get("lora_name") or None,
+                lora_strength=lora_bits.get("lora_strength"),
+                sage_attention=_sage_mode(body),
+                link_continue=bool(link),
+                seamless=False,
+            )
+            queued = await cinema_produce(cp)
+        else:
+            bb = BatchBody(
+                prompts=prompts,
+                modes=_brief_shot_modes(shots),
+                duration=applied["duration"],
+                aspect=aspect,
+                quality=quality,
+                steps=steps,
+                sampler=sampler,
+                scheduler=scheduler,
+                link_continue=bool(link),
+                append_to_chain=bool(link),
+                face_lock=True,
+                music_id=music_id,
+                silent_audio=silent,
+                purpose=brief.get("purpose"),
+                lora_id=lora_bits.get("lora_id") or None,
+                lora_name=lora_bits.get("lora_name") or None,
+                lora_strength=lora_bits.get("lora_strength"),
+                sage_attention=_sage_mode(body),
+                lane=commit_lane,
+            )
+            queued = await batch(bb)
 
-    return {"applied": applied, "brief": brief, "queued": queued}
+    return {
+        "applied": applied,
+        "brief": brief,
+        "queued": queued,
+        "missing_stills": missing_stills,
+        "cinema_studio": bool(sess.get("cinema_studio")),
+    }
 
 
 # ─── Music (additive: upload → analyze → mux; does not alter generate core) ─

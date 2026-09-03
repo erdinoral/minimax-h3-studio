@@ -29,6 +29,11 @@
     cinema: { title: "", script: "", characters: [], locations: [] },
     selectedCharacter: null,
     galleryItems: [],
+    mergePickIds: [],
+    galleryMergeMode: false,
+    cinemaStudioMode: "seamless",
+    filmMode: true,
+    filmPlanBusy: false,
     firstFrameName: null,
     lastFrameName: null,
     refImageSize: "match",
@@ -39,6 +44,7 @@
     directorOnline: false,
     directorOfflineDetail: "",
     prodLane: "scene",
+    studioWorkspace: "scene", // scene | director
     musicId: null,
     musicMeta: null,
     projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
@@ -51,6 +57,7 @@
     loraApplied: false,
     loraCatalog: [],
     loraDownload: {},
+    adultContentEnabled: false,
     multishot: false,
     // Director tabs: per-session chat state
     directorSessions: [], // { id, title, messages: [ {role, content} ] }
@@ -75,7 +82,120 @@
     "documentary",
     "intro",
     "outro",
+    "adult",
   ];
+  const ADULT_LORA_ID = "erosmax-4step";
+  const ADULT_PURPOSE = "adult";
+
+  function purposeKeysForUi() {
+    if (state.adultContentEnabled) return PURPOSE_KEYS;
+    return PURPOSE_KEYS.filter((k) => k !== ADULT_PURPOSE);
+  }
+
+  function isAdultLoraSpec(spec) {
+    if (!spec) return false;
+    if (spec.adult) return true;
+    const blob = `${spec.id || ""} ${spec.file || ""} ${spec.label || ""}`.toLowerCase();
+    return blob.includes("erosmax");
+  }
+
+  function visibleLoraCatalog() {
+    const catalog = state.loraCatalog || [];
+    if (state.adultContentEnabled) return catalog;
+    return catalog.filter((spec) => !isAdultLoraSpec(spec));
+  }
+
+  function syncAdultContentUi() {
+    const on = !!state.adultContentEnabled;
+    document.querySelectorAll(".adult-only").forEach((el) => {
+      el.classList.toggle("hidden", !on);
+    });
+    $("settings-adult-on")?.classList.toggle("hidden", !on);
+    $("settings-adult-off")?.classList.toggle("hidden", on);
+    const status = $("settings-adult-status");
+    if (status) status.textContent = on ? tt("settings.adultOn") : "";
+    if (!on) {
+      if (state.projectPurpose === ADULT_PURPOSE) {
+        state.projectPurpose = null;
+        syncProjectChips();
+      }
+      if (state.loraApplied && (state.loraId === ADULT_LORA_ID || isAdultLoraSpec(appliedLoraSpec()))) {
+        if ($("lora-select")) $("lora-select").value = "";
+        if ($("cinema-lora-select")) $("cinema-lora-select").value = "";
+        state.loraId = "";
+        state.loraApplied = false;
+        if ($("steps")) $("steps").value = "20";
+        if ($("sampler")) $("sampler").value = "res_multistep";
+        updateLoraHint();
+      }
+      const bg = $("bible-genre");
+      if (bg && bg.value === ADULT_PURPOSE) bg.value = "short_film";
+    }
+    fillLoraSelect();
+    fillLoraShop();
+  }
+  window.syncAdultContentUi = syncAdultContentUi;
+
+  async function loadStudioSettings() {
+    try {
+      const data = await fetch("/api/studio/settings").then((r) => r.json());
+      state.adultContentEnabled = !!data.adult_content_enabled;
+    } catch (_) {
+      state.adultContentEnabled = false;
+    }
+    syncAdultContentUi();
+  }
+
+  async function setAdultContentEnabled(enabled) {
+    const on = !!enabled;
+    if (on) {
+      const ok = !!$("settings-adult-confirm")?.checked;
+      if (!ok) {
+        toast(tt("settings.adultNeedConfirm"));
+        return;
+      }
+    }
+    try {
+      const r = await fetch("/api/studio/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ adult_content_enabled: on }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data) || tt("settings.adultSaveFail"));
+      state.adultContentEnabled = !!data.adult_content_enabled;
+      syncAdultContentUi();
+      toast(on ? tt("settings.adultEnabledToast") : tt("settings.adultDisabledToast"));
+    } catch (e) {
+      toast(String(e.message || e));
+    }
+  }
+
+  async function applyAdultProductionPreset() {
+    setProduceMode("t2v");
+    setDuration(5);
+    setQuality("736");
+    if ($("steps")) $("steps").value = "4";
+    const samp = $("sampler");
+    if (samp) {
+      if (![...samp.options].some((o) => o.value === "er_sde")) {
+        const opt = document.createElement("option");
+        opt.value = "er_sde";
+        opt.textContent = "er_sde";
+        samp.appendChild(opt);
+      }
+      samp.value = "er_sde";
+    }
+    if ($("prompt-rewriter-enabled")) $("prompt-rewriter-enabled").checked = false;
+    if (!state.loraCatalog.length) await loadLoras();
+    const sel = $("lora-select");
+    if (sel && [...sel.options].some((o) => o.value === ADULT_LORA_ID)) {
+      sel.value = ADULT_LORA_ID;
+      if ($("cinema-lora-select")) $("cinema-lora-select").value = ADULT_LORA_ID;
+    }
+    await applyLora();
+    toast(tt("toast.adultPreset"));
+  }
   const STYLE_KEYS = [
     "realistic",
     "anime",
@@ -343,7 +463,7 @@
         mode: "film",
         score_id: "",
         score_name: "",
-        voice_lang: "Turkish",
+        voice_lang: "English",
         last_batch: "",
       },
       characters: [],
@@ -356,6 +476,11 @@
     state.cinema = { ...base, ...(state.cinema || {}) };
     state.cinema.setup = { ...base.setup, ...(state.cinema.setup || {}) };
     state.cinema.audio = { ...base.audio, ...(state.cinema.audio || {}) };
+    // Spoken dialogue defaults to English. EN UI always pins English; TR UI keeps
+    // whatever is set (default English) so users can still get pure English clips.
+    if (typeof window.h3Lang === "function" && window.h3Lang() === "en") {
+      state.cinema.audio.voice_lang = "English";
+    }
     if (!Array.isArray(state.cinema.shots)) state.cinema.shots = [];
     if (state.cinema.role_script == null) state.cinema.role_script = "";
     if (!Array.isArray(state.cinema.characters)) state.cinema.characters = [];
@@ -365,7 +490,9 @@
 
   function cinemaSetupOptions(key) {
     if (key === "purpose") {
-      return [["auto", tt("cinema.auto")]].concat(PURPOSE_KEYS.map((id) => [id, purposeLabel(id)]));
+      return [["auto", tt("cinema.auto")]].concat(
+        purposeKeysForUi().map((id) => [id, purposeLabel(id)])
+      );
     }
     if (key === "style") {
       return [["auto", tt("cinema.auto")]].concat(STYLE_KEYS.map((id) => [id, styleLabel(id)]));
@@ -1016,6 +1143,11 @@
     renderCinema();
     void fillCinemaFilms();
     void refreshCinemaPreview();
+    syncFilmModeSummary();
+    fetch("/api/cinema/film-plan")
+      .then((r) => r.json())
+      .then((st) => syncFilmStillsWarn(st.missing_stills))
+      .catch(() => {});
   }
 
   function flushCinemaFields() {
@@ -1471,22 +1603,28 @@
     const jobMeta = cinemaShotJobMeta(shot.id, index);
     const jobCls = jobMeta.cls;
     const jobLabel = jobMeta.label;
+    const modeHtml = cinemaStudioMode() === "seamless"
+      ? '<span class="cinema-shot-link muted">' +
+        (mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
+        "</span>"
+      : '<div class="cinema-shot-mode">' +
+        '<button type="button" class="t2v' +
+        (mode === "t2v" ? " on" : "") +
+        '" data-mode="t2v">' +
+        tt("mode.t2v") +
+        "</button>" +
+        '<button type="button" class="continue' +
+        (mode === "continue" ? " on" : "") +
+        '" data-mode="continue">' +
+        tt("plan.cont") +
+        "</button></div>";
     return (
       '<article class="cinema-shot" data-id="' +
       htmlEsc(shot.id) +
       '"><div class="cinema-shot-head"><span class="idx">Shot ' +
       (index + 1) +
-      '</span><div class="cinema-shot-mode">' +
-      '<button type="button" class="t2v' +
-      (mode === "t2v" ? " on" : "") +
-      '" data-mode="t2v">' +
-      tt("mode.t2v") +
-      "</button>" +
-      '<button type="button" class="continue' +
-      (mode === "continue" ? " on" : "") +
-      '" data-mode="continue">' +
-      tt("plan.cont") +
-      "</button></div>" +
+      '</span>' +
+      modeHtml +
       (jobLabel
         ? '<span class="cinema-shot-job' + jobCls + '">' + htmlEsc(jobLabel) + "</span>"
         : "") +
@@ -1533,6 +1671,7 @@
     const c = ensureCinema();
     const dur = $("cinema-duration");
     if (dur && document.activeElement !== dur) dur.value = String(c.duration || 5);
+    syncFilmModeSummary();
     const steps = $("cinema-steps");
     if (steps && document.activeElement !== steps) steps.value = String(c.steps || 20);
     const seed = $("cinema-seed");
@@ -1603,9 +1742,12 @@
       if (remove) remove.classList.toggle("hidden", !audio.score_id);
     const concat = $("btn-cinema-concat");
     if (concat) {
-      concat.classList.toggle("hidden", !audio.last_batch);
-      concat.disabled = !audio.last_batch;
+      const n = finishedClipsForMerge().length;
+      concat.classList.remove("hidden");
+      concat.disabled = n < 2;
+      concat.title = n < 2 ? tt("merge.needTwo") : tt("merge.openPicker");
     }
+    syncMergeToolbar();
     const mux = $("btn-cinema-mux");
     if (mux) {
       const ready = Boolean(audio.score_id && audio.last_batch);
@@ -1743,11 +1885,12 @@
     const nC = (c.characters || []).length;
     const nL = (c.locations || []).length;
     const nS = (c.shots || []).filter((s) => (s.text || "").trim()).length;
-    if ($("cinema-hint")) {
+    syncCinemaStudioMode();
+    if ($("cinema-hint") && cinemaStudioMode() === "assets") {
       $("cinema-hint").textContent =
         nC || nL || nS
           ? tf("cinema.hintCounts", { c: nC, l: nL, s: nS })
-          : tt("cinema.hint");
+          : tt("cinema.hintAssets");
     }
     syncCinemaFold();
     scheduleCinemaPreview();
@@ -1967,13 +2110,94 @@
     }
   }
 
+  function cinemaStudioMode() {
+    return state.cinemaStudioMode === "assets" ? "assets" : "seamless";
+  }
+
+  function readCinemaStudioMode() {
+    try {
+      const s = localStorage.getItem("h3-cinema-mode");
+      if (s === "assets" || s === "seamless") return s;
+    } catch {
+      /* ignore */
+    }
+    return "seamless";
+  }
+
+  function setCinemaStudioMode(mode, { persist = true } = {}) {
+    state.cinemaStudioMode = mode === "assets" ? "assets" : "seamless";
+    state.filmMode = state.cinemaStudioMode === "seamless";
+    if (persist) {
+      try {
+        localStorage.setItem("h3-cinema-mode", state.cinemaStudioMode);
+      } catch {
+        /* ignore */
+      }
+    }
+    syncCinemaStudioMode();
+    if ($("view-cinema") && !$("view-cinema").classList.contains("hidden")) {
+      renderCinemaShots();
+    }
+  }
+
+  function syncCinemaStudioMode() {
+    const mode = cinemaStudioMode();
+    const panel = document.querySelector("#view-cinema .cinema-panel");
+    panel?.classList.toggle("is-mode-seamless", mode === "seamless");
+    panel?.classList.toggle("is-mode-assets", mode === "assets");
+    document.querySelectorAll("#cinema-studio-mode [data-cinemamode]").forEach((btn) => {
+      btn.classList.toggle("on", btn.dataset.cinemamode === mode);
+    });
+    const seam = $("cinema-seamless");
+    if (seam) {
+      if (mode === "seamless") {
+        seam.checked = !!state.multishot;
+        seam.disabled = !state.multishot;
+      } else {
+        seam.checked = false;
+        seam.disabled = true;
+      }
+    }
+    const modeHint = $("cinema-mode-hint");
+    if (modeHint) {
+      modeHint.textContent =
+        mode === "seamless"
+          ? state.multishot
+            ? tt("cinema.modeSeamlessHint")
+            : tt("cinema.modeSeamlessNeedPack")
+          : tt("cinema.modeAssetsHint");
+    }
+    const hint = $("cinema-hint");
+    if (hint) {
+      hint.textContent = mode === "seamless" ? tt("cinema.hintSeamless") : tt("cinema.hintAssets");
+    }
+    const addCont = $("btn-cinema-add-cont");
+    if (addCont) addCont.classList.toggle("hidden", mode === "seamless");
+    const addT2v = $("btn-cinema-add-t2v");
+    if (addT2v) addT2v.textContent = mode === "seamless" ? tt("cinema.addShot") : tt("cinema.addT2v");
+  }
+  window.syncCinemaStudioMode = syncCinemaStudioMode;
+
+  async function planCinemaWithDirector() {
+    await saveCinema(true);
+    state.cinemaDirector = true;
+    setDirectorModal(true);
+    setDirectorTab("chat");
+    appendDirectorMsg("assistant", tt("cinema.planOpen"));
+    toast(tt("cinema.planToast"));
+    $("director-msg")?.focus();
+  }
+
   async function openCinemaStudio() {
+    setStudioWorkspace("director");
     $("view-gallery")?.classList.add("hidden");
     $("view-settings")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
     setDirectorLlmOpen(false);
     setDirectorOpen(false);
     state.cinemaDirector = true;
+    state.cinemaStudioMode = readCinemaStudioMode();
+    state.filmMode = state.cinemaStudioMode === "seamless";
     $("view-cinema")?.classList.remove("hidden");
     if (!state.loraCatalog || !state.loraCatalog.length) {
       try {
@@ -1983,6 +2207,7 @@
       }
     }
     await loadCinema();
+    syncCinemaStudioMode();
   }
 
   function closeCinemaStudio() {
@@ -2047,7 +2272,16 @@
       return;
     }
     const c = ensureCinema();
-    const want = mode === "continue" ? "continue" : "t2v";
+    if (cinemaStudioMode() === "seamless" && (c.shots || []).length >= 8) {
+      toast(tt("cinema.seamlessMaxShots"));
+      return;
+    }
+    const want =
+      cinemaStudioMode() === "seamless"
+        ? "t2v"
+        : mode === "continue"
+          ? "continue"
+          : "t2v";
     cinemaForceLocalShots = true;
     c.shots.push({ id: cinemaId(), text, mode: want });
     if (draft) draft.value = "";
@@ -2335,6 +2569,152 @@
     }
   }
 
+  function syncFilmModeSummary() {
+    const total = Number($("cinema-film-total")?.value) || 60;
+    const clip = Number($("cinema-duration")?.value) || Number(ensureCinema().duration) || 10;
+    const seg = Number($("cinema-film-segment")?.value) || 6;
+    const shots = Math.max(1, Math.ceil(total / clip));
+    const segs = Math.max(1, Math.ceil(shots / seg));
+    const el = $("cinema-film-summary");
+    if (el) {
+      el.textContent = tf("filmMode.summary", {
+        total: String(total),
+        clip: String(clip),
+        sec: tt("sec"),
+        shots: String(shots),
+        segs: String(segs),
+        segSize: String(seg),
+      });
+    }
+  }
+
+  function syncFilmStillsWarn(names) {
+    const el = $("cinema-film-stills-warn");
+    if (!el) return;
+    const list = Array.isArray(names) ? names.filter(Boolean) : [];
+    if (!list.length) {
+      el.classList.add("hidden");
+      el.textContent = "";
+      return;
+    }
+    el.classList.remove("hidden");
+    el.textContent = tf("filmMode.missingStills", { names: list.join(", ") });
+  }
+
+  async function produceCinemaFilm(opts) {
+    opts = opts || {};
+    const btn = $("btn-cinema-produce-film");
+    if (btn) btn.disabled = true;
+    state.filmPlanBusy = true;
+    try {
+      await saveCinema(true);
+      const cine = ensureCinema();
+      const shots = (cine.shots || []).filter((s) => (s.text || "").trim());
+      if (!shots.length) {
+        toast(tt("filmMode.needShots"));
+        return;
+      }
+      const audio = cinemaAudio();
+      const filmMode = audio.mode !== "silent";
+      const purpose =
+        cine.setup && cine.setup.purpose && cine.setup.purpose !== "auto"
+          ? cine.setup.purpose
+          : "short_film";
+      if ($("cinema-lora-select") && $("lora-select")) {
+        $("lora-select").value = $("cinema-lora-select").value;
+      }
+      const r = await fetch("/api/cinema/produce-film", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          total_sec: Number($("cinema-film-total")?.value) || 60,
+          clip_sec: Number($("cinema-duration")?.value) || cine.duration || 10,
+          segment_size: Number($("cinema-film-segment")?.value) || 6,
+          auto_concat: !!$("cinema-film-auto-concat")?.checked,
+          reset_plan: opts.reset_plan !== false && !opts.advance,
+          advance: !!opts.advance,
+          segment_index: opts.segment_index,
+          shots,
+          setup: cine.setup || {},
+          aspect: state.aspect || "16:9",
+          quality: normalizeQuality(cine.quality || state.quality || "736"),
+          steps: Number($("cinema-steps")?.value) || cine.steps || 20,
+          seed: Number($("cinema-seed")?.value) || -1,
+          silent_audio: !filmMode,
+          purpose,
+          brief: state.directorBrief || undefined,
+          ...collectLoraPayload(),
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      if (data.cinema_batch) {
+        audio.last_batch = data.cinema_batch;
+        await saveCinema(true);
+        renderCinemaAudio();
+      }
+      syncFilmStillsWarn(data.missing_stills);
+      if (Array.isArray(data.missing_stills) && data.missing_stills.length) {
+        toast(tf("filmMode.missingStillsToast", { names: data.missing_stills.join(", ") }));
+      }
+      toast(
+        opts.advance
+          ? tf("filmMode.segmentQueued", {
+              seg: String((data.segment_index || 0) + 1),
+              total: String(data.segment_count || 1),
+            })
+          : tf("filmMode.started", {
+              seg: String((data.segment_index || 0) + 1),
+              total: String(data.segment_count || 1),
+              n: String(data.count || 0),
+            })
+      );
+      setProdLane("director");
+      await refreshJobs();
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      state.filmPlanBusy = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function pollFilmPlan() {
+    if (state.filmPlanBusy) return;
+    try {
+      const st = await fetch("/api/cinema/film-plan").then((r) => r.json());
+      const plan = st.plan;
+      if (!plan || plan.status === "concat" || plan.concat_done) return;
+      syncFilmStillsWarn(st.missing_stills);
+      const autoConcat = !!$("cinema-film-auto-concat")?.checked;
+      const segCount = Number(plan.segment_count) || 1;
+      const cur = Number(plan.current_segment) || 0;
+      if (st.segment_complete && cur < segCount - 1) {
+        state.filmPlanBusy = true;
+        await produceCinemaFilm({ advance: true, reset_plan: false });
+        state.filmPlanBusy = false;
+        return;
+      }
+      if (st.all_complete && autoConcat && !plan.concat_done) {
+        if (!state._filmConcatAsked) {
+          state._filmConcatAsked = true;
+          const ok = tConfirm("confirm.filmConcat");
+          if (!ok) return;
+        }
+        state.filmPlanBusy = true;
+        const r = await fetch("/api/cinema/film-plan/concat", { method: "POST" });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(errDetail(data));
+        toast(tt("filmMode.concatOk"));
+        if (data.final_url) window.open(data.final_url, "_blank");
+        renderCinemaAudio();
+        state.filmPlanBusy = false;
+      }
+    } catch {
+      state.filmPlanBusy = false;
+    }
+  }
+
   async function produceCinema() {
     const btn = $("btn-cinema-produce");
     if (btn) btn.disabled = true;
@@ -2359,6 +2739,18 @@
       if (!shots.length) {
         toast(tt("cinema.addShotFirst"));
         return;
+      }
+      const studioMode = cinemaStudioMode();
+      const wantSeamless = studioMode === "seamless";
+      if (wantSeamless) {
+        if (!state.multishot) {
+          toast(tt("cinema.modeSeamlessNeedPack"));
+          return;
+        }
+        if (shots.length > 8) {
+          toast(tt("cinema.seamlessMaxShots"));
+          return;
+        }
       }
       const audio = cinemaAudio();
       const filmMode = audio.mode !== "silent";
@@ -2388,11 +2780,17 @@
       }
       const cine = ensureCinema();
       cine.seed = seed;
+      const queueShots = wantSeamless
+        ? shots.map((s, i) => ({
+            ...s,
+            mode: i === 0 ? "t2v" : "continue",
+          }))
+        : shots;
       const r = await fetch("/api/cinema/produce", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shots,
+          shots: queueShots,
           setup: cine.setup || {},
           audio,
           duration: Number($("cinema-duration")?.value) || cine.duration || 5,
@@ -2404,7 +2802,7 @@
           purpose,
           silent_audio: !filmMode,
           link_continue: true,
-          seamless: !!$("cinema-seamless")?.checked,
+          seamless: wantSeamless,
           ...collectLoraPayload(),
         }),
       });
@@ -2416,17 +2814,19 @@
         renderCinemaAudio();
       }
       toast(
-        data.still_lock && $("cinema-seamless")?.checked
+        data.still_lock && wantSeamless
           ? tt("cinema.stillOverSeamless")
           : data.seamless
-            ? tf("cinema.produceSeamless", { n: shots.length })
-            : filmMode
-              ? tf("cinema.produceFilm", { n: data.count || 0 })
-              : tf("cinema.produceSilent", { n: data.count || 0 })
+            ? tf("cinema.produceSeamless", { n: queueShots.length })
+            : studioMode === "assets"
+              ? tf("cinema.produceAssets", { n: data.count || 0 })
+              : filmMode
+                ? tf("cinema.produceFilm", { n: data.count || 0 })
+                : tf("cinema.produceSilent", { n: data.count || 0 })
       );
       renderCinemaShots();
-      fillPromptFromShots(shots.map((s) => s.text));
-      setQueueFromTexts(shots.map((s) => s.text));
+      fillPromptFromShots(queueShots.map((s) => s.text));
+      setQueueFromTexts(queueShots.map((s) => s.text));
       setProdLane("director");
       await refreshJobs();
     } catch (e) {
@@ -2512,28 +2912,237 @@
     }
   }
 
-  async function concatCinemaFilm() {
-    const audio = cinemaAudio();
-    const btn = $("btn-cinema-concat");
-    if (btn) btn.disabled = true;
+  function syncMergeToolbar() {
+    const n = finishedClipsForMerge().length;
+    const mergeBtn = $("btn-merge-clips");
+    if (mergeBtn) {
+      mergeBtn.disabled = n < 2;
+      mergeBtn.title = n < 2 ? tt("merge.needTwo") : tt("merge.openPicker");
+    }
+    if (!state.galleryMergeMode) {
+      const galleryConcat = $("btn-gallery-concat");
+      if (galleryConcat) {
+        galleryConcat.disabled = n < 2;
+        galleryConcat.title = n < 2 ? tt("merge.needTwo") : tt("merge.openPicker");
+      }
+    } else {
+      syncGalleryMergeHeader();
+    }
+  }
+
+  function finishedClipsForMerge() {
+    const seen = new Set();
+    const out = [];
+    const add = (j) => {
+      if (!j || !j.id || seen.has(j.id)) return;
+      const st = String(j.status || "done").toLowerCase();
+      if (st && st !== "done") return;
+      seen.add(j.id);
+      out.push(j);
+    };
+    (state.jobs || []).forEach(add);
+    (state.galleryItems || []).forEach(add);
+    out.sort((a, b) => {
+      const ba = Number(a.batch_index) || 0;
+      const bb = Number(b.batch_index) || 0;
+      if (ba && bb && ba !== bb) return ba - bb;
+      const ta = Number(a.done_at || a.created_at || 0);
+      const tb = Number(b.done_at || b.created_at || 0);
+      return tb - ta;
+    });
+    return out;
+  }
+
+  function syncGalleryMergeHeader() {
+    const panel = $("gallery-panel");
+    const hint = $("gallery-merge-hint");
+    const count = $("gallery-merge-count");
+    const cancel = $("btn-gallery-merge-cancel");
+    const concat = $("btn-gallery-concat");
+    const orderHint = $("gallery-order-hint");
+    const picked = state.mergePickIds || [];
+    const on = !!state.galleryMergeMode;
+    panel?.classList.toggle("gallery-merge-mode", on);
+    hint?.classList.toggle("hidden", !on);
+    count?.classList.toggle("hidden", !on);
+    cancel?.classList.toggle("hidden", !on);
+    orderHint?.classList.toggle("hidden", on);
+    if (hint && on) hint.textContent = tt("merge.galleryHint");
+    if (count && on) {
+      count.textContent =
+        picked.length >= 2
+          ? tf("merge.countOk", { n: String(picked.length) })
+          : tf("merge.countNeed", { n: String(picked.length) });
+    }
+    if (concat) {
+      if (on) {
+        concat.textContent = tt("merge.ok");
+        concat.classList.add("cta");
+        concat.classList.remove("btn-secondary");
+        concat.disabled = picked.length < 2;
+      } else {
+        concat.textContent = tt("merge.toolbar");
+        concat.classList.remove("cta");
+        concat.classList.add("btn-secondary");
+        concat.disabled = finishedClipsForMerge().length < 2;
+      }
+    }
+  }
+  window.syncGalleryMergeHeader = syncGalleryMergeHeader;
+
+  function patchGalleryMergeBadges() {
+    const picked = state.mergePickIds || [];
+    document.querySelectorAll("#gallery-grid .gallery-card").forEach((card) => {
+      const id = card.dataset.id;
+      if (!id) return;
+      const order = picked.indexOf(id);
+      const sel = order >= 0;
+      card.classList.toggle("is-merge-picked", sel);
+      const badge = card.querySelector(".gallery-merge-badge");
+      if (badge) {
+        badge.textContent = sel ? String(order + 1) : "";
+        badge.classList.toggle("is-on", sel);
+      }
+      const ring = card.querySelector(".gallery-merge-ring");
+      ring?.classList.toggle("is-on", sel);
+    });
+    syncGalleryMergeHeader();
+  }
+
+  function toggleGalleryMergePick(id) {
+    if (!state.galleryMergeMode || !id) return;
+    const ids = state.mergePickIds || (state.mergePickIds = []);
+    const i = ids.indexOf(id);
+    if (i >= 0) ids.splice(i, 1);
+    else ids.push(id);
+    patchGalleryMergeBadges();
+  }
+
+  function exitGalleryMergeMode() {
+    state.galleryMergeMode = false;
+    state.mergePickIds = [];
+    syncGalleryMergeHeader();
+    if ($("view-gallery") && !$("view-gallery").classList.contains("hidden")) {
+      void renderGallery();
+    } else {
+      patchGalleryMergeBadges();
+    }
+  }
+
+  function galleryMergeUiLive() {
+    return !!(
+      state.galleryMergeMode &&
+      $("gallery-grid")?.querySelector(".gallery-card .gallery-merge-pick")
+    );
+  }
+
+  function refreshGalleryMergeUi() {
+    syncGalleryMergeHeader();
+    if (galleryMergeUiLive()) {
+      document.querySelectorAll("#gallery-grid .gallery-merge-pick").forEach((btn) => {
+        btn.classList.remove("hidden");
+      });
+      patchGalleryMergeBadges();
+      return;
+    }
+    void renderGallery();
+  }
+
+  async function enterGalleryMergeMode(opts) {
+    opts = opts || {};
+    if (!state.galleryItems.length) {
+      try {
+        const data = await fetch("/api/gallery").then((r) => r.json());
+        state.galleryItems = data.items || [];
+      } catch {
+        state.galleryItems = [];
+      }
+    }
+    state.galleryMergeMode = true;
+    state.mergePickIds = [];
+    const batchId = (opts.batchId || "").trim();
+    if (batchId) {
+      const batchClips = finishedClipsForMerge()
+        .filter((j) => String(j.cinema_batch || "") === batchId)
+        .sort((a, b) => (Number(a.batch_index) || 0) - (Number(b.batch_index) || 0));
+      if (batchClips.length >= 2) {
+        state.mergePickIds = batchClips.map((j) => j.id);
+      }
+    }
+    setDirectorLlmOpen(false);
+    $("view-settings")?.classList.add("hidden");
+    $("view-support")?.classList.add("hidden");
+    $("view-gallery")?.classList.remove("hidden");
+    refreshGalleryMergeUi();
+    if (!state.galleryItems.length) toast(tt("merge.empty"));
+  }
+
+  async function submitClipMerge() {
+    const ids = (state.mergePickIds || []).filter(Boolean);
+    if (ids.length < 2) {
+      toast(tt("merge.needTwo"));
+      return;
+    }
+    const concat = $("btn-gallery-concat");
+    if (concat) concat.disabled = true;
     try {
-      const r = await fetch("/api/cinema/concat", {
+      let batchId = "";
+      try {
+        batchId = cinemaAudio().last_batch || "";
+      } catch {
+        batchId = "";
+      }
+      const r = await fetch("/api/clips/concat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batch_id: audio.last_batch || "" }),
+        body: JSON.stringify({
+          job_ids: ids,
+          batch_id: batchId,
+        }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      if (data.batch_id) audio.last_batch = data.batch_id;
-      renderCinemaAudio();
-      toast(tf("cinema.concatOk", { n: data.clips || 0 }));
+      if (data.batch_id) {
+        try {
+          const audio = cinemaAudio();
+          audio.last_batch = data.batch_id;
+          renderCinemaAudio();
+        } catch {
+          /* gallery-only merge */
+        }
+      }
+      exitGalleryMergeMode();
+      toast(tf("cinema.concatOk", { n: data.clips || ids.length }));
       if (data.final_url) window.open(data.final_url, "_blank");
+      await renderGallery();
     } catch (e) {
       toast(String(e.message || e));
     } finally {
-      if (btn) btn.disabled = false;
-      renderCinemaAudio();
+      syncGalleryMergeHeader();
     }
+  }
+
+  async function concatCinemaFilm() {
+    let batchId = "";
+    try {
+      batchId = cinemaAudio().last_batch || "";
+    } catch {
+      batchId = "";
+    }
+    await enterGalleryMergeMode({ batchId });
+  }
+
+  function onGalleryConcatClick() {
+    if (state.galleryMergeMode) {
+      const n = (state.mergePickIds || []).length;
+      if (n < 2) {
+        toast(tt("merge.needTwo"));
+        return;
+      }
+      void submitClipMerge();
+      return;
+    }
+    void enterGalleryMergeMode({});
   }
 
   async function stillFromGalleryClip(job) {
@@ -3717,6 +4326,8 @@
     const silent = state.projectSilent || state.projectPurpose === "music_video";
     if (state.projectPurpose === "music_video") {
       el.textContent = tt("project.mvHint");
+    } else if (state.projectPurpose === ADULT_PURPOSE) {
+      el.textContent = tt("project.adultHint");
     } else if (state.projectPurpose) {
       const label = purposeLabel(state.projectPurpose) || state.projectPurpose;
       const style = state.projectStyle
@@ -3776,6 +4387,10 @@
     if (!fromScene) setDirectorOpen(true);
     if (g === "purpose") {
       const p = btn.dataset.purpose;
+      if (p === ADULT_PURPOSE && !state.adultContentEnabled) {
+        toast(tt("settings.adultNeedEnable"));
+        return;
+      }
       state.projectPurpose = state.projectPurpose === p ? null : p;
       // Music video = silent visual only; all other purposes keep MiniMax audio
       state.projectSilent = state.projectPurpose === "music_video";
@@ -3790,6 +4405,9 @@
       if (state.projectPurpose === "music_video") {
         note += tt("dir.purposeMv");
         if (fromScene) toast(tt("toast.purposeMv"));
+      } else if (state.projectPurpose === ADULT_PURPOSE) {
+        note += tt("dir.purposeAdult");
+        void applyAdultProductionPreset();
       } else {
         const extra =
           state.projectPurpose === "documentary"
@@ -4611,6 +5229,14 @@
       if (!r.ok) throw new Error(errDetail(data));
       const a = data.applied || {};
       if (data.brief) state.directorBrief = data.brief;
+      if (Array.isArray(data.missing_stills) && data.missing_stills.length) {
+        syncFilmStillsWarn(data.missing_stills);
+        toast(tf("filmMode.missingStillsToast", { names: data.missing_stills.join(", ") }));
+      }
+      if (data.cinema_studio && queue && data.queued) {
+        await loadCinema();
+        renderCinemaShots();
+      }
       let prompts = Array.isArray(a.prompts)
         ? a.prompts.map((s) => String(s || "").trim()).filter(Boolean)
         : String(a.batch_prompts || "")
@@ -4698,17 +5324,7 @@
       $("sys-comfy-item")?.classList.toggle("comfy-on", !!s.comfy_online);
       $("sys-comfy-item")?.classList.toggle("comfy-off", !s.comfy_online);
       state.multishot = !!s.multishot;
-      const seam = $("cinema-seamless");
-      const seamHint = $("cinema-seamless-label");
-      if (seam) {
-        seam.disabled = !state.multishot;
-        if (state.multishot && seam.dataset.userSet !== "1") seam.checked = true;
-        if (!state.multishot) seam.checked = false;
-        seam.title = state.multishot ? tt("cinema.seamlessTitleOn") : tt("cinema.seamlessTitleOff");
-      }
-      if (seamHint && !state.multishot) {
-        seamHint.title = tt("cinema.multishotInstallTitle");
-      }
+      syncCinemaStudioMode();
     } catch {
       /* ignore */
     }
@@ -4769,6 +5385,41 @@
       btn.classList.toggle("on", btn.dataset.lane === next);
     });
     renderJobs();
+  }
+
+  function refreshStudioWorkspaceChrome() {
+    const ws = state.studioWorkspace === "director" ? "director" : "scene";
+    const titleEl = $("scene-zone-title");
+    const subEl = $("scene-zone-sub");
+    if (titleEl) {
+      titleEl.textContent = ws === "director" ? tt("ws.directorTitle") : tt("ws.sceneTitle");
+    }
+    if (subEl) {
+      subEl.innerHTML = ws === "director" ? tt("ws.directorSub") : tt("ws.sceneSub");
+    }
+  }
+
+  function setStudioWorkspace(ws) {
+    const next = ws === "director" ? "director" : "scene";
+    const changed = state.studioWorkspace !== next;
+    state.studioWorkspace = next;
+    document.body.classList.toggle("ws-director", next === "director");
+    document.body.classList.toggle("ws-scene", next === "scene");
+    document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
+      const on = btn.dataset.ws === next;
+      btn.classList.toggle("on", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    $("panel-workspace-director")?.classList.toggle("hidden", next !== "director");
+    $("panel-workspace-scene")?.classList.toggle("hidden", next !== "scene");
+    refreshStudioWorkspaceChrome();
+    if (changed) {
+      setProdLane(next);
+      if (next === "scene") {
+        if (state.produceMode === "cinema") setProduceMode("t2v");
+        if (!$("view-cinema")?.classList.contains("hidden")) closeCinemaStudio();
+      }
+    }
   }
 
   function renderJobs() {
@@ -5043,12 +5694,18 @@
     });
     if (!done.length) {
       grid.innerHTML = `<p class="muted">${tt("gallery.empty")}</p>`;
+      syncMergeToolbar();
       return;
     }
     grid.innerHTML = "";
+    const mergeOn = !!state.galleryMergeMode;
+    const picked = state.mergePickIds || [];
     done.forEach((j, i) => {
       const card = document.createElement("div");
       card.className = "gallery-card";
+      card.dataset.id = j.id;
+      const pickOrder = picked.indexOf(j.id);
+      if (pickOrder >= 0) card.classList.add("is-merge-picked");
       const url = j.url || `/api/gallery/${j.id}/video`;
       const ord =
         j.batch_index && j.batch_total
@@ -5084,11 +5741,24 @@
         <button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button>
         <div class="gallery-thumb">
           <video src="${url}" muted preload="metadata"></video>
+          <button type="button" class="gallery-merge-pick${mergeOn ? "" : " hidden"}" aria-label="${tt("merge.pick")}">
+            <span class="gallery-merge-ring${pickOrder >= 0 ? " is-on" : ""}"></span>
+            <span class="gallery-merge-badge${pickOrder >= 0 ? " is-on" : ""}">${pickOrder >= 0 ? pickOrder + 1 : ""}</span>
+          </button>
           ${j.prompt ? `<button type="button" class="gallery-prompt" title="${tt("gallery.promptTitle")}">P</button>` : ""}
           <button type="button" class="gallery-cont" title="${tt("gallery.contTitle")}">${tt("gallery.contBtn")}</button>
           <button type="button" class="gallery-still btn-ghost" title="${tt("gallery.stillTitle")}">${tt("gallery.stillBtn")}</button>
         </div>
         <div class="meta">${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
+      const pickBtn = card.querySelector(".gallery-merge-pick");
+      if (pickBtn) {
+        pickBtn.classList.toggle("hidden", !mergeOn);
+        pickBtn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleGalleryMergePick(j.id);
+        };
+      }
       const delBtn = card.querySelector(".gallery-del");
       if (delBtn) {
         delBtn.onclick = (e) => {
@@ -5126,6 +5796,10 @@
         };
       }
       card.onclick = () => {
+        if (state.galleryMergeMode) {
+          toggleGalleryMergePick(j.id);
+          return;
+        }
         const live = state.jobs.find((x) => x.id === j.id && x.status === "done");
         const meta = `${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`;
         if (live) {
@@ -5140,6 +5814,8 @@
       };
       grid.appendChild(card);
     });
+    syncMergeToolbar();
+    syncGalleryMergeHeader();
   }
 
   async function deleteGalleryItem(itemId) {
@@ -5192,6 +5868,8 @@
           if (player && !player.src.includes(j.id)) selectJob(j, { quiet: true });
         }
       }
+      syncMergeToolbar();
+      void pollFilmPlan();
     } catch {
       /* ignore */
     }
@@ -5527,7 +6205,7 @@
     const sel = $("lora-select");
     if (!sel) return;
     const prev = state.loraApplied && state.loraId ? state.loraId : sel.value || state.loraId || "";
-    const catalog = state.loraCatalog || [];
+    const catalog = visibleLoraCatalog();
     sel.innerHTML = "";
     if (!catalog.length) {
       const opt = document.createElement("option");
@@ -5568,7 +6246,7 @@
   function fillLoraShop() {
     const box = $("lora-shop");
     if (!box) return;
-    const catalog = (state.loraCatalog || []).filter((spec) => spec && spec.file);
+    const catalog = visibleLoraCatalog().filter((spec) => spec && spec.file);
     const busyId = state.loraDownload?.busy ? state.loraDownload.id : "";
     box.innerHTML = "";
     catalog.forEach((spec) => {
@@ -5704,6 +6382,10 @@
       const data = await fetch("/api/loras").then((r) => r.json());
       state.loraCatalog = data.loras || [];
       state.loraDownload = data.download || {};
+      if (typeof data.adult_content_enabled === "boolean") {
+        state.adultContentEnabled = data.adult_content_enabled;
+        syncAdultContentUi();
+      }
       fillLoraSelect();
     } catch {
       /* until Studio restart */
@@ -5751,6 +6433,10 @@
 
   async function applyLora() {
     const spec = currentLoraSpec();
+    if (spec && isAdultLoraSpec(spec) && !state.adultContentEnabled) {
+      toast(tt("settings.adultNeedEnable"));
+      return;
+    }
     state.loraId = spec?.id || "";
     if (!spec || !spec.file) {
       state.loraApplied = false;
@@ -5883,6 +6569,10 @@
     if (!id) return;
     let spec = (state.loraCatalog || []).find((x) => x.id === id);
     if (!spec) return;
+    if (isAdultLoraSpec(spec) && !state.adultContentEnabled) {
+      toast(tt("settings.adultNeedEnable"));
+      return;
+    }
     if ($("lora-select")) $("lora-select").value = id;
     if ($("cinema-lora-select")) $("cinema-lora-select").value = id;
     state.loraId = id;
@@ -6114,24 +6804,30 @@
   }
 
   $("btn-open-cinema")?.addEventListener("click", () => void openCinemaStudio());
+  $("btn-open-cinema-landing")?.addEventListener("click", () => void openCinemaStudio());
+  $("workspace-switch")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-ws]");
+    if (!btn) return;
+    e.preventDefault();
+    setStudioWorkspace(btn.dataset.ws);
+  });
   $("btn-cinema")?.addEventListener("click", () => {
-    setProduceMode("cinema");
+    setStudioWorkspace("director");
     void openCinemaStudio();
   });
   $("btn-cinema-close")?.addEventListener("click", () => closeCinemaStudio());
-  $("btn-cinema-ingest")?.addEventListener("click", () => void ingestCinemaRole());
-  $("btn-cinema-director")?.addEventListener("click", () => void runCinemaDirector());
-  $("btn-cinema-generate-shots")?.addEventListener("click", () => void generateCinemaShots());
+  $("btn-cinema-plan")?.addEventListener("click", () => void planCinemaWithDirector());
+  $("cinema-studio-mode")?.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-cinemamode]");
+    if (!btn) return;
+    setCinemaStudioMode(btn.dataset.cinemamode);
+  });
   $("prompt-rewriter-enabled")?.addEventListener("change", () => {
     void saveProduction({ quiet: true });
   });
   (async () => {
     await refreshPromptRewriterStatus();
   })();
-  $("cinema-role-script")?.addEventListener("change", () => {
-    ensureCinema().role_script = $("cinema-role-script").value || "";
-    void saveCinema(true);
-  });
   $("btn-cinema-add-char")?.addEventListener("click", () => void addCinemaAsset("character"));
   $("btn-cinema-add-loc")?.addEventListener("click", () => void addCinemaAsset("location"));
   $("view-cinema")?.addEventListener("click", (e) => {
@@ -6146,12 +6842,12 @@
   $("btn-cinema-add-cont")?.addEventListener("click", () => addCinemaShot("continue"));
   $("btn-cinema-save")?.addEventListener("click", () => void saveCinema(false));
   $("btn-cinema-produce")?.addEventListener("click", () => void produceCinema());
-  $("cinema-title")?.addEventListener("change", () => {
-    ensureCinema().title = $("cinema-title").value;
-    void saveCinema(true);
-  });
   $("cinema-duration")?.addEventListener("change", () => {
     ensureCinema().duration = Number($("cinema-duration").value) || 5;
+    void saveCinema(true);
+  });
+  $("cinema-title")?.addEventListener("change", () => {
+    ensureCinema().title = $("cinema-title").value;
     void saveCinema(true);
   });
   $("cinema-steps")?.addEventListener("change", () => {
@@ -6183,7 +6879,9 @@
     void deleteUploadedMusic(cinemaAudio().score_id, "cinema");
   });
   $("btn-cinema-concat")?.addEventListener("click", () => void concatCinemaFilm());
-  $("btn-gallery-concat")?.addEventListener("click", () => void concatCinemaFilm());
+  $("btn-gallery-concat")?.addEventListener("click", () => onGalleryConcatClick());
+  $("btn-gallery-merge-cancel")?.addEventListener("click", () => exitGalleryMergeMode());
+  $("btn-merge-clips")?.addEventListener("click", () => void enterGalleryMergeMode({}));
   $("btn-cinema-film-new")?.addEventListener("click", () => {
     void cinemaFilmAction("new")
       .then(() => toast(tt("cinema.filmNew")))
@@ -6846,7 +7544,10 @@
     $("view-gallery")?.classList.remove("hidden");
     void renderGallery();
   });
-  $("btn-gallery-close")?.addEventListener("click", () => $("view-gallery")?.classList.add("hidden"));
+  $("btn-gallery-close")?.addEventListener("click", () => {
+    exitGalleryMergeMode();
+    $("view-gallery")?.classList.add("hidden");
+  });
   $("btn-settings")?.addEventListener("click", () => {
     setDirectorLlmOpen(false);
     $("view-gallery")?.classList.add("hidden");
@@ -6859,6 +7560,8 @@
   });
   $("btn-h3-models-save")?.addEventListener("click", () => void saveH3Models(false));
   $("btn-h3-models-reset")?.addEventListener("click", () => void saveH3Models(true));
+  $("btn-adult-enable")?.addEventListener("click", () => void setAdultContentEnabled(true));
+  $("btn-adult-disable")?.addEventListener("click", () => void setAdultContentEnabled(false));
   $("btn-settings-close")?.addEventListener("click", () => {
     void saveNotifySettings({ quiet: true });
     $("view-settings")?.classList.add("hidden");
@@ -7134,6 +7837,8 @@
   $("btn-director-reset")?.addEventListener("click", () => void resetDirectorSession());
 
   document.addEventListener("h3-lang", () => {
+    ensureCinema();
+    refreshStudioWorkspaceChrome();
     syncProjectChips();
     refreshModeHints();
     updateProjectAudioHint();
@@ -7187,6 +7892,7 @@
 
   setQuality(state.quality);
   setProduceMode("t2v");
+  setStudioWorkspace("scene");
   // Açılış / yenileme: player hattı sıfır; Comfy kuyruğuna dokunulmaz
   clearPlayer({ quiet: true });
   setDirectorOpen(false);
@@ -7197,7 +7903,7 @@
   pollSystem();
   refreshJobs();
   void loadDirectorSessions().then(() => refreshDirectorStatus());
-  void loadLoras();
+  void loadStudioSettings().then(() => loadLoras());
   syncDirectorDockHeight();
   window.addEventListener("resize", syncDirectorDockHeight);
   setInterval(syncDirectorDockHeight, 2000);

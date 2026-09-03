@@ -134,7 +134,7 @@ _DEFAULT_AUDIO: dict[str, str] = {
     "mode": "film",
     "score_id": "",
     "score_name": "",
-    "voice_lang": "Turkish",
+    "voice_lang": "English",
     "last_batch": "",
 }
 
@@ -155,6 +155,7 @@ _EMPTY: dict[str, Any] = {
     "seed_lock": False,
     "characters": [],
     "locations": [],
+    "film_plan": None,
     "updated_at": 0,
 }
 
@@ -172,7 +173,7 @@ def _clean_audio(raw: Any) -> dict[str, str]:
         "mode": mode,
         "score_id": str(src.get("score_id") or "").strip(),
         "score_name": str(src.get("score_name") or "").strip(),
-        "voice_lang": str(src.get("voice_lang") or "Turkish").strip() or "Turkish",
+        "voice_lang": str(src.get("voice_lang") or "English").strip() or "English",
         "last_batch": str(src.get("last_batch") or "").strip(),
     }
     muxed = str(src.get("auto_muxed") or "").strip()
@@ -276,6 +277,8 @@ def load() -> dict[str, Any]:
     data["seed_lock"] = bool(data.get("seed_lock"))
     if not data.get("script"):
         data["script"] = "\n\n---\n\n".join(s["text"] for s in data["shots"] if s.get("text"))
+    fp = data.get("film_plan")
+    data["film_plan"] = _clean_film_plan(fp) if isinstance(fp, dict) else None
     return data
 
 
@@ -655,7 +658,7 @@ def film_audio_preamble(audio: Optional[dict[str, Any]] = None) -> str:
     audio = _clean_audio(audio or {})
     if audio.get("mode") == "silent":
         return ""
-    lang = audio.get("voice_lang") or "Turkish"
+    lang = audio.get("voice_lang") or "English"
     return (
         f"Spoken dialogue uses <d>[{lang}] line</d> tags with lipsync. "
         "The same named person must sound identical in every shot. "
@@ -728,6 +731,49 @@ def apply_look(text: str, look: str) -> str:
     return f"{look}\n\n{text}".strip()
 
 
+def character_ids_in_text(text: str, lib: Optional[dict[str, Any]] = None) -> set[str]:
+    """Cinema character asset ids mentioned in shot text (name / trigger / still name)."""
+    out: set[str] = set()
+    for h in match_prompt(text or "", lib):
+        if h.get("kind") != "character":
+            continue
+        uid = str(h.get("id") or h.get("name") or "").strip()
+        if uid:
+            out.add(uid)
+    return out
+
+
+def apply_reentry_modes(
+    shots: list[dict[str, Any]],
+    lib: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """Hard-cut (t2v) when a shot has no character continuity with the previous shot.
+
+    Same beat / same cast overlap → keep continue. Cutaway or different cast with
+    no overlap → t2v so last-frame drift does not steal character identity.
+    """
+    lib = lib or load()
+    out: list[dict[str, Any]] = []
+    prev: set[str] = set()
+    for i, raw in enumerate(shots or []):
+        if not isinstance(raw, dict):
+            continue
+        shot = dict(raw)
+        text = str(shot.get("text") or shot.get("h3Prompt") or "")
+        curr = character_ids_in_text(text, lib)
+        mode = str(shot.get("mode") or ("t2v" if i == 0 else "continue")).lower()
+        if mode in ("devam", "i2v", "last_frame"):
+            mode = "continue"
+        if i == 0:
+            mode = "t2v"
+        elif curr and not (curr & prev):
+            mode = "t2v"
+        shot["mode"] = mode
+        out.append(shot)
+        prev = curr
+    return out
+
+
 def normalize_produce_shots(
     raw_shots: Any = None,
     script: str = "",
@@ -795,6 +841,158 @@ def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: lis
         if key not in order:
             order.append(key)
     return [by_key[k] for k in order if k in by_key]
+
+
+def _portrait_file(value: Any) -> str:
+    file = str(value or "").strip()
+    if not file or file.startswith("preview:"):
+        return ""
+    return file
+
+
+def character_portrait_files(asset: Any) -> list[str]:
+    """Uploaded character still filenames (not location plates, not blob previews)."""
+    if not isinstance(asset, dict):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for im in asset.get("images") or []:
+        file = ""
+        if isinstance(im, dict):
+            file = _portrait_file(im.get("file") or im.get("image"))
+        elif isinstance(im, str):
+            file = _portrait_file(im)
+        if file and file not in seen:
+            seen.add(file)
+            out.append(file)
+    leftover = _portrait_file(asset.get("image"))
+    if leftover and leftover not in seen:
+        out.append(leftover)
+    return out
+
+
+def bound_character_portraits(text: str, lib: Optional[dict[str, Any]] = None) -> list[str]:
+    """Portrait files for character cards actually named in this prompt."""
+    files: list[str] = []
+    seen: set[str] = set()
+    for hit in match_prompt(text, lib):
+        if hit.get("kind") != "character":
+            continue
+        for file in character_portrait_files(hit):
+            if file not in seen:
+                seen.add(file)
+                files.append(file)
+    return files
+
+
+def characters_missing_stills(lib: Optional[dict[str, Any]] = None) -> list[str]:
+    """Character names with no uploaded stills (face lock weaker without them)."""
+    lib = lib or load()
+    missing: list[str] = []
+    for ch in lib.get("characters") or []:
+        if not isinstance(ch, dict):
+            continue
+        name = str(ch.get("name") or "").strip()
+        if not name:
+            continue
+        if not character_portrait_files(ch):
+            missing.append(name)
+    return missing
+
+
+def _clean_film_plan(raw: Any) -> dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    try:
+        total_sec = max(1, int(src.get("total_sec") or 60))
+    except (TypeError, ValueError):
+        total_sec = 60
+    try:
+        clip_sec = int(src.get("clip_sec") or 5)
+    except (TypeError, ValueError):
+        clip_sec = 5
+    if clip_sec not in (4, 5, 6, 8, 10, 15):
+        clip_sec = 5
+    try:
+        segment_size = max(1, min(8, int(src.get("segment_size") or 6)))
+    except (TypeError, ValueError):
+        segment_size = 6
+    segments = src.get("segments") if isinstance(src.get("segments"), list) else []
+    clean_segments: list[list[dict[str, Any]]] = []
+    for seg in segments:
+        if not isinstance(seg, list):
+            continue
+        row = [_clean_shot(s, i) for i, s in enumerate(seg) if isinstance(s, dict)]
+        row = [s for s in row if s.get("text")]
+        if row:
+            clean_segments.append(row)
+    try:
+        current = max(0, int(src.get("current_segment") or 0))
+    except (TypeError, ValueError):
+        current = 0
+    status = str(src.get("status") or "idle").strip().lower() or "idle"
+    if status not in ("idle", "producing", "done", "concat"):
+        status = "idle"
+    return {
+        "total_sec": total_sec,
+        "clip_sec": clip_sec,
+        "segment_size": segment_size,
+        "shot_count": int(src.get("shot_count") or sum(len(s) for s in clean_segments)),
+        "segment_count": len(clean_segments),
+        "segments": clean_segments,
+        "current_segment": current,
+        "segment_batches": [str(x) for x in (src.get("segment_batches") or []) if str(x).strip()],
+        "segment_job_ids": [
+            [str(j) for j in row if str(j).strip()]
+            for row in (src.get("segment_job_ids") or [])
+            if isinstance(row, list)
+        ],
+        "auto_concat": bool(src.get("auto_concat", True)),
+        "concat_done": bool(src.get("concat_done")),
+        "final_batch_id": str(src.get("final_batch_id") or "").strip(),
+        "status": status,
+    }
+
+
+def split_film_segments(
+    shots: list[dict[str, Any]], segment_size: int = 6
+) -> list[list[dict[str, Any]]]:
+    size = max(1, min(8, int(segment_size or 6)))
+    rows = [_clean_shot(s, i) for i, s in enumerate(shots or []) if isinstance(s, dict)]
+    rows = [s for s in rows if s.get("text")]
+    if not rows:
+        return []
+    out: list[list[dict[str, Any]]] = []
+    for i in range(0, len(rows), size):
+        out.append(rows[i : i + size])
+    return out
+
+
+def build_film_plan(
+    shots: list[dict[str, Any]],
+    *,
+    total_sec: int = 60,
+    clip_sec: int = 10,
+    segment_size: int = 6,
+    auto_concat: bool = True,
+) -> dict[str, Any]:
+    segments = split_film_segments(shots, segment_size)
+    return _clean_film_plan(
+        {
+            "total_sec": total_sec,
+            "clip_sec": clip_sec,
+            "segment_size": segment_size,
+            "shot_count": sum(len(s) for s in segments),
+            "segment_count": len(segments),
+            "segments": segments,
+            "current_segment": 0,
+            "segment_batches": [],
+            "segment_job_ids": [],
+            "auto_concat": auto_concat,
+            "concat_done": False,
+            "final_batch_id": "",
+            "status": "idle",
+        }
+    )
 
 
 def ingest_from_director_brief(brief: dict[str, Any], role_script: str = "") -> dict[str, Any]:

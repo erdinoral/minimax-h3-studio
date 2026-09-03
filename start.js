@@ -11,11 +11,14 @@ module.exports = {
       params: {
         venv: "env",
         env: {
-          TOKENIZERS_PARALLELISM: "false"
+          TOKENIZERS_PARALLELISM: "false",
+          // Windows + redirected stderr: tqdm \r can raise OSError [Errno 22].
+          // TQDM_DISABLE is not honored by all tqdm builds — comfy_boot.py force-disables bars.
+          PYTHONIOENCODING: "utf-8"
         },
         path: "app",
         message: [
-          "python main.py --listen 127.0.0.1 --disable-auto-launch"
+          "python ../comfy_boot.py --listen 127.0.0.1 --disable-auto-launch"
         ],
         on: [{
           // Loosened: just look for any http://host:port anywhere in the line,

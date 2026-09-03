@@ -142,14 +142,11 @@ SILENT_MUSIC_VIDEO_LOCK = (
     "One continuous shot, no cuts, no dialogue, silent."
 )
 
-# Short film / ad / trailer / social: dialogue + diegetic SFX only (one H3 audio track).
-NO_BGM_AUDIO_LOCK = (
-    "AUDIO POLICY — NO MUSIC / NO SCORE: no background music, no BGM, no soundtrack, "
-    "no non-diegetic underscore, no phonk/techno/orchestral bed, no singing. "
-    "Allowed audio only: (1) spoken dialogue in <d>[Lang]…</d> tags with lipsync, "
-    "(2) diegetic environmental and action SFX — footsteps, wind, rain, vehicles, "
-    "weapons, swords, gunfire, impacts, debris, explosions, cloth, breath, room tone. "
-    "Keep the mix dry and diegetic; do not invent a song."
+# Formerly appended a long "AUDIO POLICY" block to every prompt. Models ignored it
+# (and often treated the SFX list as content to invent). Do not reinject it.
+_AUDIO_POLICY_BLOCK = re.compile(
+    r"(?:\n\s*)*AUDIO POLICY\s*[—\-].*?(?=\n\n|\Z)",
+    re.I | re.S,
 )
 
 _DIALOGUE_LANGS = (
@@ -263,19 +260,15 @@ def ensure_dialogue_in_h3_prompt(
 
 
 def apply_audio_policy(prompt: str, brief: dict[str, Any]) -> str:
-    """Silent music-video locks, or dialogue+SFX-only (no BGM) for other purposes."""
+    """Music-video silent lock only. Strip legacy AUDIO POLICY blobs; do not re-append them."""
     silent = _is_silent_brief(brief)
-    p = (prompt or "").strip()
+    p = _AUDIO_POLICY_BLOCK.sub("", (prompt or "").strip()).strip()
     if silent:
         low = p.lower()
         if "silent visual only" in low or "no generated music" in low:
             return p
         return (p + "\n\n" + SILENT_MUSIC_VIDEO_LOCK).strip()
-    p = upgrade_inline_dialogue_tags(p)
-    low = p.lower()
-    if "audio policy — no music" in low or "no background music, no bgm" in low:
-        return p
-    return (p + "\n\n" + NO_BGM_AUDIO_LOCK).strip()
+    return upgrade_inline_dialogue_tags(p)
 
 
 def system_prompt() -> str:
@@ -317,7 +310,7 @@ Kullanıcı shot düzenletiyorsa TÜM brief'i baştan yazma. Sadece değişen sh
     "shot": 3,
     "camera": "low tracking 35mm",
     "action": "kısa özet",
-    "dialogue": ["<d>[Turkish] …</d>"],
+    "dialogue": ["<d>[English] …</d>"],
     "h3Prompt": "FULL SCENE body for that shot only"
   }
 }
@@ -325,8 +318,557 @@ Kullanıcı shot düzenletiyorsa TÜM brief'i baştan yazma. Sadece değişen sh
 
 Birden fazla shot: `"patches": [{ "shot": 2, ... }, { "shot": 5, ... }]`.
 `shot` 1-indexed. h3Prompt kalitesi GOLD STANDARD (continue lock shot 2+).
+**Kamera / açı değişince** `camera` alanını güncelle VE `h3Prompt` içindeki `The camera:` paragrafını aynı çerçeveyle yeniden yaz — eski açıyı bırakma.
+Kullanıcı global açı istediğinde (`hep low angle`, `her shot farklı açı`) tüm outline / patch'lerde bunu uygula.
 Türkçe `reply` ile ne değiştiğini söyle. Üretime alma, kuyruk yok.
 """
+
+DEFAULT_CAMERA = "eye-level medium, subtle push-in, 35mm"
+
+GENERIC_CAMERAS = frozenset(
+    {
+        DEFAULT_CAMERA.lower(),
+        "eye-level medium shot, subtle push-in, 35mm",
+    }
+)
+
+CAMERA_VARIETY: tuple[str, ...] = (
+    "low angle slow push-in, 35mm, shallow depth of field",
+    "tight medium close-up with subtle lateral drift, 50mm",
+    "high angle wide establishing, 24mm, deep focus",
+    "slow circular orbit at medium distance, 35mm",
+    "low tracking shot parallel to the subject, 35mm",
+    "pull-back reveal from medium to wide, 35mm",
+    "over-the-shoulder handheld, 40mm, shallow depth of field",
+    "Dutch angle medium shot with slow push, 32mm",
+    "bird's-eye top-down descending, wide lens",
+    "extreme close-up on eyes or hands, 85mm shallow depth of field",
+)
+
+_ORDINAL_SHOT = {
+    "birinci": 1,
+    "ikinci": 2,
+    "üçüncü": 3,
+    "ucuncu": 3,
+    "dördüncü": 4,
+    "dorduncu": 4,
+    "beşinci": 5,
+    "besinci": 5,
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+}
+
+_CAMERA_TOPIC = re.compile(
+    r"(?:"
+    r"low\s*angle|high\s*angle|bird['\s-]*s?\s*eye|dutch|close[\s-]*up|extreme\s+close|"
+    r"wide\s+shot|medium\s+shot|over[\s-]*the[\s-]*shoulder|tracking|orbit|push[\s-]*in|"
+    r"pull[\s-]*back|handheld|pov|üstten|alttan|geniş\s+plan|yakın\s+plan|"
+    r"kuşbakışı|kuş\s*bakışı|karşıdan|karşı|önden|yüzüne|yüzüme|"
+    r"açı|kamera|framing|lens|35mm|50mm|24mm|85mm|anamorphic"
+    r")",
+    re.I,
+)
+
+_VARY_ANGLES = re.compile(
+    r"(?:"
+    r"farklı\s+açı|her\s+shot.{0,24}açı|çeşitli\s+kamera|açı\s+değiştir|"
+    r"vary.{0,12}(?:angle|camera)|different.{0,20}(?:angle|camera|framing)|"
+    r"rotate.{0,12}camera|never\s+same\s+(?:angle|camera)"
+    r")",
+    re.I,
+)
+
+
+def _is_generic_camera(camera: Any) -> bool:
+    c = str(camera or "").strip().lower()
+    if not c:
+        return True
+    if c in GENERIC_CAMERAS:
+        return True
+    return "eye-level medium" in c and "35mm" in c and "push" in c
+
+
+def _strip_user_prefix(text: str) -> str:
+    t = str(text or "").strip()
+    t = re.sub(r"^\[proje:[^\]]+\]\s*", "", t, flags=re.I)
+    t = re.sub(r"^\[sinema stüdyosu\]\s*", "", t, flags=re.I)
+    return t.strip()
+
+
+def extract_director_directives(messages: list[Any]) -> dict[str, Any]:
+    """Mine user chat for camera / framing directives (global, per-shot, vary)."""
+    global_camera = ""
+    per_shot: dict[int, str] = {}
+    vary_angles = False
+    notes: list[str] = []
+
+    for m in messages or []:
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        raw = _strip_user_prefix(str(m.get("content") or ""))
+        if not raw or not _CAMERA_TOPIC.search(raw):
+            if _VARY_ANGLES.search(raw):
+                vary_angles = True
+                notes.append(raw[:500])
+            continue
+        notes.append(raw[:500])
+        if _VARY_ANGLES.search(raw):
+            vary_angles = True
+
+        for m2 in re.finditer(
+            r"(?:shot|plan)\s*#?\s*(\d+)|(\d+)\s*[\.)]\s*(?:shot|plan)",
+            raw,
+            flags=re.I,
+        ):
+            idx = int(m2.group(1) or m2.group(2) or 0)
+            if idx < 1:
+                continue
+            tail = raw[m2.end() : m2.end() + 160].strip(" :—-.,;")
+            per_shot[idx] = tail or raw[:200]
+
+        for m2 in re.finditer(
+            r"\b(birinci|ikinci|üçüncü|ucuncu|dördüncü|dorduncu|beşinci|besinci|"
+            r"first|second|third|fourth|fifth)\s+(?:shot|plan)\b",
+            raw,
+            flags=re.I,
+        ):
+            idx = _ORDINAL_SHOT.get(m2.group(1).lower(), 0)
+            if idx < 1:
+                continue
+            tail = raw[m2.end() : m2.end() + 160].strip(" :—-.,;")
+            per_shot[idx] = tail or raw[:200]
+
+        if re.search(
+            r"(?:hep|her\s+zaman|always|tüm\s+shot|all\s+shots|every\s+shot|bütün)",
+            raw,
+            flags=re.I,
+        ):
+            global_camera = raw[:240]
+
+    return {
+        "globalCamera": global_camera,
+        "perShot": per_shot,
+        "varyAngles": vary_angles,
+        "notes": notes[-8:],
+    }
+
+
+def merge_session_directives(
+    brief: dict[str, Any],
+    sess: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    out = dict(brief or {})
+    messages = list((sess or {}).get("messages") or [])
+    directives = extract_director_directives(messages)
+    if directives.get("notes") or directives.get("globalCamera") or directives.get("perShot"):
+        out["directorDirectives"] = directives
+    elif out.get("directorDirectives"):
+        directives = out["directorDirectives"]
+    else:
+        out = merge_user_scene_into_brief(out, sess)
+        return out
+    outline = normalize_shot_outline(out)
+    if outline:
+        need = int(out.get("expectedShotCount") or len(outline) or 0)
+        outline = apply_directives_to_outline(outline, directives, need)
+        outline = diversify_outline_cameras(outline, directives)
+        out["shotOutline"] = outline
+    out = merge_user_scene_into_brief(out, sess)
+    return out
+
+
+def format_directives_block(directives: Optional[dict[str, Any]]) -> str:
+    if not isinstance(directives, dict):
+        return ""
+    parts: list[str] = []
+    if directives.get("varyAngles"):
+        parts.append(
+            "VARY CAMERA: use a different height/lens/movement on EVERY shot — "
+            "never repeat the same framing twice in a row."
+        )
+    if directives.get("globalCamera"):
+        parts.append(f"GLOBAL CAMERA LOCK: {directives['globalCamera']}")
+    per = directives.get("perShot") or {}
+    if isinstance(per, dict) and per:
+        lines = [f"  shot {k}: {v}" for k, v in sorted(per.items(), key=lambda x: int(x[0]))]
+        parts.append("PER-SHOT CAMERA (exact):\n" + "\n".join(lines))
+    notes = directives.get("notes") or []
+    if notes:
+        parts.append(
+            "USER CAMERA / FRAMING NOTES (highest priority — obey exactly):\n"
+            + "\n---\n".join(str(n) for n in notes[-4:])
+        )
+    if not parts:
+        return ""
+    return "\n## DIRECTOR CAMERA DIRECTIVES (mandatory)\n" + "\n".join(parts) + "\n"
+
+
+def camera_for_outline_index(
+    index: int,
+    *,
+    directives: Optional[dict[str, Any]] = None,
+    row: Optional[dict[str, Any]] = None,
+) -> str:
+    """Resolve camera string for outline row `index` (0-based)."""
+    d = directives or {}
+    per = d.get("perShot") if isinstance(d.get("perShot"), dict) else {}
+    if per.get(index + 1):
+        return str(per[index + 1]).strip()
+    row_cam = str((row or {}).get("camera") or "").strip()
+    if row_cam and not _is_generic_camera(row_cam):
+        return row_cam
+    if d.get("globalCamera"):
+        return str(d["globalCamera"]).strip()
+    if d.get("varyAngles") or not row_cam or _is_generic_camera(row_cam):
+        return CAMERA_VARIETY[index % len(CAMERA_VARIETY)]
+    return row_cam or DEFAULT_CAMERA
+
+
+def apply_directives_to_outline(
+    outline: list[dict[str, Any]],
+    directives: Optional[dict[str, Any]],
+    need: int,
+) -> list[dict[str, Any]]:
+    if not outline:
+        return outline
+    d = directives or {}
+    out: list[dict[str, Any]] = []
+    for i, row in enumerate(outline):
+        r = dict(row)
+        r["camera"] = camera_for_outline_index(i, directives=d, row=r)
+        out.append(r)
+    return out[:need] if need else out
+
+
+def diversify_outline_cameras(
+    outline: list[dict[str, Any]],
+    directives: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """When every row still shares the generic default, assign variety."""
+    if not outline:
+        return outline
+    d = directives or {}
+    if d.get("globalCamera") and not d.get("varyAngles"):
+        cam = str(d["globalCamera"]).strip()
+        return [{**row, "camera": cam} for row in outline]
+    cams = [str(r.get("camera") or "").strip() for r in outline]
+    if len(outline) > 1 and all(_is_generic_camera(c) for c in cams):
+        return [
+            {**row, "camera": CAMERA_VARIETY[i % len(CAMERA_VARIETY)]}
+            for i, row in enumerate(outline)
+        ]
+    if d.get("varyAngles") and len(outline) > 1:
+        seen: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for i, row in enumerate(outline):
+            r = dict(row)
+            cam = camera_for_outline_index(i, directives=d, row=r)
+            if cam.lower() in seen:
+                cam = CAMERA_VARIETY[i % len(CAMERA_VARIETY)]
+            seen.add(cam.lower())
+            r["camera"] = cam
+            out.append(r)
+        return out
+    return outline
+
+
+def ensure_camera_in_h3_prompt(body: str, camera: str, *, force: bool = False) -> str:
+    """Inject or replace the camera paragraph so h3Prompt matches shot.camera."""
+    cam = str(camera or "").strip()
+    text = str(body or "").strip()
+    if not text or not cam or _is_generic_camera(cam):
+        return text
+    core = cam.lower()[:28]
+    if not force and core in text.lower():
+        return text
+    cam_line = f"The camera: {cam}."
+    replaced = re.sub(
+        r"The camera:\s*[^\n]+",
+        cam_line,
+        text,
+        count=1,
+        flags=re.I,
+    )
+    if replaced != text:
+        return replaced
+    for marker in (
+        "One continuous shot",
+        "Photorealistic",
+        "Stay locked in this look",
+        "Diegetic soundscape",
+    ):
+        pos = text.find(marker)
+        if pos > 40:
+            return text[:pos].rstrip() + "\n\n" + cam_line + "\n\n" + text[pos:]
+    return text.rstrip() + "\n\n" + cam_line
+
+
+def sync_shot_outline_from_shots(brief: dict[str, Any]) -> dict[str, Any]:
+    """Keep shotOutline.camera aligned when shots are patched in Plan mode."""
+    out = dict(brief or {})
+    shots = out.get("shots") if isinstance(out.get("shots"), list) else []
+    outline = normalize_shot_outline(out)
+    if not outline and not shots:
+        return out
+    need = int(out.get("expectedShotCount") or len(shots) or len(outline) or 0)
+    merged: list[dict[str, Any]] = []
+    for i in range(max(need, len(outline), len(shots))):
+        row = dict(outline[i]) if i < len(outline) else {
+            "index": i + 1,
+            "title": f"Shot {i + 1}",
+            "beat": "",
+            "camera": DEFAULT_CAMERA,
+        }
+        if i < len(shots) and isinstance(shots[i], dict):
+            s = shots[i]
+            if s.get("camera"):
+                row["camera"] = str(s["camera"]).strip()
+            if s.get("action"):
+                row["beat"] = str(s["action"]).strip()
+            body = str(s.get("h3Prompt") or "").strip()
+            if body and not row.get("beat"):
+                row["beat"] = body[:160]
+        row["index"] = i + 1
+        merged.append(row)
+    if need:
+        merged = merged[:need]
+    out["shotOutline"] = merged
+    return out
+
+
+def parse_camera_from_text(text: str) -> str:
+    """Map TR/EN framing hints to a concrete camera line."""
+    t = str(text or "").lower()
+    if re.search(
+        r"kar[sş]idan|karsidan|karşı\s+karşı|önünden|yüzüme|yüzüne|yuzume|yuzune|"
+        r"frontal|facing\s+(?:the\s+)?camera|head[\s-]*on",
+        t,
+    ):
+        return (
+            "frontal medium shot, subject facing camera directly, eye-level, "
+            "50mm, shallow depth of field — subject looks into lens throughout"
+        )
+    if re.search(r"kuşbakış|bird['\s-]*s?\s*eye|üstten", t):
+        return "high angle bird's-eye descending, wide lens, deep focus"
+    if re.search(r"alttan|low\s*angle", t):
+        return "low angle slow push-in, 35mm, shallow depth of field"
+    if re.search(r"yakın\s+plan|close[\s-]*up|extreme\s+close", t):
+        return "tight close-up, 85mm, shallow depth of field, subtle drift"
+    if re.search(r"geniş\s+plan|wide\s+shot", t):
+        return "wide establishing shot, 24mm, deep focus, slow push-in"
+    return ""
+
+
+def scene_action_english_hint(text: str) -> str:
+    """Best-effort English beat from a short TR/EN user scene line."""
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    if not re.search(r"[ğüşıöçĞÜŞİÖÇ]", raw):
+        return raw
+    t = raw.lower()
+    subject = "The subject"
+    if re.search(r"rus\s+(?:k[iı]z|kad[iı]n)|russian\s+(?:girl|woman)", t):
+        subject = "A young Russian woman"
+    props = ""
+    if re.search(r"nargile|hookah|shisha", t):
+        props = " beside a lit hookah with a glass base and hose"
+    actions: list[str] = []
+    if re.search(r"içecek|iccek|icecek|çekecek|cek|inhale|draw", t):
+        actions.append(
+            "lifts the hose mouthpiece to her lips and draws a smooth, controlled inhale — "
+            "cheeks softly hollow, throat calm, eyes steady on camera"
+        )
+    if re.search(r"salacak|verecek|püskür|pusur|exhale|release", t):
+        actions.append(
+            "holds the smoke a beat, then exhales toward camera: a thick ribbon of white smoke "
+            "blooms forward, curling in the practical light before drifting apart"
+        )
+    if not actions:
+        actions.append("performs the described action clearly in one continuous take")
+    env = ""
+    if re.search(r"nargile|hookah", t):
+        env = (
+            "Hookah water bubbles faintly in the base; charcoal glows; "
+            "ambient room tone and soft exhale SFX only — no music."
+        )
+    lead = f"{subject}{props}"
+    if len(actions) == 1:
+        line = f"{lead} {actions[0]}"
+    else:
+        line = f"{lead} {actions[0]}. Then she " + ". Then she ".join(actions[1:])
+    return (line + (f" {env}" if env else "")).strip()
+
+
+def extract_user_scene_intent(messages: list[Any]) -> dict[str, Any]:
+    """Last substantive user line → scene beat, camera, single-shot hint."""
+    text = ""
+    for m in reversed(messages or []):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        cand = _strip_user_prefix(str(m.get("content") or ""))
+        if len(cand) >= 12:
+            text = cand
+            break
+    if not text:
+        return {}
+    camera = parse_camera_from_text(text)
+    beat_en = scene_action_english_hint(text)
+    simple = not re.search(
+        r"\d+\s*(?:shot|sahne|klip)|shot\s*#?\s*\d|dakika|minute\b|\bfilm\b",
+        text,
+        flags=re.I,
+    )
+    return {
+        "raw": text,
+        "beat": beat_en or text,
+        "camera": camera,
+        "simpleSingleShot": bool(simple),
+        "logline": beat_en or text,
+    }
+
+
+def merge_user_scene_into_brief(
+    brief: dict[str, Any],
+    sess: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Fold the user's literal scene description into brief + outline (not generic arcs)."""
+    intent = extract_user_scene_intent((sess or {}).get("messages") or [])
+    if not intent.get("raw"):
+        return brief
+    out = dict(brief or {})
+    out["sceneIntent"] = intent
+    ll = str(out.get("logline") or "").strip()
+    generic = (
+        not ll
+        or "fixed character music video" in ll.lower()
+        or "scene lighting and blocking evolve" in ll.lower()
+        or len(ll) < 12
+    )
+    if generic:
+        out["logline"] = str(intent.get("logline") or intent["raw"])[:400]
+    clip = int(out.get("clipDurationSec") or 5)
+    if clip not in CLIP_DURATIONS:
+        clip = 5
+    explicit_need = None
+    blob = "\n".join(
+        _strip_user_prefix(str(m.get("content") or ""))
+        for m in (sess or {}).get("messages") or []
+        if isinstance(m, dict) and m.get("role") == "user"
+    )
+    _tot, need_from_user = infer_duration_and_shots(blob, clip_sec=clip)
+    try:
+        if out.get("expectedShotCount") is not None:
+            explicit_need = int(out["expectedShotCount"])
+    except (TypeError, ValueError):
+        explicit_need = None
+    # Single concrete scene → default 1 shot unless user asked for N shots
+    if intent.get("simpleSingleShot") and not need_from_user:
+        out["expectedShotCount"] = 1
+        out["totalDurationSec"] = clip
+    elif need_from_user:
+        out["expectedShotCount"] = int(need_from_user)
+        out["totalDurationSec"] = max(
+            int(out.get("totalDurationSec") or 0),
+            int(need_from_user) * clip,
+        )
+    outline = normalize_shot_outline(out)
+    if not outline:
+        outline = [
+            {
+                "index": 1,
+                "title": "User scene",
+                "beat": intent["beat"],
+                "camera": intent.get("camera") or DEFAULT_CAMERA,
+            }
+        ]
+    else:
+        row = dict(outline[0])
+        row["beat"] = intent["beat"]
+        row["title"] = row.get("title") or "User scene"
+        if intent.get("camera"):
+            row["camera"] = intent["camera"]
+        outline[0] = row
+    need = int(out.get("expectedShotCount") or len(outline) or 1)
+    outline = apply_directives_to_outline(outline, out.get("directorDirectives"), need)
+    if intent.get("camera"):
+        outline[0]["camera"] = intent["camera"]
+    out["shotOutline"] = outline[:need]
+    chars = list(out.get("characters") or [])
+    if not chars and re.search(r"rus\s+(?:k[iı]z|kad[iı]n)", intent["raw"], re.I):
+        out["characters"] = [
+            {
+                "name": "Elena",
+                "description": (
+                    "mid-20s Russian woman, cool striking features, fair skin, "
+                    "loose light blonde hair, emerald-green eyes, simple black turtleneck"
+                ),
+            }
+        ]
+    return out
+
+
+def build_scene_from_intent(
+    *,
+    shot: dict[str, Any],
+    index: int,
+    total: int,
+    brief: dict[str, Any],
+    intent: dict[str, Any],
+) -> str:
+    """English SCENE fallback that follows the user's described action (not beat arcs)."""
+    dur = int(shot.get("durationSec") or brief.get("clipDurationSec") or 5)
+    style = style_craft_line(normalize_style(brief.get("visualStyle")))
+    camera = str(
+        shot.get("camera")
+        or intent.get("camera")
+        or parse_camera_from_text(intent.get("raw") or "")
+        or DEFAULT_CAMERA
+    ).strip()
+    beat = str(intent.get("beat") or intent.get("raw") or "").strip()
+    silent = _is_silent_brief(brief)
+    chars = brief.get("characters") or []
+    char_block = ""
+    if chars and isinstance(chars[0], dict):
+        c0 = chars[0]
+        name = (c0.get("name") or "She").strip()
+        desc = (c0.get("description") or "consistent look").strip()
+        char_block = f"{name}: {desc}. Keep identical face, age, hair, eyes and wardrobe."
+    hookah_block = ""
+    if re.search(r"nargile|hookah|shisha", intent.get("raw") or "", re.I):
+        hookah_block = (
+            "A hookah/nargile with glass base and metal stem sits in frame; "
+            "charcoal glows; water in the base ripples when she draws."
+        )
+    paras = [
+        f"A {style} scene — shot {index + 1} of {total}, one continuous take (~{dur}s).",
+        char_block or "Lead subject holds consistent identity throughout.",
+        hookah_block,
+        f"Action beat (follow exactly, step by step): {beat}",
+        (
+            "She keeps frontal eye contact with lens if frontal framing was requested. "
+            "Hands, mouth, and smoke read clearly — no cutaways, no time jumps."
+        ),
+        f"The camera: {camera}.",
+        (
+            "Diegetic sound only: hookah bubble, soft inhale, exhale rush, room tone — "
+            "no BGM, no score."
+            if not silent
+            else "Silent picture — no dialogue, no SFX, no generated music."
+        ),
+        f"{style}. Cinematic contrast, natural skin texture, realistic smoke volume and light scatter.",
+        (
+            SILENT_MUSIC_VIDEO_LOCK
+            if silent
+            else "One continuous shot, no cuts. No dialogue."
+        ),
+    ]
+    body = "\n\n".join(p for p in paras if p)
+    body = ensure_camera_in_h3_prompt(body, camera, force=True)
+    return apply_audio_policy(body, brief)
 
 
 CINEMA_STUDIO_ADDENDUM = """
@@ -529,6 +1071,14 @@ def apply_shot_patches(brief: dict[str, Any], parsed: dict[str, Any]) -> dict[st
                 cur["dialogue"] = dlg
         shots[idx] = cur
     out["shots"] = shots
+    out = sync_shot_outline_from_shots(out)
+    for s in out.get("shots") or []:
+        if not isinstance(s, dict):
+            continue
+        cam = str(s.get("camera") or "").strip()
+        body = str(s.get("h3Prompt") or "").strip()
+        if cam and body:
+            s["h3Prompt"] = ensure_camera_in_h3_prompt(body, cam, force=True)
     return out
 
 
@@ -568,13 +1118,13 @@ def repair_json_text(text: str) -> str:
     # invalid dialogue keys → dialogue array
     t = re.sub(
         r'"<d>[^"]*</d>"\s*:\s*"([^"]*)"',
-        lambda m: f'"dialogue": ["<d>[Turkish] {m.group(1)}</d>"]',
+        lambda m: f'"dialogue": ["{normalize_dialogue_tag(m.group(1))}"]',
         t,
     )
     # bare Lang dialogue typos
     t = re.sub(
         r'"dialogue"\s*:\s*"([^"]*)"',
-        lambda m: f'"dialogue": ["<d>[Turkish] {m.group(1)}</d>"]',
+        lambda m: f'"dialogue": ["{normalize_dialogue_tag(m.group(1))}"]',
         t,
     )
     # trailing commas
@@ -989,16 +1539,17 @@ def build_scene_placeholder_shot(
     purpose = (brief.get("purpose") or "").lower()
     silent = bool(brief.get("silentAudio")) or purpose in ("music_video", "music-video")
     beat = _BEAT_ARCS[index % len(_BEAT_ARCS)]
+    intent = brief.get("sceneIntent") if isinstance(brief.get("sceneIntent"), dict) else {}
+    if intent.get("beat"):
+        beat = str(intent["beat"])
+    elif intent.get("raw"):
+        beat = scene_action_english_hint(str(intent["raw"])) or str(intent["raw"])
     t0 = index * dur
     t1 = t0 + dur
-    cameras = (
-        "low angle slow push-in, 35mm, shallow depth of field",
-        "tight medium close-up with subtle lateral drift, 50mm",
-        "slow circular orbit at medium distance, 35mm",
-        "low tracking shot parallel to the subject, 35mm",
-        "pull-back reveal from medium to wide, 35mm",
-    )
-    camera = cameras[index % len(cameras)]
+    cameras = CAMERA_VARIETY
+    camera = camera_for_outline_index(index, directives=brief.get("directorDirectives"))
+    if intent.get("camera") and index == 0:
+        camera = str(intent["camera"])
     atmos = (
         "Dark melodic techno-house atmosphere, nocturnal energy, controlled body language."
         if silent or "music" in purpose
@@ -1089,7 +1640,7 @@ def ensure_shot_count_sync(brief: dict[str, Any]) -> dict[str, Any]:
         )
     # Respect optional "force_continue" flag on the brief (default True)
     if brief.get("force_continue", True):
-        shots = force_continue_chain(shots[:need])
+        shots = force_continue_chain(shots[:need], brief)
     else:
         shots = shots[:need]
     # Re-apply rich prompt + audio policy
@@ -1167,7 +1718,7 @@ def build_rich_h3_prompt(
         same_lock_bits.append(f"same {name}")
     style = normalize_style(brief.get("visualStyle"))
     style_txt = style_craft_line(style)
-    camera = (shot.get("camera") or "eye-level medium shot, subtle push-in, 35mm").strip()
+    camera = (shot.get("camera") or DEFAULT_CAMERA).strip()
     action = (shot.get("action") or "").strip()
     sound = (
         shot.get("soundscape")
@@ -1190,6 +1741,7 @@ def build_rich_h3_prompt(
         if link == "continue" and not base.lower().startswith("continue directly"):
             out = "Continue directly from the previous shot.\n\n" + base
         out = ensure_dialogue_in_h3_prompt(out, dlg, silent=silent)
+        out = ensure_camera_in_h3_prompt(out, camera)
         return apply_audio_policy(out, brief)
 
     same_lock = (
@@ -1198,7 +1750,17 @@ def build_rich_h3_prompt(
         else "same characters, identical clothing and appearance"
     )
     char_block = "\n\n".join(char_paras) if char_paras else "Keep cast continuity across the continue chain."
-    beats = action or base or "characters hold tension; micro-expressions progress the emotional beat"
+    intent = brief.get("sceneIntent") if isinstance(brief.get("sceneIntent"), dict) else {}
+    if intent.get("beat") and (
+        not action
+        or action in _BEAT_ARCS
+        or "awakening / first awareness" in (action or "")
+    ):
+        beats = str(intent["beat"])
+    else:
+        beats = action or base or "characters hold tension; micro-expressions progress the emotional beat"
+    if intent.get("camera") and _is_generic_camera(camera):
+        camera = str(intent["camera"])
     t0, t1 = 0, int(dur)
     atmos = (
         "Visual mood only (silent music video): " + (music or "picture mood only")
@@ -1224,10 +1786,9 @@ def build_rich_h3_prompt(
                 if silent
                 else (
                     f"One continuous shot, no cuts. Spoken line: {dlg_txt}. "
-                    "Clear spoken dialogue audio, mouth moves in sync. "
-                    f"{NO_BGM_AUDIO_LOCK}"
+                    "Clear spoken dialogue audio, mouth moves in sync."
                     if dlg
-                    else f"One continuous shot, no cuts. No dialogue. {NO_BGM_AUDIO_LOCK}"
+                    else "One continuous shot, no cuts. No dialogue."
                 )
             ),
         ]
@@ -1250,18 +1811,21 @@ def build_rich_h3_prompt(
                 if silent
                 else (
                     f"One continuous shot, no cuts. Spoken line: {dlg_txt}. "
-                    "Clear spoken dialogue audio, mouth moves in sync. "
-                    f"{NO_BGM_AUDIO_LOCK}"
+                    "Clear spoken dialogue audio, mouth moves in sync."
                     if dlg
-                    else f"One continuous shot, no cuts. No dialogue. {NO_BGM_AUDIO_LOCK}"
+                    else "One continuous shot, no cuts. No dialogue."
                 )
             ),
         ]
     body = "\n\n".join(p for p in paras if p)
     body = ensure_dialogue_in_h3_prompt(body, dlg, silent=silent)
     out = apply_audio_policy(body, brief)
+    if intent.get("raw") and is_thin_template_prompt(out):
+        out = build_scene_from_intent(
+            shot=shot, index=index, total=total, brief=brief, intent=intent
+        )
     # Mark so QA never treats this filler as director-level
-    shot["_thin_template"] = True
+    shot["_thin_template"] = is_thin_template_prompt(out)
     return out
 
 
@@ -1321,12 +1885,46 @@ def _clean_shot(
     return shot
 
 
-def force_continue_chain(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out = []
+def _character_names_in_text(text: str, characters: list[Any]) -> set[str]:
+    """Match brief character names inside a SCENE body (case-insensitive word boundary)."""
+    found: set[str] = set()
+    blob = text or ""
+    for c in characters or []:
+        if isinstance(c, dict):
+            name = str(c.get("name") or "").strip()
+        else:
+            name = str(c or "").strip()
+        if len(name) < 2:
+            continue
+        pat = rf"(?i)(?<!\w){re.escape(name)}(?!\w)"
+        if re.search(pat, blob):
+            found.add(name.lower())
+    return found
+
+
+def force_continue_chain(
+    shots: list[dict[str, Any]],
+    brief: Optional[dict[str, Any]] = None,
+) -> list[dict[str, Any]]:
+    """Link shots: continue when cast overlaps previous; else standalone (hard cut).
+
+    Prevents cutaway → character re-entry from inheriting the wrong last frame.
+    """
+    chars = list((brief or {}).get("characters") or []) if isinstance(brief, dict) else []
+    out: list[dict[str, Any]] = []
+    prev: set[str] = set()
     for i, s in enumerate(shots):
         ss = dict(s)
-        ss["linkToPrev"] = "standalone" if i == 0 else "continue"
+        text = str(ss.get("h3Prompt") or ss.get("text") or ss.get("action") or "")
+        curr = _character_names_in_text(text, chars) if chars else set()
+        if i == 0:
+            ss["linkToPrev"] = "standalone"
+        elif chars and curr and not (curr & prev):
+            ss["linkToPrev"] = "standalone"
+        else:
+            ss["linkToPrev"] = "continue"
         out.append(ss)
+        prev = curr
     return out
 
 
@@ -1390,17 +1988,22 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
 
     # Respect optional "force_continue" flag on the brief (default True)
     if brief.get("force_continue", True):
-        cleaned = force_continue_chain(cleaned)
+        cleaned = force_continue_chain(cleaned, brief)
     if need and len(cleaned) > need:
         cleaned = cleaned[:need]
 
     # Re-enrich with final count
     final = []
+    intent = brief.get("sceneIntent") if isinstance(brief.get("sceneIntent"), dict) else {}
     for i, s in enumerate(cleaned):
         s2 = dict(s)
-        s2["h3Prompt"] = build_rich_h3_prompt(
-            shot=s2, index=i, total=len(cleaned), brief=brief
-        )
+        built = build_rich_h3_prompt(shot=s2, index=i, total=len(cleaned), brief=brief)
+        if is_thin_template_prompt(built) and intent.get("raw"):
+            built = build_scene_from_intent(
+                shot=s2, index=i, total=len(cleaned), brief=brief, intent=intent
+            )
+            s2["_thin_template"] = False
+        s2["h3Prompt"] = built
         final.append(s2)
 
     brief["shots"] = final
@@ -1422,13 +2025,18 @@ def ui_lang_addendum(lang: Any = None) -> str:
             "The Studio UI is English. Speak to the user in **English** in every `reply` and chat turn. "
             "This overrides any instruction to speak Turkish.\n"
             "JSON keys stay English. Every `h3Prompt` / SCENE body MUST stay English.\n"
-            "Dialogue tags stay `<d>[English]…</d>` or `<d>[Turkish]…</d>` matching the spoken line, "
-            "not the UI language.\n"
+            "Spoken dialogue defaults to **pure English**: use `<d>[English] …</d>` only. "
+            "Do not use Turkish/Japanese/Korean/other language tags unless the user "
+            "explicitly requests that language for the spoken line.\n"
+            "SFX: only sounds motivated by the SCENE — never invent rain/smoke/explosions.\n"
         )
     return (
         "\n\n## ARAYÜZ DİLİ\n"
         "Kullanıcıya **Türkçe** konuş (`reply` ve sohbet). JSON anahtarları İngilizce.\n"
         "Her `h3Prompt` / SCENE gövdesi her zaman İngilizce — UI TR olsa bile.\n"
+        "Diyalog: kullanıcı Türkçe replik istediyse `<d>[Turkish] …</d>`; "
+        "İngilizce / dil belirtmediyse `<d>[English] …</d>`.\n"
+        "SFX: yalnız sahnede gerekçesi olan sesler — yağmur/duman/patlama uydurma.\n"
     )
 
 
@@ -1620,7 +2228,7 @@ def normalize_shot_outline(
                         row.get("beat") or row.get("action") or row.get("title") or ""
                     ).strip(),
                     "camera": str(
-                        row.get("camera") or "eye-level medium, subtle push-in, 35mm"
+                        row.get("camera") or DEFAULT_CAMERA
                     ).strip(),
                 }
             )
@@ -1638,9 +2246,7 @@ def normalize_shot_outline(
                     "index": i + 1,
                     "title": str(s.get("title") or action or f"Shot {i + 1}")[:80],
                     "beat": action or (prompt[:160] if prompt else ""),
-                    "camera": str(
-                        s.get("camera") or "eye-level medium, subtle push-in, 35mm"
-                    ).strip(),
+                    "camera": str(s.get("camera") or DEFAULT_CAMERA).strip(),
                 }
             )
     if pad and need and len(out) < need:
@@ -1654,7 +2260,7 @@ def normalize_shot_outline(
                         f"Continue the story beat for shot {i} of {need}; "
                         f"logline: {brief.get('logline') or 'progress the scene'}"
                     ),
-                    "camera": "eye-level medium, subtle push-in, 35mm",
+                    "camera": CAMERA_VARIETY[(i - 1) % len(CAMERA_VARIETY)],
                 }
             )
     if need and len(out) > need:
@@ -1775,11 +2381,27 @@ def outline_generation_user_prompt(brief: dict[str, Any]) -> str:
         need = expected_shot_count(total_i, dur) if total_i > 0 else 1
     role = str(brief.get("roleHint") or brief.get("_roleHint") or "").strip()
     role_bit = f"\nRole / screenplay tone (optional):\n{role[:4000]}\n" if role else ""
+    directives = format_directives_block(brief.get("directorDirectives"))
+    intent = brief.get("sceneIntent") if isinstance(brief.get("sceneIntent"), dict) else {}
+    scene_bit = ""
+    if intent.get("raw"):
+        scene_bit = (
+            f"\nUSER SCENE (shot 1 beat MUST follow this — inhale/exhale steps, frontal if requested):\n"
+            f"{intent['raw']}\n"
+            f"English: {intent.get('beat') or intent['raw']}\n"
+        )
+        if intent.get("camera"):
+            scene_bit += f"Camera for shot 1: {intent['camera']}\n"
     return (
         f"FAZ A only. Build a shot OUTLINE for exactly {need} shots "
         f"({dur}s each). Do NOT write h3Prompt bodies.\n"
         f"{format_project_bible(brief)}\n"
+        f"{directives}"
+        f"{scene_bit}"
         f"{role_bit}"
+        "Each outline row MUST have a **distinct** `camera` field (height, lens, movement). "
+        "Never copy the same camera line for every shot unless the user explicitly locked one angle.\n"
+        "If USER CAMERA NOTES exist above, they override everything — bake them into each row's `camera`.\n"
         "Return ONLY JSON:\n"
         "{\n"
         '  "ready": false,\n'
@@ -1814,7 +2436,35 @@ def single_shot_user_prompt(
     link = "standalone" if index == 0 else "continue"
     title = (outline_row or {}).get("title") or f"Shot {index + 1}"
     beat = (outline_row or {}).get("beat") or title
-    camera = (outline_row or {}).get("camera") or "eye-level medium, subtle push-in, 35mm"
+    camera = camera_for_outline_index(index, directives=brief.get("directorDirectives"), row=outline_row)
+    directives = format_directives_block(brief.get("directorDirectives"))
+    intent = brief.get("sceneIntent") if isinstance(brief.get("sceneIntent"), dict) else {}
+    scene_block = ""
+    if intent.get("raw"):
+        scene_block = (
+            "\nUSER SCENE (mandatory — write THIS action in English SCENE; "
+            "no generic 'awakening' beats, no unrelated arcs):\n"
+            f"Original: {intent['raw']}\n"
+            f"English beat: {intent.get('beat') or intent['raw']}\n"
+        )
+        if intent.get("camera"):
+            scene_block += f"Required camera/framing: {intent['camera']}\n"
+    cast_names: list[str] = []
+    for c in brief.get("characters") or []:
+        if isinstance(c, dict) and (c.get("name") or "").strip():
+            cast_names.append(str(c["name"]).strip())
+        elif isinstance(c, str) and c.strip():
+            cast_names.append(c.strip())
+    cast_rule = ""
+    if cast_names:
+        cast_rule = (
+            "CAST NAMES (use these exact spellings in the SCENE when the character appears; "
+            "never rename/translate): "
+            + ", ".join(cast_names)
+            + ".\n"
+            "If this beat has no cast overlap with the previous shot (cutaway / re-entry), "
+            'set linkToPrev to "standalone".\n'
+        )
     prev_snip = ""
     if prev_shot and isinstance(prev_shot, dict):
         prev_body = (prev_shot.get("h3Prompt") or "")[:900]
@@ -1823,19 +2473,24 @@ def single_shot_user_prompt(
         )
     return (
         f"FAZ B — write ONLY shot {index + 1} of {need} "
-        f"({dur} seconds, linkToPrev={link}).\n"
+        f"({dur} seconds, suggested linkToPrev={link}).\n"
         f"{H3_PROMPT_GUIDE}\n"
         f"{format_project_bible(brief)}\n"
+        f"{directives}"
+        f"{scene_block}"
+        f"{cast_rule}"
         f"OUTLINE for this shot: title={title!r} beat={beat!r} camera={camera!r}\n"
+        f"MANDATORY: `camera` field AND a full paragraph starting with 'The camera:' MUST match {camera!r} exactly. "
+        "User camera notes override outline defaults.\n"
         f"{prev_snip}"
         "Return ONLY JSON: "
         '{"shot":{'
         f'"durationSec":{dur},"camera":"...","action":"...","dialogue":[],'
         '"soundscape":"...","music":"none","linkToPrev":'
-        f'"{link}","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
+        f'"standalone|continue","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
         "}}\n"
         "Rules: English SCENE screenplay; character cards on shot 1; "
-        "shot 2+ MUST start with 'Continue directly from the previous shot.' "
+        "when linkToPrev=continue, start with 'Continue directly from the previous shot.' "
         "+ Same X, same Y, identical clothing; micro-actions only; "
         "no keyword soup; no BGM unless silent music-video lock."
     )

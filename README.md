@@ -164,17 +164,79 @@ Optional full v2 extras (LLM writer, `context_pin`, accelerators) stay out of St
 - **Sağ sütun — shot listesi:** write a shot, then **+ Yeni video** (t2v / new chain) or **+ Continue** (last frame of the previous shot). Tags on each card can flip the mode later.
 - Mention a character or location **name** in a shot — that still is attached on New Video shots (Ref2VA). Continue shots keep last-frame I2V and put identity in the prompt text.
 
+#### Film modu — 1 dakikalık film reçetesi (TR)
+
+Uzun filmlerde **New Video / Continue** ile uğraşmak yerine **Film modu** panelini kullan:
+
+1. **Karakterler:** her role **2–3 yüz stilli** yükle; shot metninde çağrı adını kullan (`@Ayşe`).
+2. **H3 Yönetmen:** “1 dakikalık film, 10 saniyelik klipler, karakterler …” de → Plan kaydet (**Sinema’ya aktar**).
+3. **Film modu:** hedef **60 sn**, klip **10 sn**, segment **6 shot** (dengeli: 2 segment × 6).
+4. **Otomatik devam/kes** açıkken shot kartlarında T2V/Continue gizlenir; sistem `linkToPrev` + yüz kilidini uygular.
+5. **Film modu · kuyruğa al** → segment 1 kuyruğa girer; bitince segment 2 otomatik; **Bitince birleştir** ile tek MP4.
+6. Yönetmen **Üretime al** (Sinema açıkken) artık düz batch yerine **`/api/cinema/produce`** kullanır (karakter stilleri + akıllı continue).
+
+Still eksik karakterler sarı uyarı ile gösterilir — kimlik için still şart.
+
+```text
+POST /api/cinema/produce-film   # segmentli üretim (total_sec, clip_sec, segment_size)
+GET  /api/cinema/film-plan      # segment durumu
+POST /api/cinema/film-plan/concat
+POST /api/clips/concat          # seçili klipleri birleştir
+```
+
+```javascript
+// 1 dakika · 10 sn klip · 6’lı segment
+await fetch("/api/cinema/produce-film", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    total_sec: 60,
+    clip_sec: 10,
+    segment_size: 6,
+    reset_plan: true,
+    auto_concat: true,
+  }),
+});
+// Segment 2 otomatik (UI) veya:
+await fetch("/api/cinema/produce-film", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ advance: true, reset_plan: false }),
+});
+await fetch("/api/cinema/film-plan/concat", { method: "POST" });
+```
+
+```python
+import requests
+base = "http://127.0.0.1:8787"
+requests.post(f"{base}/api/cinema/produce-film", json={
+    "total_sec": 60, "clip_sec": 10, "segment_size": 6, "reset_plan": True,
+})
+# … wait for segments …
+requests.post(f"{base}/api/cinema/film-plan/concat")
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/cinema/produce-film \
+  -H "Content-Type: application/json" \
+  -d '{"total_sec":60,"clip_sec":10,"segment_size":6,"reset_plan":true}'
+```
+
 ```text
 GET  /api/cinema
 PUT  /api/cinema
 POST /api/cinema/character
 POST /api/cinema/location
 POST /api/cinema/produce   # shots: [{ text, mode }], seamless: true → one Multishot take (max 8)
+POST /api/cinema/produce-film
+GET  /api/cinema/film-plan
+POST /api/cinema/film-plan/concat
 POST /api/cinema/mux       # concat clips, keep dialogue, mix one score
+POST /api/clips/concat
 GET  /api/cinema/final/{batch_id}
 POST /api/director/chat            # plan_mode: true → shot tahtasını görür, patch ile düzenler
 POST /api/director/plan            # { session_id, shots, apply_cinema } Plan kaydet / stüdyoya aktar
-POST /api/director/commit
+POST /api/director/commit          # cinema_studio → cinema/produce + face lock
 ```
 
 ```bash

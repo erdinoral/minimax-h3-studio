@@ -53,6 +53,7 @@ CATALOG: list[dict[str, Any]] = [
         "graphs": ["fl2va"],
         "hint": "4 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz",
         "size_hint": "~1.8 GB",
+        "adult": True,
         "url": (
             "https://huggingface.co/t8star/"
             "minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8/resolve/main/"
@@ -227,6 +228,16 @@ def _copy_spec(spec: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def is_adult_lora(*, lora_id: str = "", file: str = "", spec: Optional[dict[str, Any]] = None) -> bool:
+    row = spec if spec is not None else find_spec(lora_id=lora_id, file=file)
+    if not row:
+        return False
+    if row.get("adult"):
+        return True
+    label = f"{row.get('id') or ''} {row.get('file') or ''} {row.get('label') or ''}".lower()
+    return "erosmax" in label
+
+
 def find_spec(lora_id: str = "", file: str = "") -> Optional[dict[str, Any]]:
     lid = (lora_id or "").strip()
     fname = Path(file or "").name
@@ -251,6 +262,7 @@ def public_list() -> list[dict[str, Any]]:
     out = []
     for spec in CATALOG:
         item = {k: spec[k] for k in spec if k not in ("url", "aliases")}
+        item["adult"] = bool(spec.get("adult")) or is_adult_lora(spec=spec)
         item["ready"] = spec_ready(spec)
         item["downloadable"] = bool(spec.get("url"))
         item["size_hint"] = spec.get("size_hint") or ""

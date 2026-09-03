@@ -531,7 +531,8 @@ class LlmRouter:
         if provider == "gemini":
             return await self._gemini_chat(
                 model, messages, temperature=temperature, format_json=format_json,
-                num_predict=num_predict, retries=retries, on_progress=on_progress,
+                num_predict=num_predict, retries=retries, think=think,
+                on_progress=on_progress,
             )
         if provider == "grok":
             return await self._grok_chat(
@@ -746,6 +747,7 @@ class LlmRouter:
         format_json,
         num_predict,
         retries,
+        think: bool = False,
         on_progress=None,
     ) -> str:
         cfg = self.load()
@@ -774,12 +776,15 @@ class LlmRouter:
         if contents[0]["role"] != "user":
             contents.insert(0, {"role": "user", "parts": [{"text": "(devam)"}]})
 
+        # JSON / structured writes must NOT enable Gemini "thinking" — thoughts
+        # eat the stream for minutes and often leave answer empty → endless retries.
+        use_thoughts = bool(think) and not format_json
         gen_cfg: dict[str, Any] = {
             "temperature": temperature,
             "maxOutputTokens": max(512, min(int(num_predict), 8192)),
-            # Show thought summaries while waiting (Gemini 2.5+ / 3.x)
-            "thinkingConfig": {"includeThoughts": True},
         }
+        if use_thoughts:
+            gen_cfg["thinkingConfig"] = {"includeThoughts": True}
         if format_json:
             gen_cfg["responseMimeType"] = "application/json"
 
@@ -792,9 +797,13 @@ class LlmRouter:
                 "parts": [{"text": "\n\n".join(system_bits)}]
             }
 
-        # Try preferred model, then newer defaults if Google returns "no longer available"
+        # Chat UI: allow model fallbacks. FAZ A/B JSON: stick to requested model
+        # (+ one lite alt) so a hung/empty stream cannot walk the whole catalog.
         candidates: list[str] = []
-        for m in (model, *GEMINI_MODELS):
+        seed = (model,) if format_json else (model, *GEMINI_MODELS)
+        if format_json and model != "gemini-3.1-flash-lite":
+            seed = (model, "gemini-3.1-flash-lite")
+        for m in seed:
             m = _normalize_gemini_model(m)
             if m and m not in candidates:
                 candidates.append(m)
@@ -807,13 +816,21 @@ class LlmRouter:
             except Exception:
                 pass
 
+        # Structured calls: shorter stream budget so FAZ B can't wedgie for 3min/shot
+        stream_timeout = 55.0 if format_json else (120.0 if use_thoughts else 90.0)
+
         last_err: Exception | None = None
         for cand in candidates:
             for attempt in range(max(1, retries)):
                 try:
-                    _prog({"type": "status", "text": f"Gemini · {cand} düşünüyor…"})
+                    label = "JSON yazıyor" if format_json else "düşünüyor"
+                    _prog({"type": "status", "text": f"Gemini · {cand} {label}…"})
                     text = await self._gemini_stream_once(
-                        key, cand, payload, on_progress=on_progress
+                        key,
+                        cand,
+                        payload,
+                        on_progress=on_progress if use_thoughts else None,
+                        timeout=stream_timeout,
                     )
                     if text:
                         if cand != model:
@@ -834,22 +851,32 @@ class LlmRouter:
                     ):
                         payload["generationConfig"].pop("thinkingConfig", None)
                         continue
+                    if "timeout" in msg or "timed out" in msg:
+                        # Don't burn remaining candidates on a soft hang — fail fast
+                        if format_json:
+                            raise RuntimeError(f"Gemini timeout ({cand}): {e}") from e
                     payload["generationConfig"]["temperature"] = max(
                         0.2, temperature - 0.15 * (attempt + 1)
                     )
         raise RuntimeError(f"Gemini chat başarısız: {last_err}")
 
     async def _gemini_stream_once(
-        self, key: str, model: str, payload: dict[str, Any], *, on_progress=None
+        self,
+        key: str,
+        model: str,
+        payload: dict[str, Any],
+        *,
+        on_progress=None,
+        timeout: float = 180.0,
     ) -> str:
         """streamGenerateContent — emit thought deltas via on_progress, return answer text."""
         url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            "https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:streamGenerateContent"
         )
         answer_parts: list[str] = []
         thought_buf = ""
-        async with httpx.AsyncClient(timeout=180.0) as c:
+        async with httpx.AsyncClient(timeout=timeout) as c:
             async with c.stream(
                 "POST",
                 url,

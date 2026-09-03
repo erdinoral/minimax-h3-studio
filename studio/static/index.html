@@ -4,13 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>H3 Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=cinema69" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema78" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
 <body>
   <header class="topbar">
     <div class="brand">H3 <span>Studio</span></div>
+    <nav class="workspace-switch" id="workspace-switch" role="tablist" aria-label="Çalışma alanı">
+      <button type="button" class="chip on" data-ws="scene" id="ws-scene" role="tab" aria-selected="true">Sahne</button>
+      <button type="button" class="chip chip-director" data-ws="director" id="ws-director" role="tab" aria-selected="false">Direktör</button>
+    </nav>
     <div class="sysbar" id="sysbar" title="Sistem performansı">
       <div class="sys-item"><span>CPU</span><b id="sys-cpu">—</b></div>
       <div class="sys-item"><span>RAM</span><b id="sys-ram">—</b></div>
@@ -34,14 +38,28 @@
   <main class="workspace" id="view-studio">
     <!-- grid: scene | player | player / prompt | ayar | prod -->
     <section class="zone zone-scene panel scene">
-        <h2>Sahne / Proje</h2>
-        <label>Üretim modu</label>
+        <h2 id="scene-zone-title">Sahne · tek klip</h2>
+        <p class="muted mode-hint" id="scene-zone-sub">Tek video üretimi: yeni / devam / referans. Film için üstten <strong>Direktör</strong>.</p>
+
+        <div id="panel-workspace-director" class="panel-workspace-director hidden">
+          <p class="director-landing-kicker" id="director-landing-kicker">Film çalışma alanı</p>
+          <h3 id="director-landing-title">Direktör · Sinema stüdyosu</h3>
+          <p class="muted mode-hint" id="director-landing-hint">İki yol: Kesintisiz (~1 dk tek take) veya Karakter/mekan kartlarıyla yüz kilidi.</p>
+          <ol class="director-landing-steps" id="director-landing-steps">
+            <li id="director-landing-step1">Kesintisiz veya Karakter/mekan modunu seç</li>
+            <li id="director-landing-step2">Shot yaz veya Planla ile yönetmene sor</li>
+            <li id="director-landing-step3">Filmi kuyruğa al</li>
+          </ol>
+          <button type="button" class="cta" id="btn-open-cinema-landing">Sinema stüdyosunu aç</button>
+        </div>
+
+        <div id="panel-workspace-scene">
+        <label id="scene-mode-label">Üretim modu</label>
         <div class="chips" id="mode-chips">
           <button type="button" class="chip on" data-mode="t2v" id="mode-t2v">Yeni video</button>
           <button type="button" class="chip" data-mode="continue" id="mode-continue">Videoyu devam ettir</button>
           <button type="button" class="chip" data-mode="ref" id="mode-ref">Referans</button>
           <button type="button" class="chip" data-mode="v2v" id="mode-v2v">V2V / video ref</button>
-          <button type="button" class="chip" data-mode="cinema" id="mode-cinema">Direktör</button>
           <button type="button" class="chip" data-mode="face" id="mode-face">Yüz referansı</button>
         </div>
 
@@ -56,6 +74,7 @@
             <button type="button" class="chip" data-group="purpose" data-purpose="documentary" aria-pressed="false">belgesel</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="intro" aria-pressed="false">intro</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="outro" aria-pressed="false">outro</button>
+            <button type="button" class="chip chip-adult adult-only hidden" data-group="purpose" data-purpose="adult" aria-pressed="false" title="ErosMax · Yeni video · Ayarlarda +18 gerekir">+18</button>
           </div>
           <label id="scene-style-label">Görsel tarz</label>
           <div class="chips wrap" id="scene-style-chips" role="group" aria-label="Görsel tarz">
@@ -202,6 +221,7 @@
             <img id="continue-thumb" alt="son kare" />
           </div>
         </div>
+        </div>
     </section>
 
     <section class="zone zone-player panel player">
@@ -291,6 +311,7 @@
         </div>
         <div class="batch-add-row queue-toolbar">
           <button type="button" class="btn-ghost" id="btn-clear-errors">Hatalıları temizle</button>
+          <button type="button" class="btn-ghost" id="btn-merge-clips">Klipleri birleştir</button>
           <button type="button" class="btn-ghost" id="btn-clear-finished">Geçmişi temizle</button>
           <button type="button" class="btn-ghost" id="btn-reset-production" title="Kuyruk + klipler + kareler">Sıfırla (temiz başlat)</button>
           <button type="button" class="btn-ghost" id="btn-open-logs" title="Studio log dosyası">Loglar</button>
@@ -337,6 +358,7 @@
         <button type="button" class="chip" data-group="purpose" data-purpose="documentary" data-chip="belgesel" aria-pressed="false">belgesel</button>
         <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
         <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
+        <button type="button" class="chip chip-adult adult-only hidden" data-group="purpose" data-purpose="adult" data-chip="+18" aria-pressed="false" title="ErosMax · Yeni video · Ayarlarda +18 gerekir">+18</button>
         <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
         <button type="button" class="chip" data-group="style" data-style="anime" data-chip="anime tarz" aria-pressed="false">anime</button>
         <button type="button" class="chip" data-group="style" data-style="disney" data-chip="disney 3D tarz" aria-pressed="false">disney</button>
@@ -388,6 +410,7 @@
             <option value="documentary">belgesel</option>
             <option value="intro">intro</option>
             <option value="outro">outro</option>
+            <option value="adult" class="adult-only hidden">+18</option>
           </select>
         </label>
         <label><span id="bible-style-label">Görsel tarz</span>
@@ -469,7 +492,7 @@
   </div>
 
   <div class="overlay hidden" id="view-cinema">
-    <div class="gallery-panel cinema-panel">
+    <div class="gallery-panel cinema-panel is-mode-seamless">
       <header>
         <h2>Direktör · Sinema stüdyosu</h2>
         <select id="cinema-film-select" title="Film"></select>
@@ -522,11 +545,13 @@
               <option value="">Yok (varsayılan)</option>
             </select>
           </label>
-          <label class="cinema-seamless-label" title="ComfyUI-H3-Multishot: tek take, kesiksiz ses">
-            <input type="checkbox" id="cinema-seamless" />
-            <span id="cinema-seamless-label">Kesintisiz zincir</span>
-          </label>
-          <p class="muted mode-hint" id="cinema-prod-hint"></p>
+          <div class="chips cinema-studio-mode" id="cinema-studio-mode" role="group" aria-label="Üretim modu">
+            <button type="button" class="chip on" data-cinemamode="seamless" id="cinema-mode-seamless">Kesintisiz · ~1 dk</button>
+            <button type="button" class="chip" data-cinemamode="assets" id="cinema-mode-assets">Karakter / mekan</button>
+          </div>
+          <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
+          <p class="muted mode-hint" id="cinema-mode-hint">Tek take, kesiksiz ses · en fazla 8 shot · karakter/mekan kartı gerekmez</p>
+          <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
           <button type="button" class="cta" id="btn-cinema-produce">Filmi kuyruğa al</button>
         </div>
@@ -541,7 +566,7 @@
           </label>
           <span class="muted" id="cinema-score-name">yok — H3 her klipte yeni şarkı uydurur</span>
           <button type="button" class="btn-ghost hidden" id="btn-cinema-score-remove">Müziği kaldır</button>
-          <button type="button" class="btn-secondary hidden" id="btn-cinema-concat">Filmi birleştir</button>
+          <button type="button" class="btn-secondary" id="btn-cinema-concat">Filmi birleştir</button>
           <button type="button" class="btn-secondary hidden" id="btn-cinema-mux">Müziği karıştır</button>
           <a class="muted hidden" id="cinema-final-link" href="#" target="_blank" rel="noopener">Son filmi aç</a>
         </div>
@@ -555,7 +580,7 @@
             </button>
             <div class="cinema-fold-summary" id="cinema-char-summary"></div>
             <div class="cinema-fold-body">
-              <p class="muted mode-hint" id="cinema-char-hint">Karakter ekle+ ile kart açılır. Shot metninde isim geçince referans görsel bağlanır. Ses tarifi her klipte aynı konuşmacıyı kilitler.</p>
+              <p class="muted mode-hint" id="cinema-char-hint">Ad + foto → shot’ta isim geçince yüz kilitlenir.</p>
               <div id="cinema-chars" class="cinema-cards"></div>
             </div>
             <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-char">Karakter ekle+</button>
@@ -567,7 +592,7 @@
             </button>
             <div class="cinema-fold-summary" id="cinema-loc-summary"></div>
             <div class="cinema-fold-body">
-              <p class="muted mode-hint" id="cinema-loc-hint">Bölge adı + tanım + referans görsel. Shot’ta isim geçince set kilidi olur.</p>
+              <p class="muted mode-hint" id="cinema-loc-hint">Ad + görsel → shot’ta isim geçince mekan kilitlenir.</p>
               <div id="cinema-locs" class="cinema-cards"></div>
             </div>
             <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-loc">Mekan ekle+</button>
@@ -575,26 +600,16 @@
         </div>
         <section class="cinema-col cinema-script-col">
           <div class="cinema-col-head">
-            <h3>Senaryo / shot listesi</h3>
+            <h3 id="cinema-script-title">Senaryo / shot listesi</h3>
+            <button type="button" class="cta" id="btn-cinema-plan">Planla</button>
           </div>
-          <label class="cinema-role-block">
-            <span id="cinema-role-label">Rol metni / senaryo</span>
-            <textarea id="cinema-role-script" rows="6" placeholder="Tüm rol metnini / senaryoyu buraya yapıştır…"></textarea>
-          </label>
-          <button type="button" class="cta" id="btn-cinema-ingest">LLM ile film altyapısı kur</button>
-          <button type="button" class="cta" id="btn-cinema-director">Yönetmen · iskelet + SCENE</button>
-          <button type="button" class="btn-secondary" id="btn-cinema-generate-shots">LLM ile sahneleri yaz</button>
-          <p class="muted mode-hint" id="cinema-role-hint">Yönetmen metni okur; karakter, mekan ve shot listesini doldurur. Mevcut görseller silinmez.</p>
-          <p class="muted mode-hint" id="cinema-director-hint">Stüdyo yönetmeni: önce N shot başlığı (iskelet), sonra her SCENE’i tek tek yazar — sohbet şart değil.</p>
-          <p class="muted mode-hint" id="cinema-shots-llm-hint">Kartlar doluyken: LLM yalnızca stüdyo board’undaki karakter/mekanlarla shot yazar. Ana Sahne bu board’u görmez.</p>
-          <p class="muted mode-hint" id="cinema-script-hint">Yaz → Yeni video veya Continue ile sıraya ekle. Continue önceki shot’ın son karesinden devam eder. Portreli karakter = yüz kilidi zinciri.</p>
           <textarea id="cinema-shot-draft" rows="4" placeholder="Shot metnini yaz… örn. Ada walks into Rooftop at dusk, coat catching wind."></textarea>
           <div class="cinema-shot-add">
             <button type="button" class="btn-secondary" id="btn-cinema-add-t2v">+ Yeni video</button>
             <button type="button" class="btn-secondary" id="btn-cinema-add-cont">+ Continue</button>
           </div>
           <div id="cinema-shots" class="cinema-shots"></div>
-          <p class="muted" id="cinema-hint">Karakter / mekan ekle → shot’lara isimlerini yaz → kuyruğa al.</p>
+          <p class="muted" id="cinema-hint">Shot yaz → kuyruğa al. En fazla 8 shot · kesintisiz tek take.</p>
           <details class="cinema-preview-fold" id="cinema-preview-fold">
             <summary id="cinema-preview-sum">Kuyruğa gidecek prompt</summary>
             <pre id="cinema-preview-text" class="cinema-preview-text"></pre>
@@ -643,11 +658,14 @@
   </div>
 
   <div class="overlay hidden" id="view-gallery">
-    <div class="gallery-panel">
+    <div class="gallery-panel" id="gallery-panel">
       <header>
         <h2>Galeri</h2>
         <span class="muted gallery-order-hint" id="gallery-order-hint">Tüm üretilenler · yeni → üst sol</span>
-        <button type="button" class="btn-secondary" id="btn-gallery-concat">Seçili filmi birleştir</button>
+        <span class="muted gallery-merge-hint hidden" id="gallery-merge-hint"></span>
+        <span class="muted gallery-merge-count hidden" id="gallery-merge-count"></span>
+        <button type="button" class="btn-secondary hidden" id="btn-gallery-merge-cancel">İptal</button>
+        <button type="button" class="btn-secondary" id="btn-gallery-concat">Klipleri birleştir</button>
         <button type="button" class="menu-btn" id="btn-gallery-close">← Studio</button>
       </header>
       <div class="gallery-grid" id="gallery-grid"></div>
@@ -770,6 +788,23 @@
         </div>
         <p class="muted mode-hint" id="notify-settings-hint">Tik’ler otomatik kaydolur · AkiFactory aktar → Test → Telegram’a bak.</p>
 
+        <details class="adult-settings" id="settings-adult-section" style="margin-top:1.25rem">
+          <summary id="settings-adult-summary">+18 · yetişkin içerik</summary>
+          <p class="muted mode-hint" id="settings-adult-intro">
+            Kapalıyken yetişkin üretim türü ve ErosMax LoRA görünmez. Yalnızca yasal, rızaya dayalı yetişkin içerik için.
+            Reşit olmayan veya izinsiz içerik üretilemez.
+          </p>
+          <div id="settings-adult-off">
+            <label class="check"><input type="checkbox" id="settings-adult-confirm" /> <span id="settings-adult-confirm-label">18 yaşından büyüğüm ve yasal yetişkin içerik üreteceğim</span></label>
+            <button type="button" class="btn-secondary" id="btn-adult-enable" style="margin-top:8px">+18 modunu aç</button>
+          </div>
+          <div id="settings-adult-on" class="hidden">
+            <p class="muted mode-hint" id="settings-adult-on-hint">+18 açık — Üretim türünde “+18” seçeneği ve ErosMax LoRA kullanılabilir.</p>
+            <button type="button" class="btn-ghost" id="btn-adult-disable">+18 modunu kapat</button>
+          </div>
+          <p class="muted mode-hint" id="settings-adult-status"></p>
+        </details>
+
         <h3 class="llm-settings-title" id="settings-lora-title" style="margin-top:1.25rem">H3 LoRA’lar</h3>
         <p class="muted mode-hint lora-shop-title" id="lora-shop-title">Hazır LoRA’lar — yoksa isme tıkla, Hugging Face’ten iner</p>
         <div class="lora-shop" id="lora-shop"></div>
@@ -813,7 +848,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema69"></script>
-  <script src="/static/app.js?v=cinema69"></script>
+  <script src="/static/i18n.js?v=cinema78"></script>
+  <script src="/static/app.js?v=cinema78"></script>
 </body>
 </html>

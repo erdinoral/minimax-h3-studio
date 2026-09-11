@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>H3 Studio</title>
-  <link rel="stylesheet" href="/static/app.css?v=cinema78" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema79" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 </head>
@@ -29,8 +29,8 @@
         <button type="button" class="chip" data-lang="tr">TR</button>
       </div>
       <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
-      <button type="button" id="btn-support" class="menu-btn" title="Sorun bildir / fikir yaz">Destek</button>
       <button type="button" id="btn-settings" class="menu-btn">Ayarlar</button>
+      <button type="button" id="btn-support" class="menu-btn support-rainbow-btn" title="Sponsor / sorun bildir">Destek</button>
       <span class="comfy-pill" id="comfy-pill" title="Comfy arka uç — Pinokio Stop ile kapanır">Comfy …</span>
     </nav>
   </header>
@@ -676,11 +676,29 @@
     <div class="gallery-panel support-panel">
       <header>
         <h2>Destek</h2>
-        <span class="muted gallery-order-hint">Sorun ve fikirler GitHub Issues’a düşer — herkese açık</span>
+        <span class="muted gallery-order-hint">Sponsor · sorun · fikir — GitHub</span>
         <button type="button" class="menu-btn" id="btn-support-close">← Studio</button>
       </header>
+      <section class="support-sponsor">
+        <h3 data-i18n="support.sponsorTitle">Bu stüdyoyu destekle</h3>
+        <p class="mode-hint" id="support-sponsor-body" data-i18n="support.sponsorBody">
+          Destekleriniz benim için çok önemli. Bu iş vaktimin büyük bir kısmını alıyor — her destek beni gerçekten mutlu eder ve daha fazla projenin gelmesine de katkı olur.
+        </p>
+        <a
+          class="support-rainbow-btn support-sponsor-cta"
+          href="https://github.com/sponsors/erdinoral"
+          target="_blank"
+          rel="noopener noreferrer"
+          id="btn-support-sponsor"
+          data-i18n="support.sponsorBtn"
+        >GitHub’da sponsor ol</a>
+        <p class="muted mode-hint" data-i18n="support.sponsorThanks">Teşekkürler — bir yıldız bile projenin bulunmasına yardım eder.</p>
+        <p class="muted mode-hint">
+          <a href="https://github.com/erdinoral/minimax-h3-studio" target="_blank" rel="noopener" id="support-star-link" data-i18n="support.starRepo">Depoyu yıldızla</a>
+        </p>
+      </section>
       <p class="muted mode-hint" id="support-intro" data-i18n="support.intro">
-        Bize buradan ulaş. Bug, takılma, eksik çeviri veya “şunu da ekleseniz” — GitHub’da issue aç; takip edilebilir ve kaybolmaz.
+        Bug veya fikir için GitHub’da issue aç; takip edilebilir ve kaybolmaz.
       </p>
       <div class="support-grid">
         <article class="support-card">
@@ -848,7 +866,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema78"></script>
-  <script src="/static/app.js?v=cinema78"></script>
+  <script src="/static/i18n.js?v=cinema79"></script>
+  <script src="/static/app.js?v=cinema79"></script>
 </body>
 </html>

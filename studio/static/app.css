@@ -1779,6 +1779,68 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 .support-panel {
   width: min(820px, 100%);
 }
+.support-sponsor {
+  margin: 4px 0 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+.support-sponsor h3 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+.support-sponsor .mode-hint {
+  margin: 0 0 12px;
+  line-height: 1.55;
+}
+.support-sponsor-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border: none;
+  border-radius: 10px;
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+}
+@keyframes support-rainbow-shift {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.support-rainbow-btn {
+  background-image: linear-gradient(
+    90deg,
+    #ff4d6d,
+    #ff9f1c,
+    #ffd60a,
+    #2ec4b6,
+    #4cc9f0,
+    #7b2cbf,
+    #f72585,
+    #ff4d6d
+  );
+  background-size: 200% 100%;
+  animation: support-rainbow-shift 2.8s linear infinite;
+  box-shadow: 0 8px 24px rgba(247, 37, 133, 0.28);
+  border-color: transparent !important;
+  color: #fff !important;
+}
+.support-rainbow-btn:hover {
+  filter: brightness(1.06);
+  border-color: transparent !important;
+  color: #fff !important;
+}
+.menu.menu .support-rainbow-btn.menu-btn {
+  font-weight: 700;
+}
 .support-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

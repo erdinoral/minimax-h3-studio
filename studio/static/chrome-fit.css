@@ -1,0 +1,145 @@
+/**
+ * Pro chrome fit — Maestro-inspired layout polish only.
+ * Scoped under html.chrome-fit so it can be turned off in Settings (localStorage).
+ * No neon-orange Maestro theme, no Blend, no NLE.
+ */
+html.chrome-fit .workspace-switch {
+  border-radius: 999px;
+  border-color: rgba(196, 92, 38, 0.35);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 2px;
+  gap: 2px;
+  overflow: visible;
+}
+html.chrome-fit .workspace-switch .chip {
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.8rem;
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+html.chrome-fit .workspace-switch .chip.on {
+  background: var(--accent);
+  color: #fff8f0;
+  box-shadow: 0 0 0 1px rgba(196, 92, 38, 0.55), 0 0 18px rgba(196, 92, 38, 0.28);
+}
+html.chrome-fit .workspace-switch .chip-director.on {
+  background: var(--accent-hot);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(179, 58, 43, 0.5), 0 0 16px rgba(179, 58, 43, 0.25);
+}
+
+html.chrome-fit #mode-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+}
+html.chrome-fit #mode-chips .chip {
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+html.chrome-fit #mode-chips .chip.on {
+  background: rgba(196, 92, 38, 0.22);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+html.chrome-fit #scene-duration-label,
+html.chrome-fit #scene-mode-label,
+html.chrome-fit .chrome-section-label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+html.chrome-fit #dur-chips {
+  gap: 6px;
+  padding: 4px 0;
+}
+html.chrome-fit #dur-chips .chip {
+  border-radius: 8px;
+  min-width: 3.2rem;
+  justify-content: center;
+}
+
+html.chrome-fit #fl2va-frames.frame-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 10px 0 4px;
+}
+html.chrome-fit #fl2va-frames .frame-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px dashed rgba(163, 154, 144, 0.45);
+  background: rgba(0, 0, 0, 0.2);
+  min-height: 88px;
+}
+html.chrome-fit #fl2va-frames .frame-slot:hover,
+html.chrome-fit #fl2va-frames .frame-slot:focus-within {
+  border-color: rgba(196, 92, 38, 0.55);
+  background: rgba(196, 92, 38, 0.06);
+}
+html.chrome-fit #fl2va-frames .frame-slot > label:first-child {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+html.chrome-fit #fl2va-frames .file-pick {
+  width: 100%;
+}
+html.chrome-fit #fl2va-frames .file-pick-btn {
+  width: 100%;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+html.chrome-fit #scene-project {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+html.chrome-fit #project-audio-hint {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(28, 22, 18, 0.85);
+  font-size: 0.78rem;
+}
+
+html.chrome-fit #cinema-audio-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+}
+html.chrome-fit #cinema-audio-mode .chip.on {
+  background: rgba(196, 92, 38, 0.22);
+  border-color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  html.chrome-fit #fl2va-frames.frame-pair {
+    grid-template-columns: 1fr;
+  }
+}

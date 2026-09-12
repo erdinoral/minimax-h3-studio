@@ -50,6 +50,8 @@ from lib.loras import (
     spec_ready,
 )
 from lib.director import (
+    normalize_style,
+    style_craft_line,
     apply_audio_policy,
     apply_directives_to_outline,
     apply_shot_patches,
@@ -3560,6 +3562,303 @@ def _brief_to_cinema_shots(shots: list[dict]) -> list[dict[str, Any]]:
     return out
 
 
+
+@app.post("/api/cinema/creature")
+async def cinema_add_creature(body: dict[str, Any]):
+    return cinema.upsert_asset("creature", body or {})
+
+
+@app.patch("/api/cinema/creature/{asset_id}")
+async def cinema_patch_creature(asset_id: str, body: dict[str, Any]):
+    updated = cinema.update_asset("creature", asset_id, body or {})
+    if not updated:
+        raise HTTPException(404, "yaratık yok")
+    return updated
+
+
+@app.delete("/api/cinema/creature/{asset_id}")
+async def cinema_del_creature(asset_id: str):
+    data = cinema.load()
+    found = next((x for x in (data.get("creatures") or []) if str(x.get("id") or "") == str(asset_id)), None)
+    name = str((found or {}).get("name") or "").strip()
+    if not cinema.delete_asset("creature", asset_id):
+        raise HTTPException(404, "yaratık yok")
+    _remember_removed_asset("creature", name, asset_id)
+    return {"ok": True, "id": asset_id}
+
+
+@app.get("/api/cinema/library")
+async def cinema_library_get(kind: Optional[str] = None):
+    """Global character/location/creature library (persists across films)."""
+    k = (kind or "").strip().lower()
+    if k in ("character", "location", "creature"):
+        return {"ok": True, **cinema.list_library(k)}
+    return {"ok": True, **cinema.list_library()}
+
+
+class CinemaLibrarySaveBody(BaseModel):
+    kind: str = "character"
+    asset_id: str = Field(..., min_length=1)
+
+
+class CinemaLibraryPullBody(BaseModel):
+    kind: str = "character"
+    library_id: str = Field(..., min_length=1)
+
+
+@app.post("/api/cinema/library/save")
+async def cinema_library_save(body: CinemaLibrarySaveBody):
+    kind, _ = cinema.asset_kind_key(body.kind)
+    try:
+        saved = cinema.save_film_asset_to_library(kind, body.asset_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    return {"ok": True, "asset": saved, "kind": kind, "library": cinema.list_library(kind)}
+
+
+@app.post("/api/cinema/library/pull")
+async def cinema_library_pull(body: CinemaLibraryPullBody):
+    kind, _ = cinema.asset_kind_key(body.kind)
+    try:
+        asset = cinema.pull_library_to_film(kind, body.library_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e)) from e
+    return {"ok": True, "asset": asset, "kind": kind, "cinema": cinema.load()}
+
+
+@app.delete("/api/cinema/library/{kind}/{asset_id}")
+async def cinema_library_delete(kind: str, asset_id: str):
+    k, _ = cinema.asset_kind_key(kind)
+    if not cinema.delete_library_asset(k, asset_id):
+        raise HTTPException(404, "kütüphanede yok")
+    return {"ok": True, "id": asset_id, "kind": k}
+
+
+
+class CinemaSheetBody(BaseModel):
+    kind: str = "character"  # character | location
+    name: str = Field(..., min_length=1)
+    notes: str = ""
+    asset_id: Optional[str] = None
+    duration: int = 5
+    quality: str = "736"
+    steps: int = 18
+    aspect: str = "16:9"
+    style: Optional[str] = None
+    seed: int = -1
+    # Optional Comfy upload name(s) from /api/refs/upload
+    ref_image: Optional[str] = None
+    ref_images: Optional[list[str]] = None
+
+    @field_validator("ref_images", mode="before")
+    @classmethod
+    def _sheet_refs(cls, v: Any) -> Optional[list[str]]:
+        if v is None or v == "":
+            return None
+        if isinstance(v, str):
+            return [v] if v.strip() else None
+        if isinstance(v, list):
+            out = [str(x).strip() for x in v if str(x).strip()]
+            return out[:3] or None
+        return None
+
+
+async def _maybe_attach_sheet_still(job: dict) -> None:
+    """After a sheet generate job finishes, keep only the last-frame still; discard video."""
+    aid = str(job.get("sheet_asset_id") or "").strip()
+    if not aid:
+        return
+    kind = "location" if str(job.get("sheet_kind") or "") == "location" else (
+        "creature" if str(job.get("sheet_kind") or "") == "creature" else "character"
+    )
+    try:
+        if not job.get("last_frame_path"):
+            await _prepare_last_frame(job, upload=True)
+    except Exception as e:
+        slog.warn_job(job, "sheet last frame prep", err=e)
+        return
+    src = Path(job.get("last_frame_path") or "")
+    if not src.is_file():
+        slog.warn_job(job, "sheet still missing frame file")
+        return
+    lib = cinema.load()
+    _, key = cinema.asset_kind_key(kind)
+    found = next((x for x in lib.get(key) or [] if str(x.get("id")) == aid), None)
+    if not found:
+        slog.warn_job(job, "sheet asset missing", asset=aid[:8])
+        return
+    images = list(found.get("images") or [])
+    if len(images) >= cinema.MAX_ASSET_IMAGES:
+        slog.warn_job(job, "sheet asset image cap")
+        return
+    rid = str(uuid.uuid4())[:12]
+    dest = REFS / f"h3_sheet_{rid}.png"
+    REFS.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    try:
+        comfy_name = await comfy.upload_image(dest, dest.name)
+    except Exception as e:
+        slog.warn_job(job, "sheet still comfy upload", err=e)
+        return
+    images.insert(0, {"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
+    found["images"] = images[: cinema.MAX_ASSET_IMAGES]
+    cinema.upsert_asset(kind, found)
+    # Persist into global library so film switches / empty saves don't lose the sheet
+    try:
+        lib_saved = cinema.save_film_asset_to_library(kind, aid)
+        job["library_id"] = lib_saved.get("id")
+        job["library_saved"] = True
+    except Exception as e:
+        slog.warn_job(job, "sheet library save", err=e)
+    job["sheet_still_url"] = f"/api/refs/{comfy_name}"
+    job["sheet_attached"] = True
+    # Ephemeral sheet: drop the video — only the still matters for refs
+    if job.get("sheet_ephemeral") is not False:
+        for key_path in ("local_path",):
+            p = Path(job.get(key_path) or "")
+            if p.is_file():
+                try:
+                    p.unlink()
+                except OSError as e:
+                    slog.warn_job(job, "sheet video unlink", err=e)
+        clip_fallback = CLIPS / f"{job.get('id')}.mp4"
+        if clip_fallback.is_file():
+            try:
+                clip_fallback.unlink()
+            except OSError:
+                pass
+        gal = GALLERY / f"{job.get('id')}.mp4"
+        if gal.is_file():
+            try:
+                gal.unlink()
+            except OSError:
+                pass
+        # Drop gallery entry if archived earlier
+        global _gallery
+        jid = str(job.get("id") or "")
+        if jid:
+            _gallery[:] = [g for g in _gallery if str(g.get("id")) != jid]
+            try:
+                _save_gallery()
+            except Exception:
+                pass
+        job["output"] = None
+        job["local_path"] = None
+        job["download_name"] = None
+        job["discarded_video"] = True
+        job["progress_label"] = "still hazır · video silindi"
+    _save_jobs()
+    slog.info_job(job, "sheet still attached", kind=kind, asset=aid[:8])
+
+
+@app.post("/api/cinema/generate-sheet")
+async def cinema_generate_sheet(body: CinemaSheetBody):
+    """Queue a silent H3 clip that renders a 3-panel character/location reference sheet."""
+    if not await comfy.healthy():
+        raise HTTPException(503, "ComfyUI kapalı")
+    kind_raw = str(body.kind or "character").lower()
+    kind, _ = cinema.asset_kind_key(kind_raw)
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(400, "ad gerekli")
+    notes = (body.notes or "").strip()
+    style_key = normalize_style(body.style) if body.style else "realistic"
+    # Prefer cinema setup style when caller omitted
+    if not body.style:
+        lib0 = cinema.load()
+        setup = lib0.get("setup") if isinstance(lib0.get("setup"), dict) else {}
+        style_key = normalize_style(setup.get("style") or "realistic")
+    style_line = style_craft_line(style_key)
+    refs: list[str] = []
+    if body.ref_images:
+        refs.extend(str(x) for x in body.ref_images if str(x).strip())
+    one = (body.ref_image or "").strip()
+    if one and one not in refs:
+        refs.insert(0, one)
+    refs = refs[:3]
+    has_ref = bool(refs)
+    if kind == "location":
+        prompt = cinema.build_location_sheet_prompt(
+            name, notes, style_line=style_line, has_place_ref=has_ref
+        )
+    else:
+        prompt = cinema.build_character_sheet_prompt(
+            name,
+            notes,
+            style_line=style_line,
+            has_face_ref=has_ref,
+            force_creature=(kind == "creature"),
+        )
+    asset_payload: dict[str, Any] = {
+        "name": name,
+        "notes": notes,
+    }
+    if body.asset_id:
+        asset_payload["id"] = body.asset_id
+    if has_ref:
+        asset_payload["source_ref"] = refs[0]
+    asset = cinema.upsert_asset(kind, asset_payload)
+    # Use caller's speed preset (Taslak/Orta/Yüksek); keep last frame, discard video
+    quality = normalize_quality(body.quality or "736")
+    steps = body.steps if body.steps and body.steps > 0 else 18
+    dur = int(body.duration) if body.duration and int(body.duration) > 0 else 5
+    dur = max(4, min(dur, 10))
+    gen_kwargs: dict[str, Any] = {
+        "prompt": prompt,
+        "duration": dur,
+        "aspect": body.aspect or "16:9",
+        "quality": quality,
+        "seed": body.seed if body.seed is not None else -1,
+        "steps": steps,
+        "silent_audio": True,
+        "purpose": "short_film",
+        "lane": "director",
+        "prompt_rewriter_enabled": False,
+    }
+    if has_ref:
+        if kind == "character":
+            gen_kwargs["mode"] = "face"
+            gen_kwargs["ref_images"] = refs
+            gen_kwargs["ref_image_size"] = "max"
+        else:
+            # location + creature: visual ref, not face-lock
+            gen_kwargs["mode"] = "ref"
+            gen_kwargs["ref_images"] = refs
+            gen_kwargs["ref_image_size"] = "match"
+        # Don't merge existing Garen/… card stills into this sheet job
+        gen_kwargs["skip_cinema_assets"] = True
+    else:
+        gen_kwargs["skip_cinema_assets"] = True
+    job = await generate(GenerateBody(**gen_kwargs))
+    jid = str(job.get("id") or "")
+    for j in _jobs:
+        if str(j.get("id")) == jid:
+            j["sheet_asset_id"] = asset.get("id")
+            j["sheet_kind"] = kind
+            j["sheet_name"] = name
+            j["sheet_ephemeral"] = True
+            j["sheet_has_ref"] = has_ref
+            j["frame_length"] = duration_to_length(dur)
+            j["duration"] = dur
+            j["lane"] = "director"
+            ref_bit = (
+                " +yüz" if has_ref and kind == "character" else (" +mekân" if has_ref else "")
+            )
+            j["progress_label"] = f"sheet{ref_bit} · {quality}p/{steps} → still"
+            job = j
+            break
+    _save_jobs()
+    return {
+        "job": job,
+        "asset": asset,
+        "prompt": prompt,
+        "kind": kind,
+        "ref_images": refs,
+    }
+
+
+
+
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
@@ -6375,6 +6674,11 @@ async def _run_job(job: dict):
                     slog.warn_job(job, "gallery archive failed", err=e)
                 slog.info_job(job, "done", file=video_meta.get("filename"))
                 await _notify_job(job, "done")
+                try:
+                    if job.get("sheet_asset_id"):
+                        await _maybe_attach_sheet_still(job)
+                except Exception as e:
+                    slog.warn_job(job, "sheet still attach failed", err=e)
                 try:
                     await _maybe_auto_mux_cinema(job)
                 except Exception as e:

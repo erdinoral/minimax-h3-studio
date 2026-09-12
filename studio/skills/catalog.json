@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "source": "MiniMax Design Hub Skill Connector + Design agent-profiles (portable extract)",
+  "note": "Full Hub pipelines (Midjourney, canvas, <<<image_N>>>) are NOT executed here. Packs feed cinema setup + H3 compose craft only.",
+  "vendor_dir": "vendor",
+  "packs": [
+    {
+      "id": "h3_core",
+      "title": "H3 core prompt craft",
+      "vendor": ["h3-prompt-expert", "h3-visual-design"],
+      "role": "engine"
+    },
+    {
+      "id": "sci_fi_hard",
+      "title": "Hard-science deep space",
+      "look": "sci_fi_hard",
+      "vendor": ["future-sci-fi-cinematic-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "sci_fi_opera",
+      "title": "Epic space opera",
+      "look": "sci_fi_opera",
+      "vendor": ["future-sci-fi-cinematic-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "sci_fi_wasteland",
+      "title": "Wasteland relic sci-fi",
+      "look": "sci_fi_wasteland",
+      "vendor": ["future-sci-fi-cinematic-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "sci_fi_alien",
+      "title": "Alien organic ecology",
+      "look": "sci_fi_alien",
+      "vendor": ["future-sci-fi-cinematic-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "micro_expression",
+      "title": "Micro-expression close-up",
+      "look": "micro_expression",
+      "vendor": ["micro-expression-video-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "product_minimal",
+      "title": "Minimalist product",
+      "look": "product_minimal",
+      "vendor": ["minimalist-product-ad-generator", "brand-promo-video-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "title_sequence",
+      "title": "Cinematic title sequence",
+      "look": "title_sequence",
+      "vendor": ["cinematic-title-sequence"],
+      "role": "genre"
+    },
+    {
+      "id": "handdrawn_live",
+      "title": "Hand-drawn live hybrid",
+      "look": "handdrawn_live",
+      "vendor": ["handdrawn-live-video-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "cgi_short",
+      "title": "3D animation short",
+      "look": "cgi_short",
+      "vendor": ["3d-animation-short-generator"],
+      "role": "genre"
+    },
+    {
+      "id": "music_video_cool",
+      "title": "Cool music video",
+      "look": "music_video_cool",
+      "vendor": ["cool-music-video"],
+      "role": "genre"
+    }
+  ]
+}

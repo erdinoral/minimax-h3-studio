@@ -2129,6 +2129,17 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
       "prod";
   }
   :root { --director-h: var(--director-collapsed-h, 80px); }
+  body.ws-director .workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 42vh) minmax(0, 1fr);
+    grid-template-areas:
+      "player"
+      "prod";
+  }
+  body.ws-director #view-cinema.cinema-dock:not(.hidden) {
+    right: 0;
+    bottom: 42vh;
+  }
 }
 
 #view-cinema {
@@ -2140,6 +2151,68 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   flex-direction: column;
   overflow: auto;
   max-height: calc(100vh - 80px);
+}
+
+/* Direktör = Sahne gibi gömülü: sol sinema, sağ player + prod */
+body.ws-director {
+  --director-rail: clamp(300px, 34vw, 460px);
+}
+body.ws-director #view-cinema.cinema-dock:not(.hidden) {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  right: var(--director-rail);
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 8px 8px 8px 10px;
+  background: var(--bg);
+  pointer-events: auto;
+}
+body.ws-director #view-cinema.cinema-dock:not(.hidden) .cinema-panel {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: 100%;
+  border-radius: 8px;
+  overflow: auto;
+}
+body.ws-director .workspace {
+  grid-template-columns: 1fr var(--director-rail);
+  grid-template-rows: minmax(220px, 1fr) minmax(0, 1.05fr);
+  grid-template-areas:
+    ". player"
+    ". prod";
+  padding-right: 8px;
+}
+body.ws-director .zone-scene,
+body.ws-director .zone-prompt,
+body.ws-director .zone-ayar {
+  display: none !important;
+}
+body.ws-director .zone-player {
+  grid-area: player;
+  min-width: 0;
+  gap: 8px;
+}
+body.ws-director .zone-prod {
+  grid-area: prod;
+}
+body.ws-director .zone-player .player-stage {
+  flex: 1 1 auto;
+  min-height: 200px;
+  max-height: min(42vh, 380px);
+}
+body.ws-director .zone-player .player-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+body.ws-director .zone-player .player-actions .btn-secondary,
+body.ws-director .zone-player .player-actions .btn-ghost {
+  font-size: 0.75rem;
+  padding: 5px 9px;
 }
 .cinema-panel header #cinema-title {
   flex: 1;
@@ -2649,6 +2722,107 @@ button.cinema-fold-toggle:hover {
   justify-content: flex-end;
   margin-top: 16px;
 }
+.cinema-scene-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 130;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.66);
+}
+.cinema-scene-modal.hidden {
+  display: none;
+}
+.cinema-scene-dialog {
+  width: min(640px, 100%);
+  max-height: min(860px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+}
+.cinema-scene-dialog header,
+.cinema-scene-dialog .row-btns {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cinema-scene-dialog h3 {
+  margin: 0;
+}
+.cinema-scene-hint {
+  margin: 8px 0 12px;
+  font-size: 0.9rem;
+}
+.cinema-scene-fields {
+  display: grid;
+  gap: 10px;
+}
+.cinema-scene-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: var(--muted, #9aa3ad);
+}
+.cinema-scene-fields input,
+.cinema-scene-fields select,
+.cinema-scene-fields textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  color: inherit;
+  background: var(--bg-input, #12161c);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+.cinema-scene-preview-fold {
+  margin: 14px 0 8px;
+}
+.cinema-scene-preview {
+  margin: 8px 0 0;
+  padding: 10px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+}
+.cinema-shot-summary {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--muted, #9aa3ad);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.cinema-shot-title {
+  margin: 0 0 4px;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: inherit;
+}
+.cinema-shot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cinema-shot .cinema-shot-edit {
+  margin-left: auto;
+}
 .clip-merge-dialog {
   width: min(720px, 100%);
   max-height: min(85vh, 820px);
@@ -2911,4 +3085,80 @@ button.cinema-fold-toggle:hover {
     grid-template-columns: 1fr;
     overflow: auto;
   }
+}
+
+
+/* restored cinema asset tabs */
+.cinema-cast-lock-banner {
+  display: none;
+  gap: 8px 14px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  margin: 0 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(196, 92, 38, 0.45);
+  background: linear-gradient(120deg, rgba(196, 92, 38, 0.18), rgba(22, 18, 16, 0.9));
+}
+.cinema-panel.is-mode-assets .cinema-cast-lock-banner {
+  display: flex;
+}
+.cinema-cast-lock-banner strong {
+  font-size: 0.92rem;
+  color: #f0d2b8;
+}
+.cinema-cast-lock-banner span {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  max-width: 52rem;
+  line-height: 1.35;
+}
+.cinema-asset-tabs {
+  margin: 0 0 8px;
+}
+.cinema-asset-tab-panel input,
+.cinema-asset-tab-panel textarea {
+  width: 100%;
+  margin: 0 0 8px;
+  box-sizing: border-box;
+}
+.cinema-asset-tab-panel .cta {
+  width: 100%;
+  margin-top: 4px;
+}
+.cinema-folder-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cinema-folder-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 4px 6px 0;
+}
+.cinema-folder-tab b {
+  color: var(--text);
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cinema-folder {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+  min-height: 108px;
+  padding: 6px;
+  border-radius: 0 8px 8px 8px;
+  background: #14110f;
+  border: 1px dashed #5a4a3c;
+}
+.cinema-folder.is-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

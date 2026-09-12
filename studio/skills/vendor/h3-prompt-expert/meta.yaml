@@ -1,0 +1,34 @@
+display-name-zh: H3 提示词专家
+version: 1.0.3
+tag-en: Platform Tooling
+tag-cn: 平台工具
+complete-tags-en:
+  - "Platform Tooling"
+complete-tags-cn:
+  - "平台工具"
+summary-en: Evaluates video intent and references, turning scattered inputs into controllable multimodal video generation instructions.
+summary-cn: 判断视频需求与参考素材，将零散输入整理成可控的多模态视频生成指令。
+desc-en: Turns rough video ideas, asset lists, keyframes, multimodal references, and edit instructions into production-ready MiniMax-H3 prompts. It diagnoses the request, checks reference fit, asks focused choice-card questions, and outputs official H3 structures for reference roles, UI/text control, keyframes, music, dialogue, and edit preservation. It does not replace full scriptwriting, storyboards, long workflows, or prompts for other models.
+desc-cn: 这是一个本地 Skill，用于把粗略视频创意、素材列表、关键帧需求、多模态参考和视频编辑指令转成可生产使用的 MiniMax H3 提示词。它会先识别任务类型，评估用户文字和参考图是否满足目标，缺少会改变 prompt 骨架的信息时用选项提问，并在用户选择后只输出官方 H3 格式，如 integrated_multimodal_description 或 subject_definitions 与 retention_analysis。它适合 case 级 H3 提示词、参考素材角色映射、UI/文字/布局控制、关键帧对齐、音乐卡点/对白和编辑保留；不替代完整剧本、分镜规划、长期项目流程或其他视频模型提示词。
+structured-info:
+  zh-CN:
+    summary: 将视频创意、参考素材与关键帧整理为可控、可直接使用的H3提示词。
+    best-for:
+      - 多模态提示词
+      - 参考图提示
+      - 文字UI控制
+    how-to-use: 提供视频创意和参考素材，选择任务类型并补齐关键信息。
+    outputs: H3格式提示词、素材映射、运动声音及文字UI约束。
+  en-US:
+    summary: Organize video ideas, reference assets, and keyframes into controllable, directly usable H3 prompts.
+    best-for:
+      - Multimodal Prompts
+      - Image References
+      - Text UI Control
+    how-to-use: Provide the video idea and references, select a task type, and fill in missing details.
+    outputs: H3-formatted prompts, asset mapping, motion and sound directions, and text/UI constraints.
+author-en: MiniMax Design
+author-cn: MiniMax Design
+source: official-featured
+cover: "https://cdn.hailuoai.com/hailuo-video-web/public_assets/adfe03a1-cff0-4380-a45c-121e39621ae1.mp4"
+cover-en: "https://cdn.hailuoai.com/hailuo-video-web/public_assets/adfe03a1-cff0-4380-a45c-121e39621ae1.mp4"

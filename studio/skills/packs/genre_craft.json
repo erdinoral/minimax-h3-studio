@@ -1,0 +1,172 @@
+{
+  "sci_fi_hard": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "cold",
+      "lighting": "practical",
+      "era": "near_future",
+      "purpose": "short_film",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic, hard-science deep-space realism",
+    "craft": "maintainable aerospace structures, practical cabin point lights, worn titanium, reflective spacesuits, instrument displays, cold controlled contrast, physically plausible floating dust",
+    "avoid": "neon cyberpunk pollution, holographic UI clutter, cybernetic bodies, rain-soaked neon streets, purple/magenta light pollution as default future",
+    "camera_bias": "Favor medium, close, and close-up. Use wide only for true scale of space architecture.",
+    "soundscape": "mechanical cabin hum, soft suit fabric, distant instrument beeps, controlled air recirculation",
+    "music": "N/A"
+  },
+  "sci_fi_opera": {
+    "setup": {
+      "camera": "imax65",
+      "palette": "bleach",
+      "lighting": "natural",
+      "era": "near_future",
+      "purpose": "short_film",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic, epic space-opera scale",
+    "craft": "monumental minimalist brutalist architecture, vast negative space, solemn natural light, weathered stone, heavy matte metal, protective fabrics, dry drifting dust",
+    "avoid": "cheap neon cyberpunk shorthand, cluttered holograms, cartoon proportions",
+    "camera_bias": "Wide only when monumental architecture or fleet scale is the story; otherwise medium and close for faces.",
+    "soundscape": "vast hall reverb, distant boots on stone, low wind across plaza, solemn quiet between lines",
+    "music": "N/A"
+  },
+  "sci_fi_wasteland": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "warm",
+      "lighting": "hard_sun",
+      "era": "near_future",
+      "purpose": "short_film",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic, wasteland relic science fiction",
+    "craft": "eroded technological ruins, harsh daylight, sand-scattered particles, rusted steel, weathered armor, worn leather, cracked surfaces, restrained dusty earth tones",
+    "avoid": "clean chrome utopia, neon cyberpunk nights, glossy VFX-first look",
+    "camera_bias": "Eye-level and low angles emphasizing isolation; wide for ruin scale when needed.",
+    "soundscape": "wind over sand, metal creak, distant debris, dry fabric and boot grit",
+    "music": "N/A"
+  },
+  "sci_fi_alien": {
+    "setup": {
+      "camera": "anamorphic2x",
+      "palette": "cold",
+      "lighting": "volumetric",
+      "era": "near_future",
+      "purpose": "short_film",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic, alien organic ecology",
+    "craft": "internally consistent organic architecture, plants and fungi, wet surfaces, translucent veins, water droplets, keratin scales, refraction, localized soft biological light only on living organisms",
+    "avoid": "city neon cyberpunk, generic green goo tropes, overlit bioluminescence flooding the frame",
+    "camera_bias": "Push-ins and tracking through wet organic corridors; macro for texture, medium for characters.",
+    "soundscape": "wet drip, soft organic membrane stretch, distant creature breath, humid air",
+    "music": "N/A"
+  },
+  "micro_expression": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "rec709",
+      "lighting": "studio",
+      "era": "present",
+      "purpose": "short_film",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic, intimate micro-expression study",
+    "craft": "tight facial close-up, readable eye/brow/mouth micro-changes, shallow depth of field, skin texture retained, performance-first framing",
+    "avoid": "wide establishing unless briefly motivated, busy background action stealing focus, over-smoothed plastic skin",
+    "camera_bias": "Close-up and extreme close-up; subtle push-in on emotional beats.",
+    "soundscape": "quiet room tone, breath, subtle fabric, clear dialogue when present",
+    "music": "N/A"
+  },
+  "product_minimal": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "rec709",
+      "lighting": "studio",
+      "era": "present",
+      "purpose": "commercial",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic, minimalist product hero",
+    "craft": "clean negative space, precise product silhouette, controlled studio key and soft rim, material truth (metal, glass, fabric), slow confident camera",
+    "avoid": "busy lifestyle clutter, neon cyberpunk, cartoon CGI look, unreadable logo distortion",
+    "camera_bias": "Macro and medium hero angles; slow orbit or push-in.",
+    "soundscape": "soft studio hush, tactile material SFX on contact, no busy street bed",
+    "music": "N/A"
+  },
+  "title_sequence": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "noir",
+      "lighting": "practical",
+      "era": "present",
+      "purpose": "intro",
+      "style": "realistic",
+      "audio": "film"
+    },
+    "visual_style": "Live-action, cinematic title-sequence energy",
+    "craft": "graphic composition, timed title reveals, strong silhouettes, editorial pacing, controlled typography moments only when intended as on-screen titles",
+    "avoid": "random watermark text, unreadable typography, slideshow of unrelated shots",
+    "camera_bias": "Motivated moves that land on title cards or iconic objects.",
+    "soundscape": "stylized impacts synced to cuts, sparse atmosphere",
+    "music": "N/A"
+  },
+  "handdrawn_live": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "pastel",
+      "lighting": "natural",
+      "era": "present",
+      "purpose": "short_film",
+      "style": "illustration",
+      "audio": "film"
+    },
+    "visual_style": "Hand-drawn live hybrid, ink and paper texture over photographic staging",
+    "craft": "visible line work, paper grain, controlled color fill, live-action blocking translated into drawn performance",
+    "avoid": "pure photoreal skin lock, generic anime sakuga unless requested, plastic 3D CGI",
+    "camera_bias": "Medium and close with drawn parallax; keep motion readable.",
+    "soundscape": "paper rustle accents optional, clear dialogue, light ambient",
+    "music": "N/A"
+  },
+  "cgi_short": {
+    "setup": {
+      "camera": "35mm",
+      "palette": "teal_orange",
+      "lighting": "studio",
+      "era": "present",
+      "purpose": "short_film",
+      "style": "cgi_3d",
+      "audio": "film"
+    },
+    "visual_style": "Premium 3D CGI cinematic short",
+    "craft": "PBR materials, coherent lighting, appealing proportions, clear silhouette animation, feature-trailer energy without plastic toy look",
+    "avoid": "live-action skin claims, low-poly game leftovers, noisy cyberpunk neon default",
+    "camera_bias": "Cinematic lenses with motivated moves; hold hero poses.",
+    "soundscape": "designed Foley matching CGI materials, clear dialogue if any",
+    "music": "N/A"
+  },
+  "music_video_cool": {
+    "setup": {
+      "camera": "steadicam",
+      "palette": "neon",
+      "lighting": "neon",
+      "era": "present",
+      "purpose": "music_video",
+      "style": "realistic",
+      "audio": "silent"
+    },
+    "visual_style": "Live-action music-video cool, rhythmic graphic frames",
+    "craft": "bold lighting accents, rhythmic camera energy, stylized wardrobe, graphic negative space, cut-friendly end frames",
+    "avoid": "forced dialogue lip-sync unless requested, random cyberpunk clutter without beat motivation",
+    "camera_bias": "Tracking and handheld pulses timed to imagined beat; punch-ins on peaks.",
+    "soundscape": "diegetic room / crowd only if needed; primary song muxed later",
+    "music": "N/A"
+  }
+}

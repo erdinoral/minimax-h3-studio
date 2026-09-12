@@ -26,7 +26,9 @@
     v2vVideos: [], // { name, url }
     v2vImages: [],
     storyboardImages: [],
-    cinema: { title: "", script: "", characters: [], locations: [] },
+    cinema: { title: "", script: "", characters: [], locations: [], creatures: [] },
+    cinemaLibrary: { characters: [], locations: [], creatures: [] },
+    cinemaSheetRefs: { character: null, location: null, creature: null },
     selectedCharacter: null,
     galleryItems: [],
     mergePickIds: [],
@@ -66,6 +68,32 @@
     llmPub: null,
     ollamaModels: [],
   };
+
+  const CHROME_FIT_KEY = "h3-chrome-fit";
+  function chromeFitEnabled() {
+    try {
+      const v = localStorage.getItem(CHROME_FIT_KEY);
+      if (v === null || v === undefined || v === "") return true;
+      return v === "1" || v === "true";
+    } catch {
+      return true;
+    }
+  }
+  function applyChromeFit(on) {
+    const enabled = on !== false;
+    document.documentElement.classList.toggle("chrome-fit", enabled);
+    document.body.classList.toggle("chrome-fit", enabled);
+    const cb = $("settings-chrome-fit");
+    if (cb) cb.checked = enabled;
+    try {
+      localStorage.setItem(CHROME_FIT_KEY, enabled ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }
+  function syncChromeFitFromStorage() {
+    applyChromeFit(chromeFitEnabled());
+  }
 
   function purposeLabel(k) {
     return (typeof window.t === "function" ? window.t("purpose." + k) : k) || k;
@@ -354,6 +382,96 @@
       style: "realistic",
       audio: "silent",
     },
+    sci_fi_hard: {
+      camera: "35mm",
+      palette: "cold",
+      lighting: "practical",
+      era: "near_future",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    sci_fi_opera: {
+      camera: "imax65",
+      palette: "bleach",
+      lighting: "natural",
+      era: "near_future",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    sci_fi_wasteland: {
+      camera: "35mm",
+      palette: "warm",
+      lighting: "hard_sun",
+      era: "near_future",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    sci_fi_alien: {
+      camera: "anamorphic2x",
+      palette: "cold",
+      lighting: "volumetric",
+      era: "near_future",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    micro_expression: {
+      camera: "35mm",
+      palette: "rec709",
+      lighting: "studio",
+      era: "present",
+      purpose: "short_film",
+      style: "realistic",
+      audio: "film",
+    },
+    product_minimal: {
+      camera: "35mm",
+      palette: "rec709",
+      lighting: "studio",
+      era: "present",
+      purpose: "commercial",
+      style: "realistic",
+      audio: "film",
+    },
+    title_sequence: {
+      camera: "35mm",
+      palette: "noir",
+      lighting: "practical",
+      era: "present",
+      purpose: "intro",
+      style: "realistic",
+      audio: "film",
+    },
+    handdrawn_live: {
+      camera: "35mm",
+      palette: "pastel",
+      lighting: "natural",
+      era: "present",
+      purpose: "short_film",
+      style: "illustration",
+      audio: "film",
+    },
+    cgi_short: {
+      camera: "35mm",
+      palette: "teal_orange",
+      lighting: "studio",
+      era: "present",
+      purpose: "short_film",
+      style: "cgi_3d",
+      audio: "film",
+    },
+    music_video_cool: {
+      camera: "steadicam",
+      palette: "neon",
+      lighting: "neon",
+      era: "present",
+      purpose: "music_video",
+      style: "realistic",
+      audio: "silent",
+    },
   };
   const CINEMA_SETUP_OPTIONS = {
     look: [
@@ -368,6 +486,16 @@
       ["noir", "Noir"],
       ["golden", "Golden hour"],
       ["retro_80s", "80s"],
+      ["sci_fi_hard", "Sci-fi · deep space"],
+      ["sci_fi_opera", "Sci-fi · space opera"],
+      ["sci_fi_wasteland", "Sci-fi · wasteland"],
+      ["sci_fi_alien", "Sci-fi · alien ecology"],
+      ["micro_expression", "Micro-expression"],
+      ["product_minimal", "Product minimal"],
+      ["title_sequence", "Title sequence"],
+      ["handdrawn_live", "Hand-drawn live"],
+      ["cgi_short", "3D CGI short"],
+      ["music_video_cool", "Music video cool"],
     ],
     camera: [
       ["auto", "Auto"],
@@ -468,6 +596,7 @@
       },
       characters: [],
       locations: [],
+      creatures: [],
     };
   }
 
@@ -1171,8 +1300,9 @@
       ?.querySelectorAll(".cinema-shot")
       .forEach((card) => {
         const shot = cinemaShotById(card.dataset.id);
+        if (!shot) return;
         const ta = card.querySelector("[data-field='text']");
-        if (shot && ta) shot.text = ta.value;
+        if (ta) shot.text = ta.value;
       });
     if ($("cinema-title")) c.title = $("cinema-title").value || c.title || "";
     if ($("cinema-role-script")) c.role_script = $("cinema-role-script").value || "";
@@ -1329,6 +1459,14 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  
+  function cinemaRefUrl(file) {
+    const f = String(file || "").trim();
+    if (!f) return "";
+    if (/^https?:\/\//i.test(f) || f.startsWith("/api/")) return f;
+    return "/api/refs/" + encodeURIComponent(f);
   }
 
   function cinemaAssetImages(item) {
@@ -1597,33 +1735,237 @@
     };
   }
 
+  function emptyCinemaStructured() {
+    return {
+      title: "",
+      location: "",
+      character: "",
+      action: "",
+      dialogue: "",
+      dialogue_lang: "auto",
+      camera: "",
+      visual_style: "",
+      audio: "",
+      music: "",
+      important: "",
+    };
+  }
+
+  const GENRE_CRAFT = {
+    sci_fi_hard: {
+      visual_style: "Live-action, cinematic, hard-science deep-space realism",
+      craft: "maintainable aerospace structures, practical cabin point lights, worn titanium, reflective spacesuits, instrument displays, cold controlled contrast, physically plausible floating dust",
+      avoid: "neon cyberpunk pollution, holographic UI clutter, cybernetic bodies, rain-soaked neon streets",
+      camera_bias: "Favor medium, close, and close-up. Use wide only for true scale of space architecture.",
+      soundscape: "mechanical cabin hum, soft suit fabric, distant instrument beeps, controlled air recirculation",
+      music: "N/A",
+    },
+    sci_fi_opera: {
+      visual_style: "Live-action, cinematic, epic space-opera scale",
+      craft: "monumental minimalist brutalist architecture, vast negative space, solemn natural light, weathered stone, heavy matte metal, protective fabrics, dry drifting dust",
+      avoid: "cheap neon cyberpunk shorthand, cluttered holograms, cartoon proportions",
+      camera_bias: "Wide only when monumental architecture or fleet scale is the story; otherwise medium and close for faces.",
+      soundscape: "vast hall reverb, distant boots on stone, low wind across plaza, solemn quiet between lines",
+      music: "N/A",
+    },
+    sci_fi_wasteland: {
+      visual_style: "Live-action, cinematic, wasteland relic science fiction",
+      craft: "eroded technological ruins, harsh daylight, sand-scattered particles, rusted steel, weathered armor, worn leather, cracked surfaces, restrained dusty earth tones",
+      avoid: "clean chrome utopia, neon cyberpunk nights, glossy VFX-first look",
+      camera_bias: "Eye-level and low angles emphasizing isolation; wide for ruin scale when needed.",
+      soundscape: "wind over sand, metal creak, distant debris, dry fabric and boot grit",
+      music: "N/A",
+    },
+    sci_fi_alien: {
+      visual_style: "Live-action, cinematic, alien organic ecology",
+      craft: "internally consistent organic architecture, plants and fungi, wet surfaces, translucent veins, water droplets, keratin scales, refraction, localized soft biological light only on living organisms",
+      avoid: "city neon cyberpunk, generic green goo tropes, overlit bioluminescence flooding the frame",
+      camera_bias: "Push-ins and tracking through wet organic corridors; macro for texture, medium for characters.",
+      soundscape: "wet drip, soft organic membrane stretch, distant creature breath, humid air",
+      music: "N/A",
+    },
+    micro_expression: {
+      visual_style: "Live-action, cinematic, intimate micro-expression study",
+      craft: "tight facial close-up, readable eye/brow/mouth micro-changes, shallow depth of field, skin texture retained, performance-first framing",
+      avoid: "wide establishing unless briefly motivated, busy background action stealing focus, over-smoothed plastic skin",
+      camera_bias: "Close-up and extreme close-up; subtle push-in on emotional beats.",
+      soundscape: "quiet room tone, breath, subtle fabric, clear dialogue when present",
+      music: "N/A",
+    },
+    product_minimal: {
+      visual_style: "Live-action, cinematic, minimalist product hero",
+      craft: "clean negative space, precise product silhouette, controlled studio key and soft rim, material truth (metal, glass, fabric), slow confident camera",
+      avoid: "busy lifestyle clutter, neon cyberpunk, cartoon CGI look, unreadable logo distortion",
+      camera_bias: "Macro and medium hero angles; slow orbit or push-in.",
+      soundscape: "soft studio hush, tactile material SFX on contact, no busy street bed",
+      music: "N/A",
+    },
+    title_sequence: {
+      visual_style: "Live-action, cinematic title-sequence energy",
+      craft: "graphic composition, timed title reveals, strong silhouettes, editorial pacing",
+      avoid: "random watermark text, unreadable typography, slideshow of unrelated shots",
+      camera_bias: "Motivated moves that land on title cards or iconic objects.",
+      soundscape: "stylized impacts synced to cuts, sparse atmosphere",
+      music: "N/A",
+    },
+    handdrawn_live: {
+      visual_style: "Hand-drawn live hybrid, ink and paper texture over photographic staging",
+      craft: "visible line work, paper grain, controlled color fill, live-action blocking translated into drawn performance",
+      avoid: "pure photoreal skin lock, generic anime sakuga unless requested, plastic 3D CGI",
+      camera_bias: "Medium and close with drawn parallax; keep motion readable.",
+      soundscape: "paper rustle accents optional, clear dialogue, light ambient",
+      music: "N/A",
+    },
+    cgi_short: {
+      visual_style: "Premium 3D CGI cinematic short",
+      craft: "PBR materials, coherent lighting, appealing proportions, clear silhouette animation",
+      avoid: "live-action skin claims, low-poly game leftovers, noisy cyberpunk neon default",
+      camera_bias: "Cinematic lenses with motivated moves; hold hero poses.",
+      soundscape: "designed Foley matching CGI materials, clear dialogue if any",
+      music: "N/A",
+    },
+    music_video_cool: {
+      visual_style: "Live-action music-video cool, rhythmic graphic frames",
+      craft: "bold lighting accents, rhythmic camera energy, stylized wardrobe, graphic negative space",
+      avoid: "forced dialogue lip-sync unless requested, random cyberpunk clutter without beat motivation",
+      camera_bias: "Tracking and handheld pulses timed to imagined beat; punch-ins on peaks.",
+      soundscape: "diegetic room / crowd only if needed; primary song muxed later",
+      music: "N/A",
+    },
+  };
+
+  function enrichStructuredFromLook(structured) {
+    const s = cleanCinemaStructured(structured);
+    const look = String((ensureCinema().setup || {}).look || "").trim();
+    const pack = GENRE_CRAFT[look];
+    if (!pack) return s;
+    if (!s.visual_style && pack.visual_style) s.visual_style = pack.visual_style;
+    if (!s.important) {
+      const bits = [pack.camera_bias, pack.avoid ? "Avoid: " + pack.avoid : ""].filter(Boolean);
+      if (bits.length) s.important = bits.join(" ");
+    }
+    if (!s.audio && pack.soundscape) s.audio = pack.soundscape;
+    if (!s.music && pack.music) s.music = pack.music;
+    if (!s.camera && pack.camera_bias) s.camera = pack.camera_bias;
+    return s;
+  }
+
+  function cleanCinemaStructured(raw) {
+    const src = raw && typeof raw === "object" ? raw : {};
+    const out = emptyCinemaStructured();
+    Object.keys(out).forEach((k) => {
+      out[k] = String(src[k] || "").trim();
+    });
+    if (!out.dialogue_lang) out.dialogue_lang = "auto";
+    return out;
+  }
+
+  function cinemaDialogueLangLabel(structured) {
+    const explicit = String(structured.dialogue_lang || "").trim();
+    if (explicit && explicit.toLowerCase() !== "auto") return explicit;
+    const dialogue = structured.dialogue || "";
+    if (/[\u0600-\u06FF]/.test(dialogue)) return "Arabic";
+    if (/[\u0400-\u04FF]/.test(dialogue)) return "Russian";
+    if (/[\u3040-\u30FF\u4E00-\u9FFF]/.test(dialogue)) {
+      return /[\u3040-\u30FF]/.test(dialogue) ? "Japanese" : "Chinese";
+    }
+    if (/[\uAC00-\uD7AF]/.test(dialogue)) return "Korean";
+    if (/[ğüşıöçĞÜŞİÖÇ]/.test(dialogue)) return "Turkish";
+    return "English";
+  }
+
+  function wrapCinemaDialogue(dialogue, lang) {
+    const text = String(dialogue || "").trim();
+    if (!text) return "";
+    if (/<d>/i.test(text)) return text;
+    const label = String(lang || "English").trim() || "English";
+    return "says: <d>[" + label + "] " + text + "</d>";
+  }
+
+  function composeH3Prompt(structuredRaw) {
+    const s = enrichStructuredFromLook(structuredRaw);
+    const hasBody = Object.keys(s).some(
+      (k) => k !== "dialogue_lang" && String(s[k] || "").trim()
+    );
+    if (!hasBody) return "";
+    const style = s.visual_style || "Live-action, cinematic";
+    const parts = ["[Shot 1] " + style];
+    if (s.location) parts.push("Location: " + s.location);
+    if (s.character) parts.push("Main character: " + s.character);
+    if (s.action) parts.push("Action: " + s.action);
+    if (s.camera) parts.push("Camera: " + s.camera);
+    if (s.dialogue) {
+      const lang = cinemaDialogueLangLabel(s);
+      const who = s.character || "The speaker (S1)";
+      if (/\(S[12]\)/.test(who)) {
+        parts.push(who + " " + wrapCinemaDialogue(s.dialogue, lang));
+      } else {
+        parts.push(who + " (S1) " + wrapCinemaDialogue(s.dialogue, lang));
+      }
+    }
+    if (s.important) parts.push("Constraints: " + s.important);
+    let multimodal = parts.map((p) => p.trim()).filter(Boolean).join(" ");
+    if (s.title) multimodal = "SCENE – " + s.title + ". " + multimodal;
+    const soundscape =
+      s.audio ||
+      "Natural ambient sound matching the scene, with clear dialogue when present.";
+    const musicRaw = String(s.music || "").trim();
+    const music =
+      !musicRaw || /^(n\/a|na|none|no|yok|off)$/i.test(musicRaw)
+        ? "N/A"
+        : musicRaw;
+    return (
+      "integrated_multimodal_description: " +
+      multimodal +
+      "\n\noverall_soundscape: " +
+      soundscape +
+      "\n\nnon_diegetic_music: " +
+      music
+    );
+  }
+
+  function cinemaShotSummary(shot) {
+    const s = cleanCinemaStructured(shot && shot.structured);
+    if (s.title) return s.title;
+    const bits = [s.location, s.character, s.action, s.dialogue].filter(Boolean);
+    if (bits.length) return bits.join(" · ");
+    const text = String((shot && shot.text) || "").trim();
+    if (!text) return "";
+    const oneLine = text.replace(/\s+/g, " ");
+    return oneLine.length > 140 ? oneLine.slice(0, 137) + "…" : oneLine;
+  }
+
   function cinemaShotHtml(shot, index) {
     const mode = shot.mode === "continue" ? "continue" : "t2v";
     const calls = cinemaShotCalls(shot.text);
     const jobMeta = cinemaShotJobMeta(shot.id, index);
     const jobCls = jobMeta.cls;
     const jobLabel = jobMeta.label;
-    const modeHtml = cinemaStudioMode() === "seamless"
-      ? '<span class="cinema-shot-link muted">' +
-        (mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
-        "</span>"
-      : '<div class="cinema-shot-mode">' +
-        '<button type="button" class="t2v' +
-        (mode === "t2v" ? " on" : "") +
-        '" data-mode="t2v">' +
-        tt("mode.t2v") +
-        "</button>" +
-        '<button type="button" class="continue' +
-        (mode === "continue" ? " on" : "") +
-        '" data-mode="continue">' +
-        tt("plan.cont") +
-        "</button></div>";
+    const structured = cleanCinemaStructured(shot.structured);
+    const title = structured.title;
+    const summary = cinemaShotSummary(shot) || tt("cinema.sectionEmpty");
+    const modeHtml =
+      cinemaStudioMode() === "seamless"
+        ? '<span class="cinema-shot-link muted">' +
+          (mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
+          "</span>"
+        : '<div class="cinema-shot-mode">' +
+          '<button type="button" class="t2v' +
+          (mode === "t2v" ? " on" : "") +
+          '" data-mode="t2v">' +
+          tt("mode.t2v") +
+          "</button>" +
+          '<button type="button" class="continue' +
+          (mode === "continue" ? " on" : "") +
+          '" data-mode="continue">' +
+          tt("plan.cont") +
+          "</button></div>";
     return (
       '<article class="cinema-shot" data-id="' +
       htmlEsc(shot.id) +
-      '"><div class="cinema-shot-head"><span class="idx">Shot ' +
-      (index + 1) +
-      '</span>' +
+      '"><div class="cinema-shot-head"><span class="idx">' +
+      htmlEsc(tf("cinema.sectionLabel", { n: String(index + 1) })) +
+      "</span>" +
       modeHtml +
       (jobLabel
         ? '<span class="cinema-shot-job' + jobCls + '">' + htmlEsc(jobLabel) + "</span>"
@@ -1631,11 +1973,16 @@
       '<button type="button" class="btn-ghost cinema-shot-del">' +
       tt("cinema.del") +
       "</button></div>" +
-      '<textarea data-field="text" rows="3" placeholder="' +
-      htmlEsc(tt("cinema.shotWhat")) +
-      '">' +
-      htmlEsc(shot.text) +
-      "</textarea>" +
+      (title
+        ? '<p class="cinema-shot-title">' + htmlEsc(title) + "</p>"
+        : "") +
+      '<p class="cinema-shot-summary">' +
+      htmlEsc(summary) +
+      "</p>" +
+      '<div class="cinema-shot-actions">' +
+      '<button type="button" class="btn-secondary cinema-shot-edit">' +
+      tt("cinema.sectionEdit") +
+      "</button></div>" +
       (calls.length
         ? '<div class="cinema-shot-binds">' +
           calls.map((n) => '<span class="cinema-bind">' + htmlEsc(n) + "</span>").join("") +
@@ -1643,6 +1990,161 @@
         : "") +
       "</article>"
     );
+  }
+
+  let cinemaSceneEditId = null;
+  let cinemaSceneEditMode = "t2v";
+
+  function readCinemaSceneForm() {
+    const out = emptyCinemaStructured();
+    $("cinema-scene-modal")
+      ?.querySelectorAll("[data-scene-field]")
+      .forEach((el) => {
+        const key = el.dataset.sceneField;
+        if (!key || !(key in out)) return;
+        out[key] = String(el.value || "").trim();
+      });
+    return out;
+  }
+
+  function fillCinemaSceneForm(structured) {
+    const s = cleanCinemaStructured(structured);
+    $("cinema-scene-modal")
+      ?.querySelectorAll("[data-scene-field]")
+      .forEach((el) => {
+        const key = el.dataset.sceneField;
+        if (!key) return;
+        el.value = s[key] || (key === "dialogue_lang" ? "auto" : "");
+      });
+  }
+
+  function refreshCinemaScenePreview() {
+    const pre = $("cinema-scene-preview");
+    if (!pre) return;
+    pre.textContent = composeH3Prompt(readCinemaSceneForm()) || "—";
+  }
+
+  function openCinemaSceneModal(shotId, mode) {
+    const modal = $("cinema-scene-modal");
+    if (!modal) return;
+    cinemaSceneEditId = shotId || null;
+    cinemaSceneEditMode =
+      cinemaStudioMode() === "seamless"
+        ? "t2v"
+        : mode === "continue"
+          ? "continue"
+          : "t2v";
+    const shot = shotId ? cinemaShotById(shotId) : null;
+    if (shot) {
+      cinemaSceneEditMode = shot.mode === "continue" ? "continue" : "t2v";
+      const structured = cleanCinemaStructured(shot.structured);
+      const hasStructured = Object.keys(structured).some(
+        (k) => k !== "dialogue_lang" && structured[k]
+      );
+      if (hasStructured) {
+        fillCinemaSceneForm(structured);
+      } else if (shot.text) {
+        const seeded = emptyCinemaStructured();
+        seeded.action = shot.text;
+        fillCinemaSceneForm(seeded);
+      } else {
+        fillCinemaSceneForm(emptyCinemaStructured());
+      }
+    } else {
+      const draft = ($("cinema-shot-draft")?.value || "").trim();
+      const seeded = emptyCinemaStructured();
+      if (draft) seeded.action = draft;
+      fillCinemaSceneForm(seeded);
+    }
+    refreshCinemaScenePreview();
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    $("cinema-scene-title")?.focus();
+  }
+
+  function closeCinemaSceneModal() {
+    const modal = $("cinema-scene-modal");
+    cinemaSceneEditId = null;
+    modal?.classList.add("hidden");
+    modal?.setAttribute("aria-hidden", "true");
+  }
+
+  function saveCinemaSceneModal() {
+    const structured = readCinemaSceneForm();
+    const composed = composeH3Prompt(structured);
+    const hasBody = Object.keys(structured).some(
+      (k) => k !== "dialogue_lang" && structured[k]
+    );
+    if (!hasBody && !composed) {
+      toast(tt("cinema.needShotText"));
+      return;
+    }
+    const c = ensureCinema();
+    if (
+      !cinemaSceneEditId &&
+      cinemaStudioMode() === "seamless" &&
+      (c.shots || []).length >= 8
+    ) {
+      toast(tt("cinema.seamlessMaxShots"));
+      return;
+    }
+    cinemaForceLocalShots = true;
+    const text = composed || structured.action || "";
+    if (cinemaSceneEditId) {
+      const shot = cinemaShotById(cinemaSceneEditId);
+      if (!shot) return;
+      shot.structured = structured;
+      shot.text = text;
+      if (cinemaStudioMode() !== "seamless") {
+        shot.mode = cinemaSceneEditMode;
+      }
+    } else {
+      c.shots.push({
+        id: cinemaId(),
+        text,
+        mode: cinemaSceneEditMode,
+        structured,
+      });
+      const draft = $("cinema-shot-draft");
+      if (draft) draft.value = "";
+    }
+    closeCinemaSceneModal();
+    renderCinemaShots();
+    renderCinema();
+    void saveCinema(true);
+    scheduleCinemaPreview();
+  }
+
+  function addCinemaShot(mode) {
+    openCinemaSceneModal(null, mode);
+  }
+
+  function addCinemaDraftShot() {
+    const draft = $("cinema-shot-draft");
+    const text = (draft?.value || "").trim();
+    if (!text) {
+      toast(tt("cinema.needShotText"));
+      return;
+    }
+    const c = ensureCinema();
+    if (cinemaStudioMode() === "seamless" && (c.shots || []).length >= 8) {
+      toast(tt("cinema.seamlessMaxShots"));
+      return;
+    }
+    cinemaForceLocalShots = true;
+    c.shots.push({
+      id: cinemaId(),
+      text,
+      mode: cinemaStudioMode() === "seamless" ? "t2v" : "t2v",
+    });
+    if (draft) draft.value = "";
+    renderCinemaShots();
+    renderCinema();
+    void saveCinema(true);
+  }
+
+  function cinemaShotById(id) {
+    return (ensureCinema().shots || []).find((s) => s.id === id);
   }
 
   function renderCinemaPills() {
@@ -1775,6 +2277,62 @@
     if (!host) return;
     const shots = ensureCinema().shots || [];
     host.innerHTML = shots.map((s, i) => cinemaShotHtml(s, i)).join("");
+    if (filmWorkspace) renderFilmWorkspace();
+  }
+
+  let filmWorkspace = null;
+  let filmSaveStatus = "Kaydedildi";
+  let filmNavList = [];
+  function renderFilmWorkspace() {
+    if (!window.createFilmWorkspace) return;
+    if (!filmWorkspace) {
+      filmWorkspace = window.createFilmWorkspace({
+        get: ensureCinema,
+        jobs: () => state.jobs || [],
+        toast,
+        saveStatus: () => filmSaveStatus,
+        films: () => filmNavList,
+        switchFilm: async (id) => {
+          if (!id || id === ensureCinema().film_id) return;
+          await cinemaFilmAction("switch", id);
+          await fillCinemaFilms();
+          toast(tt("cinema.filmSwitched") || "Film değiştirildi");
+        },
+        openLibrary: () => {
+          toast(tt("cinema.libSoon") || "Varlık kütüphanesi bu sürümde ayrı panelde.");
+        },
+        saveAllToLibrary: async () => {
+          toast(tt("cinema.libSoon") || "Kütüphane aktarımı henüz bağlı değil.");
+        },
+        save: async () => {
+          renderCinemaShots();
+          if ((await saveCinema(true)) === false) {
+            throw new Error("Kayıt başarısız; değişiklikler henüz diske yazılmadı.");
+          }
+        },
+        select: (id) => {
+          const card = document.querySelector(`#cinema-shots .cinema-shot[data-id="${CSS.escape(String(id))}"]`);
+          card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          if (typeof openCinemaSceneModal === "function") openCinemaSceneModal(id);
+        },
+        filter: (chapter) => {
+          document.querySelectorAll("#cinema-shots .cinema-shot").forEach((el) => {
+            const s = cinemaShotById(el.dataset.id);
+            el.hidden = !!s && (s.chapter || "Bölüm 1") !== chapter;
+          });
+        },
+        produce: async () => {
+          await produceCinema();
+        },
+        approve: async () => {
+          throw new Error("Onay API bu sürümde yok — klasik shot listesinden devam et.");
+        },
+        importFilm: async () => {
+          throw new Error("MD içe aktarma API bu sürümde yok.");
+        },
+      });
+    }
+    filmWorkspace.render();
   }
 
   function renderCinemaTimeline() {
@@ -1834,6 +2392,8 @@
   }
 
   function cinemaAssetCardsRoot(kind) {
+    const meta = typeof cinemaKindMeta === "function" ? cinemaKindMeta(kind) : null;
+    if (meta?.host) return $(meta.host);
     return kind === "character" ? $("cinema-chars") : $("cinema-locs");
   }
 
@@ -1850,7 +2410,8 @@
 
   function renderCinemaAssetCards(kind, opts) {
     const force = !!(opts && opts.force);
-    const key = kind === "character" ? "characters" : "locations";
+    const meta = typeof cinemaKindMeta === "function" ? cinemaKindMeta(kind) : null;
+    const key = meta?.key || (kind === "character" ? "characters" : "locations");
     const root = cinemaAssetCardsRoot(kind);
     if (!root) return;
     const items = ensureCinema()[key] || [];
@@ -1872,7 +2433,17 @@
     renderCinemaAudio();
     renderCinemaTimeline();
     renderCinemaAssetCards("character");
+    renderCinemaAssetCards("creature");
     renderCinemaAssetCards("location");
+    if (typeof renderCinemaLibrary === "function") {
+      try {
+        renderCinemaLibrary("character");
+        renderCinemaLibrary("creature");
+        renderCinemaLibrary("location");
+      } catch {
+        /* ignore until library hosts exist */
+      }
+    }
     if (
       $("cinema-shots") &&
       document.activeElement &&
@@ -1908,6 +2479,11 @@
     try {
       const data = await fetch("/api/cinema/films").then((r) => r.json());
       const films = data.films || [];
+      filmNavList = films.map((f) => ({
+        id: f.id,
+        title: f.title || f.id,
+        meta: f.meta || "",
+      }));
       const active = ensureCinema().film_id || data.active || "";
       sel.innerHTML = films
         .map((f) => {
@@ -1926,6 +2502,7 @@
       if (!films.length) {
         sel.innerHTML = '<option value="">—</option>';
       }
+      if (filmWorkspace) renderFilmWorkspace();
     } catch {
       /* ignore */
     }
@@ -2010,6 +2587,7 @@
     }
     return {
       characters: stored.characters !== false,
+      creatures: stored.creatures !== false,
       locations: stored.locations !== false,
     };
   }
@@ -2039,13 +2617,21 @@
     const fold = cinemaFoldState();
     const c = ensureCinema();
     const nC = (c.characters || []).length;
+    const nCr = (c.creatures || []).length;
     const nL = (c.locations || []).length;
     if ($("cinema-char-count")) $("cinema-char-count").textContent = String(nC);
+    if ($("cinema-creature-count")) $("cinema-creature-count").textContent = String(nCr);
     if ($("cinema-loc-count")) $("cinema-loc-count").textContent = String(nL);
     if ($("cinema-char-summary")) {
       $("cinema-char-summary").innerHTML = cinemaFoldSummaryHtml(
         c.characters,
         tt("cinema.noChars")
+      );
+    }
+    if ($("cinema-creature-summary")) {
+      $("cinema-creature-summary").innerHTML = cinemaFoldSummaryHtml(
+        c.creatures,
+        tt("cinema.noCreatures") || "Yaratık yok"
       );
     }
     if ($("cinema-loc-summary")) {
@@ -2188,8 +2774,443 @@
     $("director-msg")?.focus();
   }
 
+function cinemaKindMeta(kind) {
+    const k = String(kind || "character").toLowerCase();
+    if (k === "location") {
+      return {
+        kind: "location",
+        key: "locations",
+        host: "cinema-locs",
+        libHost: "cinema-loc-library",
+        api: "/api/cinema/location",
+        fold: "locations",
+      };
+    }
+    if (k === "creature") {
+      return {
+        kind: "creature",
+        key: "creatures",
+        host: "cinema-creatures",
+        libHost: "cinema-creature-library",
+        api: "/api/cinema/creature",
+        fold: "creatures",
+      };
+    }
+    return {
+      kind: "character",
+      key: "characters",
+      host: "cinema-chars",
+      libHost: "cinema-char-library",
+      api: "/api/cinema/character",
+      fold: "characters",
+    };
+  }
+
+function filmHasStillCards() {
+    const c = ensureCinema();
+    return ["characters", "creatures", "locations"].some((key) =>
+      (c[key] || []).some((a) => cinemaAssetImages(a).length || (a.name || "").trim())
+    );
+  }
+
+function setCinemaAssetTab(kind, tab) {
+    const k = cinemaKindMeta(kind).kind;
+    const t = tab === "create" ? "create" : tab === "library" ? "library" : "list";
+    document.querySelectorAll(`.cinema-asset-tabs[data-asset-kind="${k}"] .chip`).forEach((btn) => {
+      btn.classList.toggle("on", btn.dataset.assetTab === t);
+    });
+    document.querySelectorAll(`.cinema-asset-tab-panel[data-asset-kind="${k}"]`).forEach((panel) => {
+      panel.classList.toggle("hidden", panel.dataset.assetPanel !== t);
+    });
+    if (t === "library") void loadCinemaLibrary();
+  }
+
+function cinemaSheetRefUi(kind) {
+    const k = cinemaKindMeta(kind).kind;
+    if (k === "location") {
+      return {
+        key: "location",
+        preview: "cinema-loc-ref-preview",
+        name: "cinema-loc-ref-name",
+        clear: "btn-cinema-loc-ref-clear",
+        file: "cinema-loc-ref-file",
+        readyKey: "cinema.sheetPlaceReady",
+      };
+    }
+    if (k === "creature") {
+      return {
+        key: "creature",
+        preview: "cinema-creature-ref-preview",
+        name: "cinema-creature-ref-name",
+        clear: "btn-cinema-creature-ref-clear",
+        file: "cinema-creature-ref-file",
+        readyKey: "cinema.sheetCreatureReady",
+      };
+    }
+    return {
+      key: "character",
+      preview: "cinema-char-face-preview",
+      name: "cinema-char-face-name",
+      clear: "btn-cinema-char-face-clear",
+      file: "cinema-char-face-file",
+      readyKey: "cinema.sheetFaceReady",
+    };
+  }
+
+
+function renderCinemaSheetRefPreview(kind) {
+    const ui = cinemaSheetRefUi(kind);
+    const item = state.cinemaSheetRefs[ui.key];
+    const preview = $(ui.preview);
+    const nameEl = $(ui.name);
+    const clearBtn = $(ui.clear);
+    if (preview) {
+      if (item && item.url) {
+        preview.classList.remove("hidden");
+        if (preview.tagName === "IMG") {
+          preview.src = item.url;
+        } else {
+          preview.innerHTML = '<img src="' + item.url + '" alt="ref" />';
+        }
+      } else {
+        preview.classList.add("hidden");
+        if (preview.tagName === "IMG") preview.removeAttribute("src");
+        else preview.innerHTML = "";
+      }
+    }
+    if (nameEl) {
+      nameEl.textContent = item
+        ? item.filename || item.name || tt("pick.ready") || "Hazır"
+        : tt("pick.none") || "Seçilmedi";
+      nameEl.classList.toggle("has-file", !!item);
+    }
+    clearBtn?.classList.toggle("hidden", !item);
+  }
+
+async function clearCinemaSheetRef(kind) {
+    const ui = cinemaSheetRefUi(kind);
+    const item = state.cinemaSheetRefs[ui.key];
+    if (item) {
+      try {
+        await deleteUploadedMedia(item);
+      } catch {
+        /* ignore */
+      }
+    }
+    state.cinemaSheetRefs[ui.key] = null;
+    const input = $(ui.file);
+    if (input) input.value = "";
+    clearFilePickLabel(input);
+    renderCinemaSheetRefPreview(ui.key);
+  }
+
+async function generateCinemaSheet(kind) {
+    const meta = cinemaKindMeta(kind);
+    const ids =
+      meta.kind === "location"
+        ? {
+            name: "cinema-loc-create-name",
+            notes: "cinema-loc-create-notes",
+            status: "cinema-loc-create-status",
+            btn: "btn-cinema-create-loc",
+            needKey: "cinema.sheetNeedLocName",
+          }
+        : meta.kind === "creature"
+          ? {
+              name: "cinema-creature-create-name",
+              notes: "cinema-creature-create-notes",
+              status: "cinema-creature-create-status",
+              btn: "btn-cinema-create-creature",
+              needKey: "cinema.sheetNeedCreatureName",
+            }
+          : {
+              name: "cinema-char-create-name",
+              notes: "cinema-char-create-notes",
+              status: "cinema-char-create-status",
+              btn: "btn-cinema-create-char",
+              needKey: "cinema.sheetNeedCharName",
+            };
+    const nameEl = $(ids.name);
+    const notesEl = $(ids.notes);
+    const statusEl = $(ids.status);
+    const btn = $(ids.btn);
+    const name = (nameEl?.value || "").trim();
+    const notes = (notesEl?.value || "").trim();
+    if (!name) {
+      toast(tt(ids.needKey));
+      return;
+    }
+    if (btn) btn.disabled = true;
+    if (statusEl) statusEl.textContent = tt("cinema.sheetQueuing");
+    try {
+      const cine = ensureCinema();
+      const setup = cine.setup || {};
+      const style =
+        state.projectStyle ||
+        (setup.style && setup.style !== "auto" ? setup.style : null) ||
+        null;
+      const quality = normalizeQuality(
+        cine.quality || state.quality || "736"
+      );
+      const steps =
+        Number($("cinema-steps")?.value) ||
+        Number($("steps")?.value) ||
+        Number(cine.steps) ||
+        18;
+      const duration =
+        Number($("cinema-duration")?.value) ||
+        Number(cine.duration) ||
+        Number(state.duration) ||
+        5;
+      const sheetRef = state.cinemaSheetRefs[meta.kind];
+      const payload = {
+        kind: meta.kind,
+        name,
+        notes,
+        style,
+        duration,
+        quality,
+        steps,
+        aspect: state.aspect || "16:9",
+      };
+      if (sheetRef?.name) {
+        payload.ref_image = sheetRef.name;
+        payload.ref_images = [sheetRef.name];
+      }
+      const r = await fetch("/api/cinema/generate-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      const asset = data.asset;
+      if (asset && asset.id) {
+        const c = ensureCinema();
+        const list = Array.isArray(c[meta.key]) ? c[meta.key].slice() : [];
+        const i = list.findIndex((x) => String(x.id) === String(asset.id));
+        if (i >= 0) list[i] = { ...list[i], ...asset };
+        else list.push(asset);
+        c[meta.key] = list;
+      }
+      setCinemaAssetTab(meta.kind, "list");
+      setCinemaFold(meta.fold, true);
+      renderCinema();
+      state.prodLane = "director";
+      setProdLane("director");
+      await refreshJobs();
+      if (statusEl) {
+        statusEl.textContent = tf("cinema.sheetQueued", {
+          name,
+          id: String(data.job?.id || "").slice(0, 8),
+        });
+      }
+      toast(tf("cinema.sheetQueuedToast", { name }));
+    } catch (e) {
+      if (statusEl) statusEl.textContent = String(e.message || e);
+      toast(String(e.message || e));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+async function loadCinemaLibrary() {
+    try {
+      const data = await fetch("/api/cinema/library").then((r) => r.json());
+      state.cinemaLibrary = {
+        characters: Array.isArray(data.characters) ? data.characters : [],
+        locations: Array.isArray(data.locations) ? data.locations : [],
+        creatures: Array.isArray(data.creatures) ? data.creatures : [],
+      };
+    } catch {
+      state.cinemaLibrary = state.cinemaLibrary || {
+        characters: [],
+        locations: [],
+        creatures: [],
+      };
+    }
+    renderCinemaLibrary("character");
+    renderCinemaLibrary("creature");
+    renderCinemaLibrary("location");
+  }
+
+function cinemaLibraryCardHtml(item, kind) {
+    const imgs = cinemaAssetImages(item);
+    const thumb = imgs[0];
+    const src = thumb
+      ? htmlEsc(thumb.url || cinemaRefUrl(thumb.file))
+      : "";
+    return (
+      '<div class="cinema-lib-card" data-id="' +
+      htmlEsc(item.id) +
+      '" data-kind="' +
+      kind +
+      '">' +
+      (src
+        ? '<img class="cinema-lib-thumb" src="' +
+          src +
+          '" alt="" data-full="' +
+          src +
+          '" data-file="' +
+          htmlEsc(thumb?.file || "") +
+          '" data-name="' +
+          htmlEsc((item.name || "asset") + ".png") +
+          '" />'
+        : '<div class="cinema-lib-thumb is-empty"></div>') +
+      '<div class="cinema-lib-meta">' +
+      "<b>" +
+      htmlEsc(item.name || tt("cinema.untitled")) +
+      "</b>" +
+      '<span class="muted">' +
+      htmlEsc((item.notes || "").slice(0, 80)) +
+      "</span>" +
+      '<div class="row-btns">' +
+      '<button type="button" class="cta cinema-lib-pull">' +
+      htmlEsc(tt("cinema.pullLib")) +
+      "</button>" +
+      (item._inFilm
+        ? '<span class="muted">' + htmlEsc(tt("cinema.libInFilm") || "Filmde") + "</span>"
+        : "") +
+      '<button type="button" class="btn-ghost cinema-lib-del">' +
+      htmlEsc(tt("cinema.del")) +
+      "</button>" +
+      "</div></div></div>"
+    );
+  }
+
+function renderCinemaLibrary(kind) {
+    const meta = cinemaKindMeta(kind);
+    const root = $(meta.libHost);
+    if (!root) return;
+    const filmItems = ensureCinema()[meta.key] || [];
+    const inFilm = new Set(
+      filmItems.flatMap((x) =>
+        [String(x.library_id || ""), String(x.id || ""), String(x.name || "").toLowerCase()].filter(Boolean)
+      )
+    );
+    const items = ((state.cinemaLibrary && state.cinemaLibrary[meta.key]) || []).map((x) => ({
+      ...x,
+      _inFilm:
+        inFilm.has(String(x.id || "")) ||
+        inFilm.has(String(x.library_id || "")) ||
+        inFilm.has(String(x.name || "").toLowerCase()),
+    }));
+    if (!items.length) {
+      root.innerHTML =
+        '<p class="muted cinema-lib-empty">' + htmlEsc(tt("cinema.libEmpty")) + "</p>";
+      return;
+    }
+    root.innerHTML = items.map((x) => cinemaLibraryCardHtml(x, meta.kind)).join("");
+  }
+
+async function saveAllCinemaAssetsToLibrary() {
+    const c = ensureCinema();
+    let n = 0;
+    for (const kind of ["character", "creature", "location"]) {
+      const meta = cinemaKindMeta(kind);
+      for (const asset of c[meta.key] || []) {
+        if (!asset?.id) continue;
+        try {
+          await saveCinemaAssetToLibrary(meta.kind, asset.id, { quiet: true });
+          n += 1;
+        } catch {
+          /* keep going */
+        }
+      }
+    }
+    await loadCinemaLibrary();
+    toast(tf("cinema.savedAllLib", { n: String(n) }));
+    return n;
+  }
+
+function openCinemaAssetLibrary() {
+    const grid = document.querySelector("#view-cinema .cinema-grid");
+    if (grid) grid.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setCinemaAssetTab("character", "list");
+    setCinemaAssetTab("creature", "list");
+    setCinemaAssetTab("location", "list");
+    setCinemaFold("characters", true);
+    setCinemaFold("creatures", true);
+    setCinemaFold("locations", true);
+    void loadCinemaLibrary();
+  }
+
+async function saveCinemaAssetToLibrary(kind, assetId, opts) {
+    const meta = cinemaKindMeta(kind);
+    const r = await fetch("/api/cinema/library/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: meta.kind, asset_id: assetId }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errDetail(data));
+    if (data.library) {
+      state.cinemaLibrary = state.cinemaLibrary || {
+        characters: [],
+        locations: [],
+        creatures: [],
+      };
+      state.cinemaLibrary.characters =
+        data.library.characters || state.cinemaLibrary.characters;
+      state.cinemaLibrary.locations =
+        data.library.locations || state.cinemaLibrary.locations;
+      state.cinemaLibrary.creatures =
+        data.library.creatures || state.cinemaLibrary.creatures;
+    } else {
+      await loadCinemaLibrary();
+    }
+    renderCinemaLibrary(meta.kind);
+    if (!opts?.quiet) toast(tf("cinema.savedLib", { name: data.asset?.name || "" }));
+    return data.asset;
+  }
+
+async function pullCinemaLibraryAsset(kind, libraryId) {
+    const meta = cinemaKindMeta(kind);
+    const r = await fetch("/api/cinema/library/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: meta.kind, library_id: libraryId }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errDetail(data));
+    if (data.cinema) {
+      const base = emptyCinema();
+      state.cinema = {
+        ...base,
+        ...data.cinema,
+        setup: { ...base.setup, ...(data.cinema.setup || {}) },
+        audio: { ...base.audio, ...(data.cinema.audio || {}) },
+        characters: data.cinema.characters || [],
+        locations: data.cinema.locations || [],
+        creatures: data.cinema.creatures || [],
+      };
+      state.cinemaLoaded = true;
+    } else {
+      await loadCinema();
+    }
+    setCinemaAssetTab(meta.kind, "library");
+    setCinemaFold(meta.fold, true);
+    renderCinema();
+    if (filmWorkspace) filmWorkspace.render();
+    toast(tf("cinema.pulledLib", { name: data.asset?.name || "" }));
+  }
+
+
   async function openCinemaStudio() {
-    setStudioWorkspace("director");
+    if (state.studioWorkspace !== "director") {
+      state.studioWorkspace = "director";
+      document.body.classList.add("ws-director");
+      document.body.classList.remove("ws-scene");
+      document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
+        const on = btn.dataset.ws === "director";
+        btn.classList.toggle("on", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      $("panel-workspace-director")?.classList.add("hidden");
+      $("panel-workspace-scene")?.classList.add("hidden");
+      refreshStudioWorkspaceChrome();
+      setProdLane("director");
+    }
     $("view-gallery")?.classList.add("hidden");
     $("view-settings")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
@@ -2199,6 +3220,7 @@
     state.cinemaStudioMode = readCinemaStudioMode();
     state.filmMode = state.cinemaStudioMode === "seamless";
     $("view-cinema")?.classList.remove("hidden");
+    document.body.classList.add("cinema-dock-open");
     if (!state.loraCatalog || !state.loraCatalog.length) {
       try {
         await loadLoras();
@@ -2207,19 +3229,27 @@
       }
     }
     await loadCinema();
-    syncCinemaStudioMode();
+    void loadCinemaLibrary();
+    if (typeof filmHasStillCards === "function" && filmHasStillCards()) {
+      setCinemaStudioMode("assets", { persist: false });
+    } else {
+      syncCinemaStudioMode();
+    }
+    renderFilmWorkspace();
   }
 
   function closeCinemaStudio() {
     $("view-cinema")?.classList.add("hidden");
+    document.body.classList.remove("cinema-dock-open");
     state.cinemaDirector = false;
     void saveCinema(true);
   }
 
   async function addCinemaAsset(kind) {
-    const path = kind === "character" ? "/api/cinema/character" : "/api/cinema/location";
-    const key = kind === "character" ? "characters" : "locations";
-    const fold = kind === "character" ? "characters" : "locations";
+    const meta = typeof cinemaKindMeta === "function" ? cinemaKindMeta(kind) : null;
+    const path = meta?.api || (kind === "character" ? "/api/cinema/character" : kind === "creature" ? "/api/cinema/creature" : "/api/cinema/location");
+    const key = meta?.key || (kind === "character" ? "characters" : kind === "creature" ? "creatures" : "locations");
+    const fold = meta?.fold || (kind === "character" ? "characters" : kind === "creature" ? "creatures" : "locations");
     setCinemaFold(fold, true);
     clearTimeout(cinemaPreviewTimer);
     cinemaSaveGen += 1;
@@ -2262,36 +3292,6 @@
       toast(String(e.message || e));
       await loadCinema();
     }
-  }
-
-  function addCinemaShot(mode) {
-    const draft = $("cinema-shot-draft");
-    const text = (draft?.value || "").trim();
-    if (!text) {
-      toast(tt("cinema.needShotText"));
-      return;
-    }
-    const c = ensureCinema();
-    if (cinemaStudioMode() === "seamless" && (c.shots || []).length >= 8) {
-      toast(tt("cinema.seamlessMaxShots"));
-      return;
-    }
-    const want =
-      cinemaStudioMode() === "seamless"
-        ? "t2v"
-        : mode === "continue"
-          ? "continue"
-          : "t2v";
-    cinemaForceLocalShots = true;
-    c.shots.push({ id: cinemaId(), text, mode: want });
-    if (draft) draft.value = "";
-    renderCinemaShots();
-    renderCinema();
-    void saveCinema(true);
-  }
-
-  function cinemaShotById(id) {
-    return (ensureCinema().shots || []).find((s) => s.id === id);
   }
 
   function deleteCinemaShot(shotId) {
@@ -5410,12 +6410,15 @@
       btn.classList.toggle("on", on);
       btn.setAttribute("aria-selected", on ? "true" : "false");
     });
-    $("panel-workspace-director")?.classList.toggle("hidden", next !== "director");
+    // Landing unused — Direktör opens cinema dock directly
+    $("panel-workspace-director")?.classList.add("hidden");
     $("panel-workspace-scene")?.classList.toggle("hidden", next !== "scene");
     refreshStudioWorkspaceChrome();
     if (changed) {
       setProdLane(next);
-      if (next === "scene") {
+      if (next === "director") {
+        void openCinemaStudio();
+      } else {
         if (state.produceMode === "cinema") setProduceMode("t2v");
         if (!$("view-cinema")?.classList.contains("hidden")) closeCinemaStudio();
       }
@@ -6803,6 +7806,93 @@
     }
   }
 
+  
+  document.querySelectorAll(".cinema-asset-tabs").forEach((tabs) => {
+    tabs.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-asset-tab]");
+      if (!btn) return;
+      setCinemaAssetTab(tabs.dataset.assetKind, btn.dataset.assetTab);
+    });
+  });
+  
+  document.querySelectorAll("#cinema-char-library, #cinema-loc-library, #cinema-creature-library").forEach((root) => {
+    root.addEventListener("click", (e) => {
+      const kind = root.id.includes("creature")
+        ? "creature"
+        : root.id.includes("loc")
+          ? "location"
+          : "character";
+      const pull = e.target.closest(".cinema-lib-pull");
+      if (pull) {
+        e.preventDefault();
+        const card = pull.closest(".cinema-lib-card");
+        if (!card) return;
+        void pullCinemaLibraryAsset(kind, card.dataset.id || "").catch((err) =>
+          toast(String(err.message || err))
+        );
+        return;
+      }
+      const del = e.target.closest(".cinema-lib-del");
+      if (del) {
+        e.preventDefault();
+        const card = del.closest(".cinema-lib-card");
+        if (!card) return;
+        if (!confirm(tt("confirm.deleteCard") || "Sil?")) return;
+        void fetch(
+          "/api/cinema/library/" +
+            encodeURIComponent(kind) +
+            "/" +
+            encodeURIComponent(card.dataset.id || ""),
+          { method: "DELETE" }
+        )
+          .then(async (r) => {
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(data.detail || "silinemedi");
+            toast(tt("cinema.libDeleted") || "Silindi");
+            await loadCinemaLibrary();
+          })
+          .catch((err) => toast(String(err.message || err)));
+      }
+    });
+  });
+
+  $("btn-cinema-create-char")?.addEventListener("click", () => void generateCinemaSheet("character"));
+  $("btn-cinema-create-loc")?.addEventListener("click", () => void generateCinemaSheet("location"));
+  $("btn-cinema-create-creature")?.addEventListener("click", () => void generateCinemaSheet("creature"));
+  $("btn-cinema-save-char-lib")?.addEventListener("click", () => void saveCinemaAssetToLibrary("character"));
+  $("btn-cinema-save-loc-lib")?.addEventListener("click", () => void saveCinemaAssetToLibrary("location"));
+  $("btn-cinema-save-creature-lib")?.addEventListener("click", () => void saveCinemaAssetToLibrary("creature"));
+  $("btn-cinema-add-creature")?.addEventListener("click", () => void addCinemaAsset("creature"));
+  ["cinema-char-face-file", "cinema-loc-ref-file", "cinema-creature-ref-file"].forEach((id) => {
+    $(id)?.addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const kind = id.includes("loc") ? "location" : id.includes("creature") ? "creature" : "character";
+      const ui = cinemaSheetRefUi(kind);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
+        const body = await r.json();
+        if (!r.ok) throw new Error(body.detail || "upload failed");
+        const name = body.name || body.filename || "";
+        state.cinemaSheetRefs = state.cinemaSheetRefs || { character: null, location: null, creature: null };
+        state.cinemaSheetRefs[ui.key] = {
+          name,
+          filename: name,
+          url: body.url || ("/api/refs/" + encodeURIComponent(name)),
+          file: name,
+        };
+        renderCinemaSheetRefPreview(kind);
+      } catch (err) {
+        toast(String(err.message || err));
+      }
+    });
+  });
+  $("btn-cinema-char-face-clear")?.addEventListener("click", () => clearCinemaSheetRef("character"));
+  $("btn-cinema-loc-ref-clear")?.addEventListener("click", () => clearCinemaSheetRef("location"));
+  $("btn-cinema-creature-ref-clear")?.addEventListener("click", () => clearCinemaSheetRef("creature"));
+
   $("btn-open-cinema")?.addEventListener("click", () => void openCinemaStudio());
   $("btn-open-cinema-landing")?.addEventListener("click", () => void openCinemaStudio());
   $("workspace-switch")?.addEventListener("click", (e) => {
@@ -6840,6 +7930,7 @@
   });
   $("btn-cinema-add-t2v")?.addEventListener("click", () => addCinemaShot("t2v"));
   $("btn-cinema-add-cont")?.addEventListener("click", () => addCinemaShot("continue"));
+  $("btn-cinema-add-draft")?.addEventListener("click", () => addCinemaDraftShot());
   $("btn-cinema-save")?.addEventListener("click", () => void saveCinema(false));
   $("btn-cinema-produce")?.addEventListener("click", () => void produceCinema());
   $("cinema-duration")?.addEventListener("change", () => {
@@ -6992,6 +8083,15 @@
       deleteCinemaShot(card.dataset.id);
       return;
     }
+    const edit = e.target.closest(".cinema-shot-edit");
+    if (edit) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = edit.closest(".cinema-shot");
+      if (!card?.dataset.id) return;
+      openCinemaSceneModal(card.dataset.id);
+      return;
+    }
     const card = e.target.closest(".cinema-shot");
     if (!card) return;
     const shot = cinemaShotById(card.dataset.id);
@@ -7002,6 +8102,18 @@
       renderCinemaShots();
       void saveCinema(true);
     }
+  });
+  $("btn-cinema-scene-close")?.addEventListener("click", closeCinemaSceneModal);
+  $("btn-cinema-scene-cancel")?.addEventListener("click", closeCinemaSceneModal);
+  $("btn-cinema-scene-save")?.addEventListener("click", () => saveCinemaSceneModal());
+  $("cinema-scene-modal")?.addEventListener("click", (e) => {
+    if (e.target === $("cinema-scene-modal")) closeCinemaSceneModal();
+  });
+  $("cinema-scene-modal")?.addEventListener("input", (e) => {
+    if (e.target.closest("[data-scene-field]")) refreshCinemaScenePreview();
+  });
+  $("cinema-scene-modal")?.addEventListener("change", (e) => {
+    if (e.target.closest("[data-scene-field]")) refreshCinemaScenePreview();
   });
   const cinemaDelegate = (rootId, kind) => {
     $(rootId)?.addEventListener("change", (e) => {
@@ -7066,6 +8178,13 @@
   $("btn-cinema-character-save")?.addEventListener("click", () => void saveCinemaCharacterModal());
   $("cinema-character-modal")?.addEventListener("click", (e) => {
     if (e.target === $("cinema-character-modal")) closeCinemaCharacterModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("cinema-scene-modal")?.classList.contains("hidden")) {
+      closeCinemaSceneModal();
+      e.preventDefault();
+    }
   });
   $("first-frame-file")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
@@ -7553,10 +8672,14 @@
     $("view-gallery")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
     $("view-settings")?.classList.remove("hidden");
+    syncChromeFitFromStorage();
     void refreshDirectorStatus();
     void refreshNotifySettings();
     void loadLoras();
     void loadH3Models();
+  });
+  $("settings-chrome-fit")?.addEventListener("change", (e) => {
+    applyChromeFit(!!e.target.checked);
   });
   $("btn-h3-models-save")?.addEventListener("click", () => void saveH3Models(false));
   $("btn-h3-models-reset")?.addEventListener("click", () => void saveH3Models(true));
@@ -7892,6 +9015,7 @@
 
   setQuality(state.quality);
   setProduceMode("t2v");
+  syncChromeFitFromStorage();
   setStudioWorkspace("scene");
   // Açılış / yenileme: player hattı sıfır; Comfy kuyruğuna dokunulmaz
   clearPlayer({ quiet: true });

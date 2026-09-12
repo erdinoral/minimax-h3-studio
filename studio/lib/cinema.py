@@ -17,6 +17,7 @@ FILMS_DIR = STUDIO_ROOT / "data" / "films"
 REFS_DIR = STUDIO_ROOT / "data" / "refs"
 COMFY_INPUT_DIR = STUDIO_ROOT.parent / "app" / "input"
 MUSIC_DIR = STUDIO_ROOT / "data" / "music"
+LIBRARY_FILE = STUDIO_ROOT / "data" / "asset_library.json"
 
 
 def _unlink_retry(path: Path, attempts: int = 8) -> bool:
@@ -48,6 +49,16 @@ SETUP_HINTS: dict[str, dict[str, str]] = {
         "noir": "classic noir cinematic, high-contrast shadows, wet streets, moral twilight",
         "golden": "golden-hour romantic cinematic, long warm rims, honeyed atmosphere",
         "retro_80s": "1980s cinematic, neon practicals, analog video-era energy, synth-night streets",
+        "sci_fi_hard": "hard-science deep-space cinematic, worn titanium cabins, practical instrument light, cold controlled contrast",
+        "sci_fi_opera": "epic space-opera cinematic, monumental architecture, vast negative space, solemn natural light",
+        "sci_fi_wasteland": "wasteland relic sci-fi cinematic, eroded tech ruins, harsh daylight, dusty earth tones",
+        "sci_fi_alien": "alien organic ecology cinematic, wet biological architecture, localized bioluminescence only",
+        "micro_expression": "intimate micro-expression close-up cinematic, performance-first facial detail",
+        "product_minimal": "minimalist product-hero cinematic, clean negative space, material-true studio light",
+        "title_sequence": "cinematic title-sequence energy, graphic silhouette reveals, editorial pacing",
+        "handdrawn_live": "hand-drawn live hybrid, ink and paper texture over staged performance",
+        "cgi_short": "premium 3D CGI cinematic short, PBR materials, clear silhouette animation",
+        "music_video_cool": "cool music-video cinematic, rhythmic graphic frames, bold lighting accents",
     },
     "camera": {
         "35mm": "shot on 35mm spherical cinema lenses, natural falloff, classic motion-picture texture",
@@ -155,6 +166,7 @@ _EMPTY: dict[str, Any] = {
     "seed_lock": False,
     "characters": [],
     "locations": [],
+    "creatures": [],
     "film_plan": None,
     "updated_at": 0,
 }
@@ -162,6 +174,247 @@ _EMPTY: dict[str, Any] = {
 
 def _now() -> float:
     return time.time()
+
+def _empty_library() -> dict[str, Any]:
+    return {"characters": [], "locations": [], "creatures": [], "updated_at": 0}
+
+
+# --- restored from stash: asset library + sheet prompts ---
+
+def asset_kind_key(kind: str) -> tuple[str, str]:
+    """Normalize kind -> (singular, plural list key)."""
+    k = str(kind or "").strip().lower()
+    if k in ("location", "locations", "loc", "place"):
+        return "location", "locations"
+    if k in ("creature", "creatures", "monster", "beast", "canavar", "yaratik", "yaratık"):
+        return "creature", "creatures"
+    return "character", "characters"
+
+
+def load_library() -> dict[str, Any]:
+    if not LIBRARY_FILE.is_file():
+        return _empty_library()
+    try:
+        raw = json.loads(LIBRARY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return _empty_library()
+    if not isinstance(raw, dict):
+        return _empty_library()
+    out = _empty_library()
+    out["characters"] = [
+        _clean_asset(x, "character") for x in (raw.get("characters") or []) if isinstance(x, dict)
+    ]
+    out["locations"] = [
+        _clean_asset(x, "location") for x in (raw.get("locations") or []) if isinstance(x, dict)
+    ]
+    out["creatures"] = [
+        _clean_asset(x, "creature") for x in (raw.get("creatures") or []) if isinstance(x, dict)
+    ]
+    out["updated_at"] = raw.get("updated_at") or 0
+    return out
+
+
+
+def save_library(data: dict[str, Any]) -> dict[str, Any]:
+    out = {
+        "characters": [
+            _clean_asset(x, "character") for x in (data.get("characters") or []) if isinstance(x, dict)
+        ],
+        "locations": [
+            _clean_asset(x, "location") for x in (data.get("locations") or []) if isinstance(x, dict)
+        ],
+        "creatures": [
+            _clean_asset(x, "creature") for x in (data.get("creatures") or []) if isinstance(x, dict)
+        ],
+        "updated_at": _now(),
+    }
+    LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LIBRARY_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out
+
+
+
+def list_library(kind: Optional[str] = None) -> dict[str, Any]:
+    lib = load_library()
+    k, _ = asset_kind_key(kind) if kind else ("", "")
+    if k == "character":
+        return {"characters": lib["characters"], "locations": [], "creatures": []}
+    if k == "location":
+        return {"characters": [], "locations": lib["locations"], "creatures": []}
+    if k == "creature":
+        return {"characters": [], "locations": [], "creatures": lib.get("creatures") or []}
+    return lib
+
+
+
+def delete_library_asset(kind: str, asset_id: str) -> bool:
+    k, key = asset_kind_key(kind)
+    aid = str(asset_id or "").strip()
+    if not aid:
+        return False
+    lib = load_library()
+    before = len(lib.get(key) or [])
+    lib[key] = [x for x in (lib.get(key) or []) if str(x.get("id") or "") != aid]
+    if len(lib[key]) == before:
+        return False
+    save_library(lib)
+    return True
+
+
+
+def save_film_asset_to_library(kind: str, asset_id: str) -> dict[str, Any]:
+    k, key = asset_kind_key(kind)
+    aid = str(asset_id or "").strip()
+    data = load()
+    found = next((x for x in (data.get(key) or []) if str(x.get("id") or "") == aid), None)
+    if not found:
+        raise ValueError("asset yok")
+    payload = dict(found)
+    payload["library_id"] = str(found.get("library_id") or found.get("id") or "")
+    saved = upsert_library_asset(k, payload)
+    # Mark film card as linked
+    found["library_id"] = saved["id"]
+    update_asset(k, aid, {"library_id": saved["id"]})
+    return saved
+
+
+
+def pull_library_to_film(kind: str, library_id: str) -> dict[str, Any]:
+    """Copy a library asset into the active film (new film-local id)."""
+    k, key = asset_kind_key(kind)
+    lid = str(library_id or "").strip()
+    lib = load_library()
+    found = next((x for x in (lib.get(key) or []) if str(x.get("id") or "") == lid), None)
+    if not found:
+        raise ValueError("kütüphanede yok")
+    data = load()
+    # If already in film (same library_id or same name+images), return existing
+    for x in data.get(key) or []:
+        if str(x.get("library_id") or "") == lid:
+            return _clean_asset(x, k)
+        if (
+            str(x.get("name") or "").strip().lower() == str(found.get("name") or "").strip().lower()
+            and str(x.get("image") or "") == str(found.get("image") or "")
+        ):
+            return _clean_asset(x, k)
+    payload = dict(found)
+    payload.pop("id", None)
+    payload["library_id"] = lid
+    payload["id"] = str(uuid.uuid4())
+    return upsert_asset(k, payload)
+
+
+
+def build_character_sheet_prompt(
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_face_ref: bool = False,
+    force_creature: bool = False,
+) -> str:
+    """H3 SCENE prompt for a 3-panel character turnaround still (portrait|front|back)."""
+    who = (name or "character").strip() or "character"
+    look = (notes or "").strip()
+    creature = bool(force_creature) or _sheet_is_creature(who, look)
+    if not look:
+        look = (
+            "legendary dragon: massive scaled body, four legs, membranous wings, long tail, "
+            "horned reptilian head, no human anatomy"
+            if creature
+            else "distinctive face, clear age, hair, wardrobe, and proportions"
+        )
+    style = (style_line or "").strip() or (
+        "cinematic fantasy creature photography, detailed scales and anatomy"
+        if creature
+        else "photorealistic live-action cinematography, natural skin texture"
+    )
+    identity = ""
+    if has_face_ref:
+        if creature:
+            identity = (
+                "IDENTITY LOCK: <Picture 1> is the creature / species reference. "
+                "All three panels must show the same non-human creature as Picture 1 — "
+                "identical head shape, scales/fur, colors, and proportions. "
+                "Do not turn it into a human wearing a costume or mask. "
+            )
+        else:
+            identity = (
+                "IDENTITY LOCK: <Picture 1> is the face / identity reference for this character. "
+                "All three panels must show the same person as Picture 1 — identical face shape, "
+                "eyes, nose, mouth, age, skin tone, and hair. Do not invent a different face. "
+            )
+    if creature:
+        return (
+            f"Locked static CREATURE reference sheet for {who}. "
+            f"{identity}"
+            "CRITICAL: the subject is a full non-human creature (animal / mythical beast), "
+            "NOT a human, NOT a person in a dragon mask, NOT cosplay, NOT a bipedal humanoid "
+            "wearing a costume. Show the real creature body. "
+            "One continuous shot, no cuts, camera completely locked, no pan, no zoom, no dialogue, silent. "
+            "A single wide photographic frame divided into three equal vertical panels side by side "
+            "on a seamless medium-grey studio backdrop with soft even studio lighting, no text, no logos, no watermark. "
+            "Left panel: close-up of the creature HEAD only (snout/jaws/eyes/horns), facing camera, sharp scale detail. "
+            "Center panel: full-body FRONT or three-quarter standing pose of the entire creature, "
+            "head-to-tail / wings visible, four legs or true creature anatomy, grounded on studio floor. "
+            "Right panel: full-body REAR or opposite three-quarter of the same creature, identical species and markings. "
+            "All three panels show the exact same creature with consistent anatomy, color, and scale pattern. "
+            f"Creature appearance: {look}. "
+            f"Visual craft: {style}. "
+            "Clean production reference plate, not a story scene, empty grey studio, no human figures."
+        )
+    return (
+        f"Locked static character reference sheet for {who}. "
+        f"{identity}"
+        "One continuous shot, no cuts, camera completely locked, no pan, no zoom, no dialogue, silent. "
+        "A single wide photographic frame divided into three equal vertical panels side by side "
+        "on a seamless medium-grey studio backdrop with soft even studio lighting, no text, no logos, no watermark. "
+        "Left panel: close-up head-and-shoulders portrait facing camera, neutral expression, sharp facial detail. "
+        "Center panel: full-body front standing pose, arms relaxed at sides, head-to-toe visible, same identity and wardrobe. "
+        "Right panel: full-body back view, identical stance and clothing, same hair and proportions. "
+        "All three panels show the exact same person with consistent face, body, and outfit. "
+        f"Subject appearance: {look}. "
+        f"Visual craft: {style}. "
+        "Clean production reference plate, not a story scene, no props clutter, bare studio floor."
+    )
+
+
+
+def build_location_sheet_prompt(
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_place_ref: bool = False,
+) -> str:
+    """H3 SCENE prompt for a single location reference still (one frame, no triptych)."""
+    place = (name or "location").strip() or "location"
+    look = (notes or "").strip() or (
+        "clear architecture, lighting, materials, and spatial depth"
+    )
+    style = (style_line or "").strip() or (
+        "photorealistic live-action cinematography, natural materials"
+    )
+    place_lock = ""
+    if has_place_ref:
+        place_lock = (
+            "PLACE LOCK: <Picture 1> is the visual reference for this location. "
+            "Match architecture, materials, lighting, and spatial layout of Picture 1 — "
+            "same place, not a different set. "
+        )
+    return (
+        f"Locked static location reference still for {place}. "
+        f"{place_lock}"
+        "One continuous shot, no cuts, camera completely locked, no dialogue, silent. "
+        "ONE single wide cinematic photograph of the whole place — one cohesive frame only. "
+        "Do NOT split into panels, triptych, grid, collage strips, or side-by-side views. "
+        "No black bars, no panel dividers, no multi-angle montage. "
+        "Show the full space in one establishing hero angle: architecture, depth, light, "
+        "materials, and atmosphere readable at a glance. "
+        f"Place description: {look}. "
+        f"Visual craft: {style}. "
+        "Clean production reference plate, empty of named characters unless required by the description."
+    )
 
 
 def _clean_audio(raw: Any) -> dict[str, str]:
@@ -191,19 +444,132 @@ def _clean_setup(raw: Any) -> dict[str, str]:
     return out
 
 
-def _clean_shot(item: Any, index: int = 0) -> dict[str, Any]:
+_STRUCTURED_KEYS = (
+    "title",
+    "location",
+    "character",
+    "action",
+    "dialogue",
+    "dialogue_lang",
+    "camera",
+    "visual_style",
+    "audio",
+    "music",
+    "important",
+)
+
+
+def _clean_structured(raw: Any) -> dict[str, str]:
+    src = raw if isinstance(raw, dict) else {}
+    out: dict[str, str] = {}
+    for key in _STRUCTURED_KEYS:
+        out[key] = str(src.get(key) or "").strip()
+    return out
+
+
+def _dialogue_lang_label(structured: dict[str, str]) -> str:
+    """H3 <d>[Language] tag — never invent Arabic; preserve user choice / light auto."""
+    explicit = (structured.get("dialogue_lang") or "").strip()
+    if explicit and explicit.lower() not in ("auto", ""):
+        return explicit
+    dialogue = structured.get("dialogue") or ""
+    if re.search(r"[\u0600-\u06FF]", dialogue):
+        return "Arabic"
+    if re.search(r"[\u0400-\u04FF]", dialogue):
+        return "Russian"
+    if re.search(r"[\u3040-\u30FF\u4E00-\u9FFF]", dialogue):
+        return "Japanese" if re.search(r"[\u3040-\u30FF]", dialogue) else "Chinese"
+    if re.search(r"[\uAC00-\uD7AF]", dialogue):
+        return "Korean"
+    if re.search(r"[ğüşıöçĞÜŞİÖÇ]", dialogue):
+        return "Turkish"
+    return "English"
+
+
+def _wrap_dialogue_block(dialogue: str, lang: str) -> str:
+    text = (dialogue or "").strip()
+    if not text:
+        return ""
+    # Already H3-tagged — leave as-is
+    if "<d>" in text.lower():
+        return text
+    label = (lang or "English").strip() or "English"
+    # Multi-line dialogue: keep as one <d> block
+    return f"says: <d>[{label}] {text}</d>"
+
+
+def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
+    """Author fields → official H3 three-field prompt (base-en.txt)."""
+    try:
+        from . import skills as skill_lib
+
+        s = skill_lib.enrich_structured_from_look(structured, look_id)
+    except Exception:
+        s = _clean_structured(structured)
+    if not any(s.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang"):
+        return ""
+
+    style = s.get("visual_style") or "Live-action, cinematic"
+    parts: list[str] = [f"[Shot 1] {style}"]
+    if s.get("location"):
+        parts.append(f"Location: {s['location']}")
+    if s.get("character"):
+        parts.append(f"Main character: {s['character']}")
+    if s.get("action"):
+        parts.append(f"Action: {s['action']}")
+    if s.get("camera"):
+        parts.append(f"Camera: {s['camera']}")
+    if s.get("dialogue"):
+        lang = _dialogue_lang_label(s)
+        who = s.get("character") or "The speaker (S1)"
+        # Prefer identity + dialogue in multimodal body
+        if "(S1)" in who or "(S2)" in who:
+            parts.append(f"{who} {_wrap_dialogue_block(s['dialogue'], lang)}")
+        else:
+            parts.append(f"{who} (S1) {_wrap_dialogue_block(s['dialogue'], lang)}")
+    if s.get("important"):
+        parts.append(f"Constraints: {s['important']}")
+
+    multimodal = " ".join(p.strip() for p in parts if p.strip())
+    if s.get("title"):
+        multimodal = f"SCENE – {s['title']}. {multimodal}"
+
+    soundscape = s.get("audio") or (
+        "Natural ambient sound matching the scene, with clear dialogue when present."
+    )
+    music_raw = (s.get("music") or "").strip()
+    if not music_raw or music_raw.lower() in ("n/a", "na", "none", "no", "yok", "off"):
+        music = "N/A"
+    else:
+        music = music_raw
+
+    return (
+        f"integrated_multimodal_description: {multimodal}\n\n"
+        f"overall_soundscape: {soundscape}\n\n"
+        f"non_diegetic_music: {music}"
+    )
+
+
+def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     if isinstance(item, str):
         item = {"text": item}
     if not isinstance(item, dict):
         item = {}
+    structured = _clean_structured(item.get("structured"))
     text = str(item.get("text") or item.get("prompt") or item.get("h3Prompt") or "").strip()
+    composed = compose_h3_prompt(structured, look_id=look_id)
+    if composed:
+        text = composed
     mode = str(item.get("mode") or "").strip().lower()
     if mode in ("continue", "devam", "i2v", "last_frame"):
         mode = "continue"
     else:
         mode = "t2v"
     sid = str(item.get("id") or "").strip() or str(uuid.uuid4())
-    return {"id": sid, "text": text, "mode": mode, "index": index}
+    out = {"id": sid, "text": text, "mode": mode, "index": index}
+    if any(structured.values()):
+        out["structured"] = structured
+    return out
 
 
 def split_shots(script: str) -> list[str]:
@@ -225,16 +591,19 @@ def split_shots(script: str) -> list[str]:
 
 
 def _migrate_shots(data: dict[str, Any]) -> list[dict[str, Any]]:
+    look_id = ""
+    setup = data.get("setup") if isinstance(data.get("setup"), dict) else {}
+    look_id = str(setup.get("look") or "").strip()
     raw = data.get("shots")
     if isinstance(raw, list):
-        cleaned = [_clean_shot(item, i) for i, item in enumerate(raw)]
+        cleaned = [_clean_shot(item, i, look_id=look_id) for i, item in enumerate(raw)]
         # Keep explicit shot rows (even empty drafts). Only fall back to script when
         # the shots key is missing — legacy saves stored script only.
         if cleaned or "shots" in data:
             return cleaned
     texts = split_shots(str(data.get("script") or ""))
     return [
-        _clean_shot({"text": t, "mode": "t2v" if i == 0 else "continue"}, i)
+        _clean_shot({"text": t, "mode": "t2v" if i == 0 else "continue"}, i, look_id=look_id)
         for i, t in enumerate(texts)
     ]
 
@@ -254,10 +623,13 @@ def load() -> dict[str, Any]:
     data.setdefault("role_script", "")
     data.setdefault("characters", [])
     data.setdefault("locations", [])
+    data.setdefault("creatures", [])
     if not isinstance(data["characters"], list):
         data["characters"] = []
     if not isinstance(data["locations"], list):
         data["locations"] = []
+    if not isinstance(data["creatures"], list):
+        data["creatures"] = []
     data["setup"] = _clean_setup(data.get("setup"))
     data["audio"] = _clean_audio(data.get("audio"))
     data["shots"] = _migrate_shots(data)
@@ -300,7 +672,10 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
     for key in ("duration", "quality", "steps"):
         if key not in data and prev.get(key) is not None:
             data = {**data, key: prev.get(key)}
-    shots = [_clean_shot(x, i) for i, x in enumerate(data.get("shots") or [])]
+    shots = [
+        _clean_shot(x, i, look_id=str((_clean_setup(data.get("setup")).get("look") or "")).strip())
+        for i, x in enumerate(data.get("shots") or [])
+    ]
     script = str(data.get("script") or "").strip()
     if shots:
         script = "\n\n---\n\n".join(s["text"] for s in shots if s.get("text"))
@@ -339,6 +714,7 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
         "seed_lock": seed_lock,
         "characters": [_clean_asset(x, "character") for x in (data.get("characters") or [])],
         "locations": [_clean_asset(x, "location") for x in (data.get("locations") or [])],
+        "creatures": [_clean_asset(x, "creature") for x in (data.get("creatures") or [])],
         "updated_at": _now(),
     }
     outline = data.get("shotOutline")
@@ -453,7 +829,7 @@ def new_asset(kind: str, **fields: Any) -> dict[str, Any]:
 
 def upsert_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     data = load()
-    key = "characters" if kind == "character" else "locations"
+    kind, key = asset_kind_key(kind)
     cleaned = _clean_asset(asset, kind)
     items = data[key]
     idx = next((i for i, x in enumerate(items) if str(x.get("id") or "") == cleaned["id"]), -1)
@@ -472,8 +848,8 @@ def update_asset(kind: str, asset_id: str, fields: dict[str, Any]) -> Optional[d
     if not aid:
         return None
     data = load()
-    key = "characters" if kind == "character" else "locations"
-    items = data[key]
+    kind, key = asset_kind_key(kind)
+    items = data.setdefault(key, [])
     idx = next((i for i, x in enumerate(items) if str(x.get("id") or "") == aid), -1)
     if idx < 0:
         return None
@@ -488,7 +864,7 @@ def update_asset(kind: str, asset_id: str, fields: dict[str, Any]) -> Optional[d
 
 def delete_asset(kind: str, asset_id: str) -> bool:
     data = load()
-    key = "characters" if kind == "character" else "locations"
+    kind, key = asset_kind_key(kind)
     aid = str(asset_id or "").strip()
     removed = [x for x in data[key] if str(x.get("id") or "") == aid]
     before = len(data[key])
@@ -715,6 +1091,16 @@ def setup_preamble(setup: Optional[dict[str, Any]] = None) -> str:
         hint = (SETUP_HINTS.get(key) or {}).get(val) or ""
         if hint:
             parts.append(hint)
+    look = setup.get("look") or ""
+    if look and look != "auto":
+        try:
+            from . import skills as skill_lib
+
+            craft = skill_lib.look_craft_line(look)
+            if craft and craft not in " ".join(parts):
+                parts.append(craft)
+        except Exception:
+            pass
     blob = " ".join(parts).strip()
     if not blob:
         return ""

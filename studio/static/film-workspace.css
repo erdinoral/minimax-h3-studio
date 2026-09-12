@@ -1,0 +1,45 @@
+/* Advanced film workspace is optional; classic cinema grid stays the default. */
+#film-workspace-fold { margin: 8px 16px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); }
+#film-workspace-fold > summary { cursor: pointer; padding: 10px 14px; color: var(--text-muted); font-size: 13px; list-style: none; }
+#film-workspace-fold > summary::-webkit-details-marker { display: none; }
+#film-workspace-fold[open] > summary { border-bottom: 1px solid var(--border); color: var(--text); }
+#film-workspace { padding: 16px; }
+.film-production-settings { margin: 8px 16px; border: 1px solid var(--border); border-radius: 8px; }
+.film-production-settings>summary { cursor: pointer; padding: 10px 14px; color: var(--text-muted); font-size: 13px; }
+.film-start-frame { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: var(--bg); }
+#film-workspace button,.film-import-dialog button,.film-import { background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; cursor: pointer; font: inherit; }
+#film-workspace button:disabled { opacity: .45; cursor: default; }
+#film-workspace button:hover,.film-import:hover { border-color: var(--accent); }
+#film-workspace button:focus-visible,.film-import-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.film-toolbar,.film-stage-head,.film-takes { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.film-toolbar { margin-bottom: 16px; }
+.film-toolbar strong { margin-right: auto; }
+#film-save-state { color: var(--text-muted); font-size: 12px; }
+.film-layout { display: grid; grid-template-columns: 190px minmax(280px, 1fr) 310px; gap: 18px; align-items: start; }
+.film-layout h3 { margin: 0 0 12px; font-size: 15px; }
+.film-layout nav { position: sticky; top: 0; }
+.film-layout nav button { width: 100%; text-align: left; margin-bottom: 7px; }
+.film-layout small,.film-layout nav p { display: block; color: var(--text-muted); font-size: 11px; margin-top: 5px; }
+#film-workspace .selected { border-color: var(--accent); background: var(--bg-elevated); }
+.film-stage-head { justify-content: space-between; margin-bottom: 12px; }
+.film-stage video { width: 100%; max-height: 460px; aspect-ratio: 16/9; background: #000; border-radius: 8px; }
+.film-preview-placeholder { display: grid; place-items: center; aspect-ratio: 16/9; padding: 32px; text-align: center; color: var(--text-muted); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; }
+.film-shot-strip { display: flex; gap: 8px; overflow-x: auto; padding: 12px 0; }
+.film-shot-strip button { flex: 0 0 145px; text-align: left; }
+.film-shot-strip span { display: block; font-size: 12px; margin: 6px 0; }
+.film-inspector { max-height: 70vh; overflow-y: auto; padding-right: 6px; }
+.film-inspector label,.film-import-dialog label { display: block; font-size: 12px; margin-bottom: 10px; }
+.film-inspector input:not([type=checkbox]),.film-inspector textarea,.film-inspector select,.film-import-dialog input,.film-import-dialog textarea,.film-takes select { display: block; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-top: 5px; font: inherit; box-sizing: border-box; }
+.film-inspector fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 10px; }
+.film-inspector legend { color: var(--text-muted); font-size: 12px; }
+.film-asset { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.film-asset:last-child { border: 0; }
+.film-ref-images { display: flex; gap: 6px; flex-wrap: wrap; }
+.film-ref-images label { width: 65px; }
+.film-ref-images img { display: block; width: 65px; height: 65px; object-fit: contain; background: var(--bg); border-radius: 5px; }
+.film-warning { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.film-takes { margin-top: 14px; }
+.film-import-dialog { width: min(680px, 90vw); max-height: 85vh; background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+.film-import-dialog::backdrop { background: rgba(0, 0, 0, .7); }
+@media (max-width: 1100px) { .film-layout { grid-template-columns: 150px minmax(250px, 1fr); } .film-inspector { grid-column: 1 / -1; max-height: none; } }
+@media (max-width: 650px) { .film-layout { display: block; } .film-layout nav { position: static; margin-bottom: 15px; } .film-inspector { margin-top: 20px; } }

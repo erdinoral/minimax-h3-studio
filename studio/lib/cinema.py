@@ -1203,8 +1203,11 @@ def film_audio_preamble(audio: Optional[dict[str, Any]] = None) -> str:
     if audio.get("mode") == "silent":
         return ""
     lang = audio.get("voice_lang") or "English"
+    # Never put a sample <d>…</d> here — H3 speaks tag contents, so a
+    # placeholder word like "line" becomes the first audible word in the clip.
     return (
-        f"Spoken dialogue uses <d>[{lang}] line</d> tags with lipsync. "
+        f"Only tagged spoken words are audible. Language for those tags is {lang}. "
+        "Do not speak instructions, tag names, language names, or placeholders. "
         "The same named person must sound identical in every shot. "
         "No background music and no original score — underscore is mixed later."
     )

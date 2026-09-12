@@ -1910,7 +1910,6 @@
     ["#btn-clip-prompt-close", "clip.close"],
     ["#view-cinema h2", "cinema.title"],
     ["#cinema-title", "cinema.filmName", "placeholder"],
-    ["#btn-cinema-close", "cinema.back"],
     ["#btn-cinema-save", "cinema.save"],
     ["#btn-cinema-produce", "cinema.produce"],
     ["#cinema-audio-mode [data-audio=film]", "cinema.audioFilm"],

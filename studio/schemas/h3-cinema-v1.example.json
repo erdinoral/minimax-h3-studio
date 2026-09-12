@@ -1,0 +1,289 @@
+{
+  "_instructions": {
+    "DELETE_BEFORE_RETURN": "Fill every empty field below IN ENGLISH, then DELETE this entire _instructions object. Return ONLY valid JSON (schema h3-cinema/v1). No markdown fences, no commentary.",
+    "SIL_SONRA_DON": "Asagidaki bos alanlari INGILIZCE doldur, sonra bu _instructions nesnesinin TAMAMINI sil. Sadece gecerli JSON dondur. Markdown kod blogu veya aciklama yazma.",
+    "language": {
+      "required": "English",
+      "why": "MiniMax H3 still + video prompts must be English. Turkish/other languages in visual fields hurt quality.",
+      "write_in_english": [
+        "setup.look, camera, palette, lighting, era, style",
+        "characters[].notes, voice, trigger (names may stay as proper nouns)",
+        "locations[].notes",
+        "creatures[].notes",
+        "sections: title, location, character, action, camera, visual_style, audio, music, important, logline"
+      ],
+      "dialogue_exception": "dialogue may stay in the spoken story language (set dialogue_lang: tr|en|ar|…). Everything else = English."
+    },
+    "what_this_is": "Text-only film package for MiniMax H3 Studio. Import fills cards. Studio generates stills and videos — you do NOT create images or image URLs.",
+    "defaults": {
+      "duration_seconds_per_clip": 5,
+      "sections_count": 12,
+      "total_runtime": "12 clips x 5s = 60s (1 minute). Keep exactly 12 sections unless the user asks otherwise. 3 acts = 36 sections (3 x 12).",
+      "quality_note": "Leave quality/steps as-is. Studio Produce uses the user's Draft/Final preset.",
+      "quality": "736",
+      "steps": 18
+    },
+    "mode_field": {
+      "t2v": "NEW video — fresh clip (text-to-video / new beat). Use for shot 1 and for hard cuts (new location, time jump, different cast with no overlap).",
+      "continue": "CONTINUE from previous clip last frame (chain). Use when the same beat continues in the same space with overlapping cast.",
+      "aliases_also_ok": [
+        "continue",
+        "devam",
+        "i2v",
+        "last_frame"
+      ],
+      "default_in_this_template": "section[0]=t2v, sections[1..11]=continue for one continuous minute. Change a later section to t2v for a hard cut."
+    },
+    "how_pipeline_works": [
+      "1) YOU write text only, IN ENGLISH: unique names + appearance notes for characters, then creatures, then locations. Same spelling in section.character / section.location.",
+      "2) Fill sections IN ENGLISH: each item is ONE 5s clip — concrete visible action, not themes. No image files.",
+      "3) User imports JSON. Cards sit ready. Nothing generates yet.",
+      "4) User clicks Produce. Studio order: character stills → creature stills → location stills (name + notes, same as Görsel oluştur), then scene videos with the selected preset (Draft or Final).",
+      "5) t2v = new clip; continue = last frame of previous clip. Studio may force t2v if cast does not overlap."
+    ],
+    "field_guide": {
+      "title": "Short section title (optional).",
+      "location": "Place name — must match a locations[].name when possible.",
+      "character": "Who is on screen — match characters[].name (comma-separate if multiple).",
+      "action": "ENGLISH. What happens THIS 5s clip only. Visual, specific, present tense.",
+      "dialogue": "Spoken lines in THIS clip only. Empty if silent. May stay in the story language; set dialogue_lang. Do not force a language unless the story needs it.",
+      "dialogue_lang": "auto | tr | en | ar | … — language of dialogue; auto keeps text as written.",
+      "camera": "ENGLISH. Shot size / move (e.g. medium close-up slow push-in).",
+      "visual_style": "ENGLISH. Look for THIS clip if it differs from setup; else leave empty to inherit.",
+      "audio": "ENGLISH. Diegetic sound in the clip (room tone, footsteps, rain).",
+      "music": "Score cue or N/A.",
+      "important": "Must-lock details (costume, prop, continuity). Keep short."
+    },
+    "cast_guide": {
+      "characters": "name + ENGLISH notes ONLY (appearance, age, wardrobe — this is the still prompt). Optional English voice tag. trigger = same as name. Leave lora_id empty. Do NOT add image/url fields.",
+      "locations": "name + ENGLISH notes (architecture, time of day, weather). Notes become the location still prompt.",
+      "creatures": "name + ENGLISH notes (anatomy, scale, color). Notes become the creature still prompt. No voice/lora."
+    },
+    "setup_guide": {
+      "look_camera_palette_lighting_era": "Global film bible IN ENGLISH; use auto if unsure.",
+      "purpose": "short_film | music_video | …",
+      "style": "realistic | anime | …"
+    },
+    "rules": [
+      "Write ALL visual/prompt fields in English (H3 requirement). Dialogue may stay in the spoken language.",
+      "Keep schema exactly: h3-cinema/v1",
+      "Keep duration: 5",
+      "Keep exactly 12 sections unless user requests a different length",
+      "TEXT ONLY — no images, no URLs, no base64, no portrait files. Studio creates stills from name+notes.",
+      "Do not nest commentary inside sections — use the fields only",
+      "Same character name spelling everywhere (cast + sections)",
+      "Each section = one 5s beat; do not cram a whole minute into one section",
+      "DELETE _instructions before final output"
+    ]
+  },
+  "schema": "h3-cinema/v1",
+  "title": "",
+  "logline": "",
+  "look": "auto",
+  "setup": {
+    "look": "auto",
+    "camera": "auto",
+    "palette": "auto",
+    "lighting": "auto",
+    "era": "auto",
+    "purpose": "short_film",
+    "style": "realistic"
+  },
+  "duration": 5,
+  "quality": "736",
+  "steps": 18,
+  "characters": [
+    {
+      "name": "",
+      "notes": "",
+      "voice": "",
+      "trigger": "",
+      "lora_id": "",
+      "lora_strength": 0.8
+    }
+  ],
+  "locations": [
+    {
+      "name": "",
+      "notes": "",
+      "trigger": ""
+    }
+  ],
+  "creatures": [
+    {
+      "name": "",
+      "notes": "",
+      "trigger": ""
+    }
+  ],
+  "sections": [
+    {
+      "mode": "t2v",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "mode": "continue",
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    }
+  ]
+}

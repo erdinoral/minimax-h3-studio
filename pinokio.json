@@ -9,7 +9,9 @@
       "title": "H3 Studio",
       "links": [
         { "title": "GitHub", "value": "https://github.com/erdinoral/minimax-h3-studio" },
-        { "title": "Support / Issues", "value": "https://github.com/erdinoral/minimax-h3-studio/issues" }
+        { "title": "Support / Issues", "value": "https://github.com/erdinoral/minimax-h3-studio/issues" },
+        { "title": "Open Collective", "value": "https://opencollective.com/minimax-h3-studio" },
+        { "title": "GitHub Sponsors", "value": "https://github.com/sponsors/erdinoral" }
       ]
     },
     {

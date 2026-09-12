@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="tr">
 <head>
   <meta charset="UTF-8" />
@@ -12,11 +12,11 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema85" />
-  <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema85" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema101" />
+  <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema101" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema85" />
+  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema101" />
 </head>
 <body>
   <header class="topbar">
@@ -44,6 +44,14 @@
       <span class="comfy-pill" id="comfy-pill" title="Comfy arka uç — Pinokio Stop ile kapanır">Comfy …</span>
     </nav>
   </header>
+
+  <div id="donor-ticker" class="donor-ticker hidden" hidden>
+    <button type="button" class="donor-ticker-label" id="btn-donor-ticker" data-i18n="donor.thanks">Teşekkürler</button>
+    <div class="donor-ticker-mask" aria-live="polite">
+      <div class="donor-ticker-track" id="donor-ticker-track"></div>
+    </div>
+    <button type="button" class="donor-ticker-join" id="btn-donor-join" data-i18n="donor.join">Sen de destekle</button>
+  </div>
 
   <main class="workspace" id="view-studio">
     <!-- grid: scene | player | player / prompt | ayar | prod -->
@@ -509,11 +517,12 @@
         <button type="button" class="btn-ghost" id="btn-cinema-film-new">Yeni film</button>
         <input type="text" id="cinema-title" placeholder="Film adı" />
         <button type="button" class="btn-ghost" id="btn-cinema-export">Zip</button>
+        <button type="button" class="btn-ghost" id="btn-cinema-json">JSON</button>
         <label class="file-pick file-pick-inline">
-          <input type="file" id="cinema-import-file" class="file-pick-input" accept=".zip,application/zip" />
+          <input type="file" id="cinema-import-file" class="file-pick-input" accept=".zip,.json,application/zip,application/json" />
           <span class="file-pick-btn" id="cinema-import-btn">İçe aktar</span>
         </label>
-        <button type="button" class="menu-btn" id="btn-cinema-close">â† Studio</button>
+        <button type="button" class="menu-btn" id="btn-cinema-close">← Studio</button>
       </header>
       <div class="cinema-setup-bar">
         <div class="film-pills" id="cinema-pills"></div>
@@ -563,7 +572,7 @@
           <p class="muted mode-hint" id="cinema-mode-hint">Tek take, kesiksiz ses · en fazla 8 shot · karakter/mekan kartı gerekmez</p>
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
-          <button type="button" class="cta" id="btn-cinema-produce">Filmi kuyruğa al</button>
+          <button type="button" class="cta" id="btn-cinema-produce">Üret</button>
         </div>
         <div class="cinema-audio-bar">
           <div class="chips" id="cinema-audio-mode">
@@ -586,7 +595,7 @@
           <section class="cinema-stack" data-fold="characters">
             <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="characters" aria-expanded="true">
               <span class="cinema-fold-title" id="cinema-char-title">Karakterler</span>
-              <span class="cinema-fold-meta"><span id="cinema-char-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">â–¾</span></span>
+              <span class="cinema-fold-meta"><span id="cinema-char-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▼</span></span>
             </button>
             <div class="cinema-fold-summary" id="cinema-char-summary"></div>
             <div class="cinema-fold-body">
@@ -632,7 +641,7 @@
           <section class="cinema-stack" data-fold="creatures">
             <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="creatures" aria-expanded="true">
               <span class="cinema-fold-title" id="cinema-creature-title">Yaratıklar</span>
-              <span class="cinema-fold-meta"><span id="cinema-creature-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">â–¾</span></span>
+              <span class="cinema-fold-meta"><span id="cinema-creature-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▼</span></span>
             </button>
             <div class="cinema-fold-summary" id="cinema-creature-summary"></div>
             <div class="cinema-fold-body">
@@ -678,7 +687,7 @@
           <section class="cinema-stack" data-fold="locations">
             <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="locations" aria-expanded="true">
               <span class="cinema-fold-title" id="cinema-loc-title">Mekanlar</span>
-              <span class="cinema-fold-meta"><span id="cinema-loc-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">â–¾</span></span>
+              <span class="cinema-fold-meta"><span id="cinema-loc-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▼</span></span>
             </button>
             <div class="cinema-fold-summary" id="cinema-loc-summary"></div>
             <div class="cinema-fold-body">
@@ -783,6 +792,33 @@
           </div>
         </div>
       </div>
+      <div class="cinema-scene-modal hidden" id="cinema-json-modal" aria-hidden="true">
+        <div class="cinema-scene-dialog cinema-json-dialog" role="dialog" aria-modal="true" aria-labelledby="cinema-json-dialog-title">
+          <header>
+            <h3 id="cinema-json-dialog-title">Film JSON</h3>
+            <button type="button" class="menu-btn" id="btn-cinema-json-close">Kapat</button>
+          </header>
+          <p class="muted cinema-scene-hint" id="cinema-json-hint">Örnek indir → başka AI’ya ver. Sadece İngilizce metin doldursun (_instructions silinsin). İçe aktar = kartlar hazır. Görsel ve sahneler Üret ile, seçili ön ayarla sırayla üretilir.</p>
+          <label class="cinema-json-file-label file-pick">
+            <input type="file" id="cinema-json-file" class="file-pick-input" accept=".json,application/json" />
+            <span class="file-pick-btn" id="cinema-json-file-btn">JSON dosyası seç</span>
+          </label>
+          <label class="cinema-json-paste-label">
+            <span id="cinema-json-lbl-paste">JSON yapıştır</span>
+            <textarea id="cinema-json-text" rows="14" spellcheck="false" placeholder='{ "schema": "h3-cinema/v1", "title": "...", "characters": [], "sections": [] }'></textarea>
+          </label>
+          <div class="cinema-json-opts">
+            <label class="check"><input type="checkbox" id="cinema-json-merge" /><span id="cinema-json-lbl-merge">Mevcut karta birleştir (merge)</span></label>
+            <label class="check"><input type="checkbox" id="cinema-json-library" /><span id="cinema-json-lbl-library">Kütüphaneye de kaydet</span></label>
+          </div>
+          <div class="row-btns">
+            <button type="button" class="btn-secondary" id="btn-cinema-json-template">Örnek indir</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-json-export">JSON indir</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-json-cancel">İptal</button>
+            <button type="button" class="cta" id="btn-cinema-json-import">İçe aktar</button>
+          </div>
+        </div>
+      </div>
       <div class="cinema-scene-modal hidden" id="cinema-scene-modal" aria-hidden="true">
         <div class="cinema-scene-dialog" role="dialog" aria-modal="true" aria-labelledby="cinema-scene-dialog-title">
           <header>
@@ -791,31 +827,49 @@
           </header>
           <p class="muted cinema-scene-hint" id="cinema-scene-hint">Yazar alanlarını doldur; Kaydet MiniMax H3 üçlü prompt’a derler.</p>
           <div class="cinema-scene-fields">
-            <label><span id="cinema-scene-lbl-title">Sahne başlığı</span><input id="cinema-scene-title" type="text" data-scene-field="title" /></label>
-            <label><span id="cinema-scene-lbl-location">Lokasyon</span><textarea id="cinema-scene-location" rows="2" data-scene-field="location"></textarea></label>
-            <label><span id="cinema-scene-lbl-character">Karakter</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character"></textarea></label>
-            <label><span id="cinema-scene-lbl-action">Olay / aksiyon</span><textarea id="cinema-scene-action" rows="3" data-scene-field="action"></textarea></label>
-            <label><span id="cinema-scene-lbl-dialogue">Diyalog</span><textarea id="cinema-scene-dialogue" rows="2" data-scene-field="dialogue"></textarea></label>
-            <label><span id="cinema-scene-lbl-dialogue-lang">Diyalog dili</span>
-              <select id="cinema-scene-dialogue-lang" data-scene-field="dialogue_lang">
-                <option value="auto">Auto</option>
-                <option value="Turkish">Turkish</option>
-                <option value="English">English</option>
-                <option value="Arabic">Arabic</option>
-                <option value="French">French</option>
-                <option value="German">German</option>
-                <option value="Spanish">Spanish</option>
-                <option value="Japanese">Japanese</option>
-                <option value="Chinese">Chinese</option>
-                <option value="Korean">Korean</option>
-                <option value="Russian">Russian</option>
-              </select>
-            </label>
-            <label><span id="cinema-scene-lbl-camera">Kamera</span><textarea id="cinema-scene-camera" rows="2" data-scene-field="camera"></textarea></label>
-            <label><span id="cinema-scene-lbl-visual">Görsel stil</span><textarea id="cinema-scene-visual" rows="2" data-scene-field="visual_style"></textarea></label>
-            <label><span id="cinema-scene-lbl-audio">Ses / ambiyans</span><textarea id="cinema-scene-audio" rows="2" data-scene-field="audio"></textarea></label>
-            <label><span id="cinema-scene-lbl-music">Film müziği</span><textarea id="cinema-scene-music" rows="2" data-scene-field="music" placeholder="N/A"></textarea></label>
-            <label><span id="cinema-scene-lbl-important">Önemli / kısıt</span><textarea id="cinema-scene-important" rows="2" data-scene-field="important"></textarea></label>
+            <section class="cinema-scene-group">
+              <h4 class="cinema-scene-group-title" id="cinema-scene-group-story">Sahne</h4>
+              <label><span id="cinema-scene-lbl-title">Sahne başlığı</span><input id="cinema-scene-title" type="text" data-scene-field="title" autocomplete="off" /></label>
+              <label><span id="cinema-scene-lbl-location">Lokasyon</span><textarea id="cinema-scene-location" rows="2" data-scene-field="location"></textarea></label>
+              <label><span id="cinema-scene-lbl-character">Karakter</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character"></textarea></label>
+              <label><span id="cinema-scene-lbl-action">Olay / aksiyon</span><textarea id="cinema-scene-action" rows="3" data-scene-field="action"></textarea></label>
+            </section>
+            <section class="cinema-scene-group">
+              <h4 class="cinema-scene-group-title" id="cinema-scene-group-dialogue">Diyalog</h4>
+              <div class="cinema-scene-row">
+                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-dialogue">Diyalog</span><textarea id="cinema-scene-dialogue" rows="3" data-scene-field="dialogue"></textarea></label>
+                <label class="cinema-scene-lang"><span id="cinema-scene-lbl-dialogue-lang">Diyalog dili</span>
+                  <select id="cinema-scene-dialogue-lang" data-scene-field="dialogue_lang">
+                    <option value="auto">Auto</option>
+                    <option value="Turkish">Turkish</option>
+                    <option value="English">English</option>
+                    <option value="Arabic">Arabic</option>
+                    <option value="French">French</option>
+                    <option value="German">German</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="Japanese">Japanese</option>
+                    <option value="Chinese">Chinese</option>
+                    <option value="Korean">Korean</option>
+                    <option value="Russian">Russian</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+            <section class="cinema-scene-group">
+              <h4 class="cinema-scene-group-title" id="cinema-scene-group-lens">Kamera &amp; stil</h4>
+              <div class="cinema-scene-row">
+                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-camera">Kamera</span><textarea id="cinema-scene-camera" rows="2" data-scene-field="camera"></textarea></label>
+                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-visual">Görsel stil</span><textarea id="cinema-scene-visual" rows="2" data-scene-field="visual_style"></textarea></label>
+              </div>
+              <label><span id="cinema-scene-lbl-important">Önemli / kısıt</span><textarea id="cinema-scene-important" rows="2" data-scene-field="important"></textarea></label>
+            </section>
+            <section class="cinema-scene-group">
+              <h4 class="cinema-scene-group-title" id="cinema-scene-group-audio">Ses</h4>
+              <div class="cinema-scene-row">
+                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-audio">Ses / ambiyans</span><textarea id="cinema-scene-audio" rows="2" data-scene-field="audio"></textarea></label>
+                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-music">Film müziği</span><textarea id="cinema-scene-music" rows="2" data-scene-field="music" placeholder="N/A"></textarea></label>
+              </div>
+            </section>
           </div>
           <details class="cinema-scene-preview-fold" open>
             <summary id="cinema-scene-preview-sum">H3 önizleme</summary>
@@ -839,7 +893,7 @@
         <span class="muted gallery-merge-count hidden" id="gallery-merge-count"></span>
         <button type="button" class="btn-secondary hidden" id="btn-gallery-merge-cancel">İptal</button>
         <button type="button" class="btn-secondary" id="btn-gallery-concat">Klipleri birleştir</button>
-        <button type="button" class="menu-btn" id="btn-gallery-close">â† Studio</button>
+        <button type="button" class="menu-btn" id="btn-gallery-close">← Studio</button>
       </header>
       <div class="gallery-grid" id="gallery-grid"></div>
     </div>
@@ -849,14 +903,23 @@
     <div class="gallery-panel support-panel">
       <header>
         <h2>Destek</h2>
-        <span class="muted gallery-order-hint">Sponsor · sorun · fikir — GitHub</span>
-        <button type="button" class="menu-btn" id="btn-support-close">â† Studio</button>
+        <span class="muted gallery-order-hint">GitHub Sponsors · Open Collective · sorun · fikir</span>
+        <button type="button" class="menu-btn" id="btn-support-close">← Studio</button>
       </header>
       <section class="support-sponsor">
         <h3 data-i18n="support.sponsorTitle">Bu stüdyoyu destekle</h3>
         <p class="mode-hint" id="support-sponsor-body" data-i18n="support.sponsorBody">
           Destekleriniz benim için çok önemli. Bu iş vaktimin büyük bir kısmını alıyor — her destek beni gerçekten mutlu eder ve daha fazla projenin gelmesine de katkı olur.
         </p>
+        <div class="support-sponsor-actions">
+        <a
+          class="support-rainbow-btn support-sponsor-cta"
+          href="https://opencollective.com/minimax-h3-studio"
+          target="_blank"
+          rel="noopener noreferrer"
+          id="btn-support-oc"
+          data-i18n="support.ocBtn"
+        >Open Collective’te bağış yap</a>
         <a
           class="support-rainbow-btn support-sponsor-cta"
           href="https://github.com/sponsors/erdinoral"
@@ -864,7 +927,13 @@
           rel="noopener noreferrer"
           id="btn-support-sponsor"
           data-i18n="support.sponsorBtn"
-        >GitHub’da sponsor ol</a>
+        >GitHub Sponsors</a>
+        </div>
+        <section class="support-donors" id="support-donors">
+          <h3 data-i18n="support.donorsTitle">Destekleyenler</h3>
+          <p class="muted mode-hint" id="support-donors-empty" data-i18n="support.donorsEmpty">İlk bağış senin adını buraya yazar.</p>
+          <p class="support-donors-list hidden" id="support-donors-list" hidden></p>
+        </section>
         <p class="muted mode-hint" data-i18n="support.sponsorThanks">Teşekkürler — bir yıldız bile projenin bulunmasına yardım eder.</p>
         <p class="muted mode-hint">
           <a href="https://github.com/erdinoral/minimax-h3-studio" target="_blank" rel="noopener" id="support-star-link" data-i18n="support.starRepo">Depoyu yıldızla</a>
@@ -897,7 +966,7 @@
       <header>
         <h2>Ayarlar</h2>
         <span class="muted gallery-order-hint">API anahtarları · LoRA indirme · bu makinede saklanır</span>
-        <button type="button" class="menu-btn" id="btn-settings-close">â† Studio</button>
+        <button type="button" class="menu-btn" id="btn-settings-close">← Studio</button>
       </header>
       <div class="llm-settings" id="llm-settings">
         <h3 class="llm-settings-title">Yönetmen LLM / API anahtarları</h3>
@@ -1044,8 +1113,18 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema85"></script>
-  <script src="/static/film-workspace.js?v=cinema85"></script>
-  <script src="/static/app.js?v=cinema85"></script>
+  <div class="cinema-still-modal hidden" id="cinema-still-modal" aria-hidden="true">
+    <div class="cinema-still-dialog" role="dialog" aria-modal="true">
+      <img id="cinema-still-modal-img" alt="" />
+      <div class="row-btns">
+        <a class="btn-secondary" id="cinema-still-modal-dl" href="#" download>İndir</a>
+        <button type="button" class="btn-secondary" id="cinema-still-modal-close">Kapat</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js?v=cinema101" charset="utf-8"></script>
+  <script src="/static/film-workspace.js?v=cinema101" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema101" charset="utf-8"></script>
 </body>
 </html>

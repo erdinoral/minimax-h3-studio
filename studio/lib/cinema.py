@@ -168,6 +168,7 @@ _EMPTY: dict[str, Any] = {
     "locations": [],
     "creatures": [],
     "film_plan": None,
+    "pending_produce": None,
     "updated_at": 0,
 }
 
@@ -262,6 +263,27 @@ def delete_library_asset(kind: str, asset_id: str) -> bool:
 
 
 
+def upsert_library_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
+    """Insert or replace a card in the global asset library."""
+    k, key = asset_kind_key(kind)
+    lib = load_library()
+    cleaned = _clean_asset(asset if isinstance(asset, dict) else {}, k)
+    lid = str(
+        (asset or {}).get("library_id") or (asset or {}).get("id") or cleaned.get("id") or ""
+    ).strip()
+    if lid:
+        cleaned["id"] = lid
+    items = list(lib.get(key) or [])
+    idx = next((i for i, x in enumerate(items) if str(x.get("id") or "") == cleaned["id"]), -1)
+    if idx >= 0:
+        items[idx] = cleaned
+    else:
+        items.append(cleaned)
+    lib[key] = items
+    save_library(lib)
+    return cleaned
+
+
 def save_film_asset_to_library(kind: str, asset_id: str) -> dict[str, Any]:
     k, key = asset_kind_key(kind)
     aid = str(asset_id or "").strip()
@@ -303,6 +325,62 @@ def pull_library_to_film(kind: str, library_id: str) -> dict[str, Any]:
     payload["id"] = str(uuid.uuid4())
     return upsert_asset(k, payload)
 
+
+_CREATURE_HINT = re.compile(
+    r"\b(dragon|wyvern|drake|beast|creature|kaiju|monster|griffin|phoenix|"
+    r"serpent|ashwing|ejder|yaratik|yaratık|canavar)\b",
+    re.I,
+)
+
+
+def _sheet_is_creature(name: str, notes: str = "") -> bool:
+    """True when name/notes clearly describe a non-human creature (not a person)."""
+    return bool(_CREATURE_HINT.search(f"{name or ''} {notes or ''}"))
+
+
+SHEET_PANEL_LABELS = ("portrait", "front", "back")
+
+
+def is_tripanel_still(path: Path) -> bool:
+    """True when the still is a wide 3-panel sheet, not a single portrait/place."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return False
+    src = Path(path)
+    if not src.is_file():
+        return False
+    try:
+        with Image.open(src) as im:
+            w, h = im.size
+    except Exception:
+        return False
+    return bool(w and h and w >= int(h * 1.55))
+
+
+def split_tripanel_still(src: Path, dest_dir: Path, stem: str) -> list[Path]:
+    """Crop a 3-panel sheet into portrait / front / back PNGs. Location stills stay 1 frame."""
+    from PIL import Image
+
+    src = Path(src)
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with Image.open(src) as im:
+        rgb = im.convert("RGB")
+        w, h = rgb.size
+        if w < int(h * 1.55):
+            dest = dest_dir / f"{stem}_portrait.png"
+            rgb.save(dest, "PNG")
+            return [dest]
+        third = max(1, w // 3)
+        out: list[Path] = []
+        for i, label in enumerate(SHEET_PANEL_LABELS):
+            left = i * third
+            right = w if i == 2 else (i + 1) * third
+            dest = dest_dir / f"{stem}_{label}.png"
+            rgb.crop((left, 0, right, h)).save(dest, "PNG")
+            out.append(dest)
+        return out
 
 
 def build_character_sheet_prompt(
@@ -712,9 +790,21 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
         "steps": steps,
         "seed": seed,
         "seed_lock": seed_lock,
-        "characters": [_clean_asset(x, "character") for x in (data.get("characters") or [])],
-        "locations": [_clean_asset(x, "location") for x in (data.get("locations") or [])],
-        "creatures": [_clean_asset(x, "creature") for x in (data.get("creatures") or [])],
+        "characters": [
+            _clean_asset(x, "character")
+            for x in _keep_asset_stills(data.get("characters") or [], prev.get("characters") or [])
+        ],
+        "locations": [
+            _clean_asset(x, "location")
+            for x in _keep_asset_stills(data.get("locations") or [], prev.get("locations") or [])
+        ],
+        "creatures": [
+            _clean_asset(x, "creature")
+            for x in _keep_asset_stills(
+                data["creatures"] if "creatures" in data else (prev.get("creatures") or []),
+                prev.get("creatures") or [],
+            )
+        ],
         "updated_at": _now(),
     }
     outline = data.get("shotOutline")
@@ -722,9 +812,81 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
         outline = prev.get("shotOutline")
     if isinstance(outline, list) and outline:
         out["shotOutline"] = outline
+    # Scene produce waits on this; a whitelist save used to drop it so
+    # sheets finished and the 24 clips never queued.
+    if "pending_produce" in data:
+        pend = data.get("pending_produce")
+        out["pending_produce"] = pend if isinstance(pend, dict) else None
+    else:
+        prev_pend = prev.get("pending_produce")
+        if isinstance(prev_pend, dict):
+            out["pending_produce"] = prev_pend
     CINEMA_FILE.parent.mkdir(parents=True, exist_ok=True)
     CINEMA_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     _archive_film(out)
+    return out
+
+
+def _asset_has_still(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if str(item.get("image") or "").strip() or str(item.get("url") or "").strip():
+        return True
+    imgs = item.get("images")
+    if not isinstance(imgs, list):
+        return False
+    return any(
+        (isinstance(x, str) and x.strip())
+        or (isinstance(x, dict) and (x.get("file") or x.get("url") or x.get("image")))
+        for x in imgs
+    )
+
+
+def _asset_image_files(item: Any) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    files: list[str] = []
+    seen: set[str] = set()
+    for x in item.get("images") or []:
+        file = ""
+        if isinstance(x, str):
+            file = x.strip()
+        elif isinstance(x, dict):
+            file = str(x.get("file") or x.get("image") or "").strip()
+        if file and file not in seen:
+            seen.add(file)
+            files.append(file)
+    single = str(item.get("image") or "").strip()
+    if single and single not in seen:
+        files.append(single)
+    return files
+
+
+def _keep_asset_stills(incoming: list[Any], previous: list[Any]) -> list[Any]:
+    """Keep sheet stills if a stale UI PUT sends empty or older 1-frame collages."""
+    prev_by_id = {
+        str(x.get("id") or ""): x
+        for x in (previous or [])
+        if isinstance(x, dict) and x.get("id")
+    }
+    out: list[Any] = []
+    for row in incoming or []:
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        prev = prev_by_id.get(str(item.get("id") or ""))
+        if prev and _asset_has_still(prev):
+            prev_files = _asset_image_files(prev)
+            inc_files = _asset_image_files(item)
+            stale_collage = (
+                not inc_files
+                or (len(prev_files) > len(inc_files) and len(prev_files) >= 3)
+            )
+            if stale_collage:
+                item["images"] = list(prev.get("images") or [])
+                item["image"] = prev.get("image") or ""
+                item["url"] = prev.get("url") or ""
+        out.append(item)
     return out
 
 
@@ -934,7 +1096,11 @@ def match_prompt(text: str, lib: Optional[dict[str, Any]] = None) -> list[dict[s
     lib = lib or load()
     hits: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for kind, key in (("character", "characters"), ("location", "locations")):
+    for kind, key in (
+        ("character", "characters"),
+        ("creature", "creatures"),
+        ("location", "locations"),
+    ):
         for raw in lib.get(key) or []:
             item = _clean_asset(raw, kind)
             if not asset_mentioned(text, item):
@@ -977,11 +1143,13 @@ def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optiona
             voice_bit = (
                 f" SPEAKER LOCK: {label} always speaks with this identical voice — {voice}."
             )
-        role = (
-            "character identity / wardrobe lock"
-            if h.get("kind") == "character"
-            else "location / set lock"
-        )
+        kind = str(h.get("kind") or "")
+        if kind == "character":
+            role = "character identity / wardrobe lock"
+        elif kind == "creature":
+            role = "creature / species lock"
+        else:
+            role = "location / set lock"
         lines.append(
             f"<Picture {pic_i}> is {call} — {role} for {label}.{note_bit}{voice_bit} "
             f"Call this still as {call}. Keep this look consistent whenever {label} appears."
@@ -1052,14 +1220,23 @@ def bind_prompt(
     hits = match_prompt(text, lib)
     refs = [str(x) for x in (existing_refs or []) if x]
     bound_rows: list[dict[str, Any]] = []
+    primary: list[dict[str, Any]] = []
+    extra: list[dict[str, Any]] = []
     for h in hits:
-        for im in mentioned_images(text, h):
-            file = str(im.get("file") or "").strip()
-            if not file:
-                continue
-            bound_rows.append({**im, "asset": h})
-            if file not in refs:
-                refs.append(file)
+        imgs = mentioned_images(text, h)
+        if not imgs:
+            continue
+        primary.append({**imgs[0], "asset": h})
+        extra.extend({**im, "asset": h} for im in imgs[1:])
+    for row in primary + extra:
+        file = str(row.get("file") or "").strip()
+        if not file:
+            continue
+        bound_rows.append(row)
+        if file not in refs:
+            refs.append(file)
+        if len(refs) >= 9:
+            break
     refs = refs[:9]
     bound_rows = bound_rows[:9]
     chosen_lora = (lora_id or "").strip()
@@ -1614,6 +1791,308 @@ def _ref_files_in(lib: dict[str, Any]) -> list[str]:
             seen.add(n)
             out.append(n)
     return out
+
+
+CINEMA_JSON_SCHEMA = "h3-cinema/v1"
+CINEMA_JSON_TEMPLATE_FILE = STUDIO_ROOT / "schemas" / "h3-cinema-v1.example.json"
+
+
+def project_json_template() -> dict[str, Any]:
+    """Blank h3-cinema/v1 package with every required column present (fill externally)."""
+    if CINEMA_JSON_TEMPLATE_FILE.is_file():
+        try:
+            raw = json.loads(CINEMA_JSON_TEMPLATE_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                raw["schema"] = CINEMA_JSON_SCHEMA
+                return raw
+        except Exception:
+            pass
+    return {
+        "schema": CINEMA_JSON_SCHEMA,
+        "title": "",
+        "logline": "",
+        "look": "auto",
+        "setup": {
+            "look": "auto",
+            "camera": "auto",
+            "palette": "auto",
+            "lighting": "auto",
+            "era": "auto",
+            "purpose": "short_film",
+            "style": "realistic",
+        },
+        "duration": 5,
+        "quality": "736",
+        "steps": 18,
+        "characters": [
+            {
+                "name": "",
+                "notes": "",
+                "voice": "",
+                "trigger": "",
+                "lora_id": "",
+                "lora_strength": 0.8,
+            }
+        ],
+        "locations": [{"name": "", "notes": "", "trigger": ""}],
+        "creatures": [{"name": "", "notes": "", "trigger": ""}],
+        # Fallback: 12×5s = 60s (full template lives in schemas/h3-cinema-v1.example.json)
+        "sections": [
+            {
+                "mode": "t2v" if i == 0 else "continue",
+                "title": "",
+                "location": "",
+                "character": "",
+                "action": "",
+                "dialogue": "",
+                "dialogue_lang": "auto",
+                "camera": "",
+                "visual_style": "",
+                "audio": "",
+                "music": "N/A",
+                "important": "",
+            }
+            for i in range(12)
+        ],
+    }
+
+
+def _asset_public(asset: Any, kind: str) -> dict[str, Any]:
+    """Text-only asset card for portable JSON (no binary refs required)."""
+    item = _clean_asset(asset if isinstance(asset, dict) else {}, kind)
+    out: dict[str, Any] = {
+        "name": item.get("name") or "",
+        "notes": item.get("notes") or "",
+    }
+    if kind == "character":
+        out["voice"] = item.get("voice") or ""
+        if item.get("lora_id"):
+            out["lora_id"] = item.get("lora_id") or ""
+            out["lora_strength"] = item.get("lora_strength") or 0.8
+    if item.get("trigger") and item.get("trigger") != item.get("name"):
+        out["trigger"] = item.get("trigger") or ""
+    return out
+
+
+def _section_from_shot(shot: Any) -> dict[str, Any]:
+    if not isinstance(shot, dict):
+        return {"text": str(shot or "").strip(), "mode": "t2v"}
+    structured = _clean_structured(shot.get("structured"))
+    has_struct = any(structured.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang")
+    mode = str(shot.get("mode") or "t2v").strip().lower()
+    if mode not in ("continue", "devam", "i2v", "last_frame"):
+        mode = "t2v"
+    else:
+        mode = "continue"
+    row: dict[str, Any] = {"mode": mode}
+    if has_struct:
+        for key in _STRUCTURED_KEYS:
+            val = structured.get(key) or ""
+            if key == "dialogue_lang" and (not val or val.lower() == "auto"):
+                row[key] = "auto"
+            elif val:
+                row[key] = val
+    else:
+        text = str(shot.get("text") or shot.get("h3Prompt") or shot.get("prompt") or "").strip()
+        if text:
+            row["text"] = text
+    return row
+
+
+def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, Any]:
+    if isinstance(item, str):
+        return _clean_shot(
+            {"text": item, "mode": "t2v" if index == 0 else "continue"},
+            index,
+            look_id=look_id,
+        )
+    if not isinstance(item, dict):
+        return _clean_shot({"text": "", "mode": "t2v"}, index, look_id=look_id)
+    structured_raw = item.get("structured")
+    if not isinstance(structured_raw, dict):
+        structured_raw = {k: item.get(k) for k in _STRUCTURED_KEYS if item.get(k) not in (None, "")}
+    structured = _clean_structured(structured_raw)
+    mode = str(item.get("mode") or ("t2v" if index == 0 else "continue")).strip().lower()
+    text = str(
+        item.get("text") or item.get("h3Prompt") or item.get("prompt") or item.get("action") or ""
+    ).strip()
+    payload: dict[str, Any] = {"mode": mode, "text": text}
+    if any(structured.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang"):
+        payload["structured"] = structured
+    return _clean_shot(payload, index, look_id=look_id)
+
+
+def export_project_json() -> dict[str, Any]:
+    """Portable film package: cast + structured sections (LLM-friendly)."""
+    data = load()
+    look_id = str((_clean_setup(data.get("setup")).get("look") or "")).strip()
+    return {
+        "schema": CINEMA_JSON_SCHEMA,
+        "title": str(data.get("title") or "").strip(),
+        "logline": str(data.get("role_script") or "").strip()[:4000],
+        "setup": _clean_setup(data.get("setup")),
+        "duration": int(data.get("duration") or 5),
+        "quality": str(data.get("quality") or "720"),
+        "steps": int(data.get("steps") or 20),
+        "characters": [_asset_public(x, "character") for x in (data.get("characters") or [])],
+        "locations": [_asset_public(x, "location") for x in (data.get("locations") or [])],
+        "creatures": [_asset_public(x, "creature") for x in (data.get("creatures") or [])],
+        "sections": [_section_from_shot(s) for s in (data.get("shots") or [])],
+        "look": look_id,
+    }
+
+
+def _coerce_project_payload(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    if not isinstance(raw, dict):
+        raise ValueError("JSON nesne olmalı")
+    # Allow wrappers from external tools
+    for key in ("film", "cinema", "project", "data"):
+        nested = raw.get(key)
+        if isinstance(nested, dict) and (
+            nested.get("sections")
+            or nested.get("shots")
+            or nested.get("scenes")
+            or nested.get("characters")
+        ):
+            raw = nested
+            break
+    return raw
+
+
+def import_project_json(
+    raw: Any,
+    *,
+    mode: str = "replace",
+    save_to_library: bool = False,
+    new_film: bool = True,
+) -> dict[str, Any]:
+    """
+    Build cinema cast + sections from portable JSON.
+
+    mode:
+      - replace: overwrite characters/locations/creatures/shots from JSON
+      - merge: merge assets by name; replace shots when sections present
+    """
+    payload = _coerce_project_payload(raw)
+    # Drop AI briefing / meta keys (e.g. _instructions) if the filler forgot to delete them
+    payload = {
+        k: v
+        for k, v in payload.items()
+        if not (isinstance(k, str) and k.startswith("_"))
+    }
+    mode_l = (mode or "replace").strip().lower()
+    if mode_l not in ("replace", "merge"):
+        mode_l = "replace"
+
+    setup_raw = payload.get("setup") if isinstance(payload.get("setup"), dict) else {}
+    look_hint = str(payload.get("look") or setup_raw.get("look") or "").strip()
+
+    sections = (
+        payload.get("sections")
+        if isinstance(payload.get("sections"), list)
+        else payload.get("shots")
+        if isinstance(payload.get("shots"), list)
+        else payload.get("scenes")
+        if isinstance(payload.get("scenes"), list)
+        else []
+    )
+    shots = [
+        _shot_from_section(item, i, look_id=look_hint)
+        for i, item in enumerate(sections)
+        if isinstance(item, (dict, str))
+    ]
+    shots = [s for s in shots if s.get("text") or s.get("structured")]
+
+    chars_in = payload.get("characters") or payload.get("cast") or []
+    locs_in = payload.get("locations") or payload.get("places") or []
+    creatures_in = payload.get("creatures") or payload.get("monsters") or []
+
+    # Archive current before replace-into-new-film
+    cur = load()
+    if new_film and mode_l == "replace":
+        try:
+            save(cur)
+        except Exception:
+            pass
+        data = json.loads(json.dumps(_EMPTY))
+        data["film_id"] = uuid.uuid4().hex[:10]
+    else:
+        data = cur
+
+    title = str(payload.get("title") or payload.get("name") or data.get("title") or "").strip()
+    logline = str(payload.get("logline") or payload.get("role_script") or "").strip()
+    if title:
+        data["title"] = title
+    if logline:
+        data["role_script"] = logline
+
+    if isinstance(payload.get("setup"), dict):
+        data["setup"] = _clean_setup({**_clean_setup(data.get("setup")), **payload["setup"]})
+    elif look_hint:
+        setup = _clean_setup(data.get("setup"))
+        setup["look"] = look_hint
+        data["setup"] = setup
+
+    for key in ("duration", "quality", "steps"):
+        if payload.get(key) is not None:
+            data[key] = payload.get(key)
+
+    if mode_l == "replace":
+        data["characters"] = _merge_named_assets("character", [], chars_in)
+        data["locations"] = _merge_named_assets("location", [], locs_in)
+        data["creatures"] = _merge_named_assets("creature", [], creatures_in)
+        if shots:
+            data["shots"] = shots
+        elif sections == [] and (chars_in or locs_in or creatures_in):
+            # Cast-only package — keep existing shots unless empty film
+            data.setdefault("shots", data.get("shots") or [])
+        else:
+            data["shots"] = shots
+    else:
+        data["characters"] = _merge_named_assets(
+            "character", data.get("characters") or [], chars_in
+        )
+        data["locations"] = _merge_named_assets(
+            "location", data.get("locations") or [], locs_in
+        )
+        data["creatures"] = _merge_named_assets(
+            "creature", data.get("creatures") or [], creatures_in
+        )
+        if shots:
+            data["shots"] = shots
+
+    out = save(data)
+
+    if save_to_library:
+        for kind, key in (
+            ("character", "characters"),
+            ("location", "locations"),
+            ("creature", "creatures"),
+        ):
+            for asset in out.get(key) or []:
+                if not str(asset.get("name") or "").strip():
+                    continue
+                try:
+                    save_film_asset_to_library(kind, str(asset.get("id") or ""))
+                except Exception:
+                    pass
+
+    return {
+        "ok": True,
+        "schema": CINEMA_JSON_SCHEMA,
+        "mode": mode_l,
+        "title": out.get("title") or "",
+        "film_id": out.get("film_id") or "",
+        "counts": {
+            "characters": len(out.get("characters") or []),
+            "locations": len(out.get("locations") or []),
+            "creatures": len(out.get("creatures") or []),
+            "sections": len(out.get("shots") or []),
+        },
+        "cinema": out,
+    }
 
 
 def export_zip() -> bytes:

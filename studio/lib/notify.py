@@ -243,6 +243,47 @@ class NotifyService:
         except Exception as e:
             return {"ok": False, "detail": str(e)[:200]}
 
+    async def _send_telegram_media(
+        self,
+        path: Path,
+        caption: str,
+        *,
+        kind: str = "video",
+        force: bool = False,
+    ) -> dict[str, Any]:
+        cfg = self.load()
+        if not force and not cfg.get("enabled"):
+            return {"ok": False, "detail": "disabled"}
+        token = (cfg.get("telegram_bot_token") or "").strip()
+        chat_id = str(cfg.get("telegram_chat_id") or "").strip()
+        if not token or not chat_id:
+            return {"ok": False, "detail": "telegram_not_configured"}
+        file_path = Path(path)
+        if not file_path.is_file():
+            return {"ok": False, "detail": "media_missing"}
+        method = "sendPhoto" if kind == "photo" else "sendVideo"
+        field = "photo" if kind == "photo" else "video"
+        url = f"https://api.telegram.org/bot{token}/{method}"
+        cap = (caption or "").strip()[:1000]
+        form = {"chat_id": chat_id, "caption": cap}
+        if kind == "video":
+            form["supports_streaming"] = "true"
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as c:
+                with file_path.open("rb") as fh:
+                    r = await c.post(
+                        url,
+                        data=form,
+                        files={field: (file_path.name, fh, "application/octet-stream")},
+                    )
+            data = r.json() if r.content else {}
+            if r.status_code >= 400 or not data.get("ok"):
+                desc = (data.get("description") if isinstance(data, dict) else None) or r.text
+                return {"ok": False, "detail": str(desc)[:200]}
+            return {"ok": True, "detail": f"telegram_{kind}"}
+        except Exception as e:
+            return {"ok": False, "detail": str(e)[:200]}
+
     async def _send_ntfy(
         self,
         title: str,
@@ -324,6 +365,27 @@ class NotifyService:
                 j.get("status") in ("queued", "running") for j in jobs
             )
 
+        if cfg.get("on_each_clip"):
+            title = "H3 · klip hazır"
+            if job.get("sheet_asset_id"):
+                title = f"H3 · sheet · {job.get('sheet_name') or job.get('sheet_kind') or 'ref'}"
+            elif bi and bt:
+                title = f"H3 · klip {bi}/{bt} hazır"
+            meta = (f"{res} · {dur}sn" if res or dur else "hazır").strip(" ·")
+            caption = f"{title}\n{meta}".strip()
+            sent = {"ok": False}
+            if (cfg.get("provider") or "telegram").lower() == "telegram":
+                if job.get("sheet_asset_id"):
+                    still = Path(job.get("last_frame_path") or "")
+                    if still.is_file():
+                        sent = await self._send_telegram_media(still, caption, kind="photo")
+                else:
+                    video = Path(job.get("local_path") or "")
+                    if video.is_file():
+                        sent = await self._send_telegram_media(video, caption, kind="video")
+            if not sent.get("ok"):
+                await self.send(title, meta, priority=3, tags="movie_camera")
+
         if batch_complete and cfg.get("on_batch_done"):
             await self.send(
                 f"H3 · seri bitti ({bt} shot)",
@@ -343,16 +405,4 @@ class NotifyService:
                 + (f" · {dur}sn" if dur else ""),
                 priority=4,
                 tags="white_check_mark,movie_camera",
-            )
-            return
-
-        if cfg.get("on_each_clip"):
-            title = "H3 · klip hazır"
-            if bi and bt:
-                title = f"H3 · klip {bi}/{bt} hazır"
-            await self.send(
-                title,
-                (f"{res} · {dur}sn" if res or dur else "Video kaydedildi"),
-                priority=3,
-                tags="movie_camera",
             )

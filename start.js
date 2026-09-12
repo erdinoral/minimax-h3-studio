@@ -4,6 +4,20 @@ module.exports = {
   },
   daemon: true,
   run: [
+    // 0) Lightweight launcher sync — Studio/UI scripts only (~1s when already current).
+    //    Does NOT pull ComfyUI / custom nodes / pip (use Update for that).
+    //    Soft-fail if offline or local git changes block ff-only.
+    {
+      method: "shell.run",
+      params: {
+        shell: "{{which('bash')}}",
+        message: [
+          // Pinokio aborts Start if the terminal prints `error:` — hide git's
+          // "untracked files would be overwritten" so local work cannot block launch.
+          "git pull --ff-only >.git/h3-pull.log 2>&1 || echo '[H3 Studio] launcher update check skipped (offline or local changes — use Update if needed)'"
+        ]
+      }
+    },
     // 1) ComfyUI backend only — no browser auto-launch. Lives only while start.js runs;
     //    Stop in Pinokio kills Comfy + Studio together (not a separate always-on app).
     {

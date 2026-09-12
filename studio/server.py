@@ -104,6 +104,7 @@ from lib.notify import NotifyService
 from lib.ollama import OllamaClient
 from lib import slog
 from lib import cinema
+from lib import donors as donor_roll
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
@@ -1122,6 +1123,8 @@ class CinemaProduceBody(BaseModel):
     append_to_chain: bool = False
     audio: Optional[dict[str, Any]] = None
     seamless: bool = False
+    # First queue missing character/creature/location sheets; scenes start after they finish
+    prepare_sheets: bool = True
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -1746,6 +1749,12 @@ async def shutdown():
         except Exception as e:
             slog.warn("shutdown task", which=label, err=e)
     _release_single_instance()
+
+
+@app.get("/api/donors")
+async def get_donors():
+    """Public thank-you roll. Empty names → UI hides the ticker."""
+    return await donor_roll.list_donors()
 
 
 @app.get("/api/health")
@@ -3695,12 +3704,28 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
     dest = REFS / f"h3_sheet_{rid}.png"
     REFS.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
-    try:
-        comfy_name = await comfy.upload_image(dest, dest.name)
-    except Exception as e:
-        slog.warn_job(job, "sheet still comfy upload", err=e)
+    panel_paths = [dest]
+    if kind in ("character", "creature"):
+        try:
+            panel_paths = cinema.split_tripanel_still(dest, REFS, f"h3_sheet_{rid}")
+        except Exception as e:
+            slog.warn_job(job, "sheet still split", err=e)
+            panel_paths = [dest]
+    uploaded: list[dict] = []
+    for part in panel_paths:
+        try:
+            comfy_name = await comfy.upload_image(part, part.name)
+        except Exception as e:
+            slog.warn_job(job, "sheet still comfy upload", err=e)
+            return
+        uploaded.append({"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
+    if not uploaded:
         return
-    images.insert(0, {"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
+    auto_only = (not images) or all(
+        str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")
+        for im in images
+    )
+    images = uploaded if auto_only else (uploaded + images)
     found["images"] = images[: cinema.MAX_ASSET_IMAGES]
     cinema.upsert_asset(kind, found)
     # Persist into global library so film switches / empty saves don't lose the sheet
@@ -3710,7 +3735,8 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
         job["library_saved"] = True
     except Exception as e:
         slog.warn_job(job, "sheet library save", err=e)
-    job["sheet_still_url"] = f"/api/refs/{comfy_name}"
+    job["sheet_still_url"] = uploaded[0]["url"]
+    job["sheet_still_urls"] = [row["url"] for row in uploaded]
     job["sheet_attached"] = True
     # Ephemeral sheet: drop the video — only the still matters for refs
     if job.get("sheet_ephemeral") is not False:
@@ -3756,23 +3782,57 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
     """Queue a silent H3 clip that renders a 3-panel character/location reference sheet."""
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı")
-    kind_raw = str(body.kind or "character").lower()
+    try:
+        return await _queue_cinema_sheet_job(
+            kind=body.kind or "character",
+            name=body.name,
+            notes=body.notes or "",
+            asset_id=body.asset_id,
+            duration=body.duration,
+            quality=body.quality,
+            steps=body.steps,
+            aspect=body.aspect or "16:9",
+            style=body.style,
+            seed=body.seed if body.seed is not None else -1,
+            ref_image=body.ref_image,
+            ref_images=body.ref_images,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)[:300]) from e
+
+
+async def _queue_cinema_sheet_job(
+    *,
+    kind: str,
+    name: str,
+    notes: str = "",
+    asset_id: Optional[str] = None,
+    duration: int = 5,
+    quality: str = "736",
+    steps: int = 18,
+    aspect: str = "16:9",
+    style: Optional[str] = None,
+    seed: int = -1,
+    ref_image: Optional[str] = None,
+    ref_images: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    """Shared sheet queue used by Generate visual + JSON import."""
+    kind_raw = str(kind or "character").lower()
     kind, _ = cinema.asset_kind_key(kind_raw)
-    name = (body.name or "").strip()
+    name = (name or "").strip()
     if not name:
-        raise HTTPException(400, "ad gerekli")
-    notes = (body.notes or "").strip()
-    style_key = normalize_style(body.style) if body.style else "realistic"
-    # Prefer cinema setup style when caller omitted
-    if not body.style:
+        raise ValueError("ad gerekli")
+    notes = (notes or "").strip()
+    style_key = normalize_style(style) if style else "realistic"
+    if not style:
         lib0 = cinema.load()
         setup = lib0.get("setup") if isinstance(lib0.get("setup"), dict) else {}
         style_key = normalize_style(setup.get("style") or "realistic")
     style_line = style_craft_line(style_key)
     refs: list[str] = []
-    if body.ref_images:
-        refs.extend(str(x) for x in body.ref_images if str(x).strip())
-    one = (body.ref_image or "").strip()
+    if ref_images:
+        refs.extend(str(x) for x in ref_images if str(x).strip())
+    one = (ref_image or "").strip()
     if one and one not in refs:
         refs.insert(0, one)
     refs = refs[:3]
@@ -3793,23 +3853,22 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
         "name": name,
         "notes": notes,
     }
-    if body.asset_id:
-        asset_payload["id"] = body.asset_id
+    if asset_id:
+        asset_payload["id"] = asset_id
     if has_ref:
         asset_payload["source_ref"] = refs[0]
     asset = cinema.upsert_asset(kind, asset_payload)
-    # Use caller's speed preset (Taslak/Orta/Yüksek); keep last frame, discard video
-    quality = normalize_quality(body.quality or "736")
-    steps = body.steps if body.steps and body.steps > 0 else 18
-    dur = int(body.duration) if body.duration and int(body.duration) > 0 else 5
+    quality_n = normalize_quality(quality or "736")
+    steps_n = steps if steps and steps > 0 else 18
+    dur = int(duration) if duration and int(duration) > 0 else 5
     dur = max(4, min(dur, 10))
     gen_kwargs: dict[str, Any] = {
         "prompt": prompt,
         "duration": dur,
-        "aspect": body.aspect or "16:9",
-        "quality": quality,
-        "seed": body.seed if body.seed is not None else -1,
-        "steps": steps,
+        "aspect": aspect or "16:9",
+        "quality": quality_n,
+        "seed": seed if seed is not None else -1,
+        "steps": steps_n,
         "silent_audio": True,
         "purpose": "short_film",
         "lane": "director",
@@ -3821,11 +3880,9 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
             gen_kwargs["ref_images"] = refs
             gen_kwargs["ref_image_size"] = "max"
         else:
-            # location + creature: visual ref, not face-lock
             gen_kwargs["mode"] = "ref"
             gen_kwargs["ref_images"] = refs
             gen_kwargs["ref_image_size"] = "match"
-        # Don't merge existing Garen/… card stills into this sheet job
         gen_kwargs["skip_cinema_assets"] = True
     else:
         gen_kwargs["skip_cinema_assets"] = True
@@ -3844,7 +3901,7 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
             ref_bit = (
                 " +yüz" if has_ref and kind == "character" else (" +mekân" if has_ref else "")
             )
-            j["progress_label"] = f"sheet{ref_bit} · {quality}p/{steps} → still"
+            j["progress_label"] = f"sheet{ref_bit} · {quality_n}p/{steps_n} → still"
             job = j
             break
     _save_jobs()
@@ -3857,11 +3914,155 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
     }
 
 
+def _asset_needs_sheet(asset: Any) -> bool:
+    if not isinstance(asset, dict):
+        return False
+    if not str(asset.get("name") or "").strip():
+        return False
+    images = asset.get("images")
+    if isinstance(images, list) and any(
+        isinstance(x, dict) and str(x.get("file") or x.get("url") or "").strip() for x in images
+    ):
+        return False
+    if str(asset.get("image") or "").strip():
+        return False
+    return True
+
+
+async def _queue_sheets_for_cinema(
+    cine: dict[str, Any],
+    *,
+    kinds: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    """Queue Görsel oluştur (sheet) for cast cards that still lack stills."""
+    if not await comfy.healthy():
+        return []
+    want = {cinema.asset_kind_key(k)[0] for k in (kinds or ["character", "location", "creature"])}
+    queued: list[dict[str, Any]] = []
+    setup = cine.get("setup") if isinstance(cine.get("setup"), dict) else {}
+    style = setup.get("style") if setup.get("style") not in (None, "", "auto") else None
+    quality = str(cine.get("quality") or "736")
+    try:
+        steps = int(cine.get("steps") or 18)
+    except (TypeError, ValueError):
+        steps = 18
+    try:
+        duration = int(cine.get("duration") or 5)
+    except (TypeError, ValueError):
+        duration = 5
+    for kind, key in (
+        ("character", "characters"),
+        ("creature", "creatures"),
+        ("location", "locations"),
+    ):
+        if kind not in want:
+            continue
+        for asset in cine.get(key) or []:
+            if not _asset_needs_sheet(asset):
+                continue
+            aid = str(asset.get("id") or "")
+            if aid and any(
+                str(j.get("sheet_asset_id") or "") == aid
+                and str(j.get("status") or "") in ("queued", "running")
+                for j in _jobs
+            ):
+                continue
+            try:
+                result = await _queue_cinema_sheet_job(
+                    kind=kind,
+                    name=str(asset.get("name") or ""),
+                    notes=str(asset.get("notes") or ""),
+                    asset_id=str(asset.get("id") or "") or None,
+                    duration=duration,
+                    quality=quality,
+                    steps=steps,
+                    style=style,
+                )
+                queued.append(
+                    {
+                        "kind": kind,
+                        "name": result.get("asset", {}).get("name") or asset.get("name"),
+                        "asset_id": (result.get("asset") or {}).get("id"),
+                        "job_id": (result.get("job") or {}).get("id"),
+                    }
+                )
+            except Exception as e:
+                slog.warn("import sheet queue failed", kind=kind, name=asset.get("name"), err=e)
+    return queued
+
+
+async def _maybe_continue_pending_produce() -> None:
+    """After character/creature/location sheets finish, queue the waiting scene clips."""
+    lib = cinema.load()
+    pend = lib.get("pending_produce")
+    if not isinstance(pend, dict):
+        return
+    ids = [str(x) for x in (pend.get("sheet_job_ids") or []) if x]
+    if not ids:
+        lib["pending_produce"] = None
+        cinema.save(lib)
+        return
+    jobs = [j for j in _jobs if str(j.get("id") or "") in set(ids)]
+    if any(str(j.get("status") or "") in ("queued", "running") for j in jobs):
+        return
+    payload = pend.get("payload") if isinstance(pend.get("payload"), dict) else {}
+    lib["pending_produce"] = None
+    cinema.save(lib)
+    if not payload:
+        return
+    payload["prepare_sheets"] = False
+    try:
+        queued = await cinema_produce(CinemaProduceBody(**payload))
+        slog.info(
+            "cinema pending produce scenes",
+            count=queued.get("count") if isinstance(queued, dict) else None,
+            batch=queued.get("cinema_batch") if isinstance(queued, dict) else None,
+        )
+    except Exception as e:
+        slog.warn("cinema pending produce failed", err=e)
 
 
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
+    if body.prepare_sheets:
+        lib0 = cinema.load()
+        already = lib0.get("pending_produce")
+        if isinstance(already, dict) and already.get("sheet_job_ids"):
+            return {
+                "ok": True,
+                "phase": "sheets",
+                "pending_scenes": True,
+                "count": 0,
+                "sheets_queued": [],
+                "message": "Görseller zaten kuyrukta — bitince sahneler başlar",
+            }
+        if body.setup:
+            lib0["setup"] = cinema._clean_setup(body.setup)
+        if body.audio is not None:
+            lib0["audio"] = cinema._clean_audio(body.audio)
+        lib0["duration"] = body.duration
+        lib0["quality"] = normalize_quality(body.quality)
+        lib0["steps"] = body.steps if body.steps and body.steps > 0 else 20
+        cinema.save(lib0)
+        sheets = await _queue_sheets_for_cinema(cinema.load())
+        if sheets:
+            lib0 = cinema.load()
+            payload = body.model_dump()
+            payload["prepare_sheets"] = False
+            lib0["pending_produce"] = {
+                "sheet_job_ids": [s.get("job_id") for s in sheets if s.get("job_id")],
+                "payload": payload,
+                "created_at": time.time(),
+            }
+            cinema.save(lib0)
+            return {
+                "ok": True,
+                "phase": "sheets",
+                "pending_scenes": True,
+                "count": 0,
+                "sheets_queued": sheets,
+            }
     parsed = cinema.normalize_produce_shots(body.shots, body.script or "", body.shot_modes)
     if not parsed:
         raise HTTPException(400, "Senaryo / shot yok")
@@ -4369,11 +4570,90 @@ async def cinema_export():
     )
 
 
+@app.get("/api/cinema/export-json")
+async def cinema_export_json():
+    return cinema.export_project_json()
+
+
+@app.get("/api/cinema/json-template")
+async def cinema_json_template():
+    """Blank h3-cinema/v1 template with every column — fill externally, then import."""
+    return cinema.project_json_template()
+
+
+class CinemaImportJsonBody(BaseModel):
+    payload: Optional[Any] = None
+    text: Optional[str] = None
+    mode: str = "replace"
+    save_to_library: bool = False
+    new_film: bool = True
+    generate_sheets: bool = False
+
+
+@app.post("/api/cinema/import-json")
+async def cinema_import_json(body: CinemaImportJsonBody):
+    raw: Any = body.payload
+    if raw is None and body.text:
+        try:
+            raw = json.loads(body.text)
+        except Exception as e:
+            raise HTTPException(400, f"JSON parse hata: {e}") from e
+    if raw is None:
+        raise HTTPException(400, "payload veya text gerekli")
+    try:
+        out = cinema.import_project_json(
+            raw,
+            mode=body.mode or "replace",
+            save_to_library=bool(body.save_to_library),
+            new_film=bool(body.new_film),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e)[:400]) from e
+    except Exception as e:
+        raise HTTPException(400, str(e)[:400]) from e
+    sheets: list[dict[str, Any]] = []
+    if body.generate_sheets:
+        try:
+            sheets = await _queue_sheets_for_cinema(out.get("cinema") or {})
+        except Exception as e:
+            slog.warn("cinema import-json sheets", err=e)
+        # Reload cinema after sheet upserts
+        out["cinema"] = cinema.load()
+        out["counts"] = {
+            "characters": len(out["cinema"].get("characters") or []),
+            "locations": len(out["cinema"].get("locations") or []),
+            "creatures": len(out["cinema"].get("creatures") or []),
+            "sections": len(out["cinema"].get("shots") or []),
+        }
+    out["sheets_queued"] = sheets
+    slog.info(
+        "cinema import-json",
+        mode=out.get("mode"),
+        counts=out.get("counts"),
+        sheets=len(sheets),
+    )
+    return out
+
+
 @app.post("/api/cinema/import")
 async def cinema_import(file: UploadFile = File(...)):
     raw = await file.read()
     if not raw:
-        raise HTTPException(400, "boş zip")
+        raise HTTPException(400, "boş dosya")
+    name = (file.filename or "").lower()
+    # JSON package (.json) — text cast + sections
+    if name.endswith(".json") or (raw[:1] in (b"{", b"[") and b"PK" != raw[:2]):
+        try:
+            payload = json.loads(raw.decode("utf-8-sig"))
+        except Exception as e:
+            raise HTTPException(400, f"JSON okunamadı: {e}") from e
+        try:
+            out = cinema.import_project_json(payload, mode="replace", new_film=True)
+        except Exception as e:
+            raise HTTPException(400, str(e)[:300]) from e
+        out["cinema"] = cinema.load()
+        out["sheets_queued"] = []
+        return out
     try:
         return cinema.import_zip(raw)
     except Exception as e:
@@ -6673,12 +6953,12 @@ async def _run_job(job: dict):
                 except Exception as e:
                     slog.warn_job(job, "gallery archive failed", err=e)
                 slog.info_job(job, "done", file=video_meta.get("filename"))
-                await _notify_job(job, "done")
                 try:
                     if job.get("sheet_asset_id"):
                         await _maybe_attach_sheet_still(job)
                 except Exception as e:
                     slog.warn_job(job, "sheet still attach failed", err=e)
+                await _notify_job(job, "done")
                 try:
                     await _maybe_auto_mux_cinema(job)
                 except Exception as e:
@@ -6789,6 +7069,12 @@ async def _run_job(job: dict):
                     pass
 
             ws_task.add_done_callback(_silent)
+        try:
+            st = str(job.get("status") or "")
+            if st in ("done", "error", "cancelled"):
+                await _maybe_continue_pending_produce()
+        except Exception as e:
+            slog.warn("pending produce continue", err=e)
 
 
 def _clip_record(job_id: Optional[str]) -> Optional[dict]:

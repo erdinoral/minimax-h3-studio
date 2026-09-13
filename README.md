@@ -157,20 +157,20 @@ POST /api/loras/import     # { url, filename? } direct HF / .safetensors link
 
 **Install (existing Pinokio install):** menu **Download Models → H3 Multishot (Seamless Chain) nodes**, or **Update**. Then **Stop → Start** so Comfy loads the pack.
 
-**Cinema:** **Kesintisiz zincir** (on when the pack is present). Shot texts are joined with `---` and render as one clip. Pack limit: **8 shots**. Uncheck it to use the older per-shot Continue chain (last-frame I2V, up to 80 shots).
+**Cinema:** **Kesintisiz zincir** (on when the pack is present). Shot texts are joined with `---` and render as one clip per **take** (max 8 shots, e.g. 8×5s = 40s). In JSON, `takes[]` is the scene list of **one continuing film**: “5 sahneli” = 5 takes × 8 shots (Sahne 1…5), then concat. A flat `sections[]` list still auto-chunks every 8. Pack limit is 8 shots **per take**, not per film. Uncheck it to use the older per-shot Continue chain (last-frame I2V, up to 80 shots).
 
-**Kesintisiz JSON** (`h3-cinema-seamless/v1`): Direktör → **JSON → Kesintisiz örnek**. Fill English text only (delete `_instructions`), import, then **Üret**. Studio switches to Seamless, skips face sheets, and queues one Multishot take. Do not add portraits — they disable Seamless. The older **Film örneği** (`h3-cinema/v1`) is the 12×5s face-lock package.
+**Kesintisiz JSON** (`h3-cinema-seamless/v1`): Direktör → **JSON → Kesintisiz örnek**. You fill only `_user.scenes` + `_user.about`, send the file to an AI. It writes detailed author fields; Studio composes the official H3 three-block prompt (`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`). Delete `_instructions` + `_user`, import, then **Üret**. One Multishot job **per take**. Do not add portraits. The older **Film örneği** (`h3-cinema/v1`) is the face-lock package (same `_user` brief).
 
 ```text
 GET  /api/cinema/json-template              # 12×5s Film (h3-cinema/v1)
-GET  /api/cinema/json-template?kind=seamless  # 6×10s Kesintisiz (h3-cinema-seamless/v1)
+GET  /api/cinema/json-template?kind=seamless  # takes[] Kesintisiz (h3-cinema-seamless/v1)
 POST /api/cinema/import-json                # { payload, mode: replace|merge }
-POST /api/cinema/produce                    # seamless: true → one take (max 8)
+POST /api/cinema/produce                    # seamless: true → one job per take (max 8 shots each)
 ```
 
 ```javascript
 const tmpl = await fetch("/api/cinema/json-template?kind=seamless").then((r) => r.json());
-// fill tmpl.title / characters / sections, delete tmpl._instructions
+// fill tmpl.title / characters / takes[].sections, delete tmpl._instructions
 await fetch("/api/cinema/import-json", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -278,7 +278,7 @@ GET  /api/cinema
 PUT  /api/cinema
 POST /api/cinema/character
 POST /api/cinema/location
-POST /api/cinema/produce   # shots: [{ text, mode }], seamless: true → one Multishot take (max 8)
+POST /api/cinema/produce   # shots with take_index, or flat list packed every 8; seamless: true
                           # optional post_pass: "" | "upscale" | "vfi"
 POST /api/cinema/produce-film
 GET  /api/cinema/film-plan

@@ -2339,14 +2339,6 @@
       return;
     }
     const c = ensureCinema();
-    if (
-      !cinemaSceneEditId &&
-      cinemaStudioMode() === "seamless" &&
-      (c.shots || []).length >= 8
-    ) {
-      toast(tt("cinema.seamlessMaxShots"));
-      return;
-    }
     cinemaForceLocalShots = true;
     const text = composed || structured.action || "";
     if (cinemaSceneEditId) {
@@ -2386,10 +2378,6 @@
       return;
     }
     const c = ensureCinema();
-    if (cinemaStudioMode() === "seamless" && (c.shots || []).length >= 8) {
-      toast(tt("cinema.seamlessMaxShots"));
-      return;
-    }
     cinemaForceLocalShots = true;
     c.shots.push({
       id: cinemaId(),
@@ -4008,10 +3996,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           toast(tt("cinema.modeSeamlessNeedPack"));
           return;
         }
-        if (shots.length > 8) {
-          toast(tt("cinema.seamlessMaxShots"));
-          return;
-        }
+        /* JSON takes[] = one Multishot job each; unmarked shots still pack every 8 */
       }
       const audio = cinemaAudio();
       const filmMode = audio.mode !== "silent";
@@ -4088,7 +4073,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         data.still_lock && wantSeamless
           ? tt("cinema.stillOverSeamless")
           : data.seamless
-            ? tf("cinema.produceSeamless", { n: queueShots.length })
+            ? tf("cinema.produceSeamless", {
+                n: queueShots.length,
+                takes: data.takes || Math.max(1, Math.ceil(queueShots.length / 8)),
+              })
             : studioMode === "assets"
               ? tf("cinema.produceAssets", { n: data.count || 0 })
               : filmMode
@@ -8528,7 +8516,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     await fillCinemaFilms();
     const c = data && data.counts ? data.counts : null;
     const extra = c
-      ? ` · ${c.characters || 0} char / ${c.locations || 0} loc / ${c.creatures || 0} yaratık / ${c.sections || 0} bölüm`
+      ? ` · ${c.characters || 0} char / ${c.locations || 0} loc / ${c.creatures || 0} yaratık / ${c.takes || 0} take / ${c.sections || 0} shot`
       : "";
     const kept = data && data.stills_kept ? data.stills_kept : {};
     const keptN =

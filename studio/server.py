@@ -3623,97 +3623,113 @@ async def _queue_cinema_seamless(
     silent: bool,
     purpose: str,
 ) -> dict:
-    """One H3MultishotSampler job: script blocks joined with --- (pack max 8 shots)."""
+    """H3MultishotSampler jobs: packs of 8 shots (e.g. 8×5s = 40s). Extra shots = next take."""
     if not detect_multishot_pack(COMFY_ROOT):
         raise HTTPException(
             400,
             "H3 Multishot paketi yok — Pinokio: Download Models → H3 Multishot, sonra Stop → Start",
         )
-    if len(parsed) > MULTISHOT_MAX_SHOTS:
-        raise HTTPException(
-            400,
-            f"Kesintisiz zincir en fazla {MULTISHOT_MAX_SHOTS} shot (pack limiti). "
-            "Fazlası için kutuyu kapatıp Continue zincirini kullan.",
-        )
+    if not parsed:
+        raise HTTPException(400, "Senaryo / shot yok")
+    pack = max(1, int(MULTISHOT_MAX_SHOTS))
+    chunks = cinema.group_seamless_takes(parsed, prompts, pack=pack)
+    take_total = len(chunks)
     w, h = resolve_size(body.aspect, body.quality)
     steps = body.steps if body.steps and body.steps > 0 else 20
     sampler = body.sampler or "res_multistep"
     scheduler = body.scheduler or "simple"
-    texts: list[str] = []
-    bound_hits: list[dict] = []
-    for text in prompts:
-        bound = cinema.bind_prompt(
-            text,
-            existing_refs=[],
-            lora_id=getattr(body, "lora_id", None) or "",
+    jobs: list[dict] = []
+    base_seed = body.seed if body.seed >= 0 else int(time.time() * 1000) % (2**53)
+    shot_offset = 0
+    for take_i, (chunk_parsed, chunk_prompts) in enumerate(chunks, start=1):
+        texts: list[str] = []
+        bound_hits: list[dict] = []
+        for text in chunk_prompts:
+            bound = cinema.bind_prompt(
+                text,
+                existing_refs=[],
+                lora_id=getattr(body, "lora_id", None) or "",
+            )
+            texts.append(bound["prompt"] if bound.get("hits") else text)
+            bound_hits.append(bound)
+        merged_hits = {"hits": []}
+        for b in bound_hits:
+            merged_hits["hits"].extend(b.get("hits") or [])
+        lora_src, _graph = _lora_src_for_shot(body, merged_hits, "t2v")
+        take_steps, take_sampler, take_scheduler = _with_lora_preset(
+            lora_src, steps, sampler, scheduler, graph="fl2va"
         )
-        texts.append(bound["prompt"] if bound.get("hits") else text)
-        bound_hits.append(bound)
-    merged_hits = {"hits": []}
-    for b in bound_hits:
-        merged_hits["hits"].extend(b.get("hits") or [])
-    lora_src, _graph = _lora_src_for_shot(body, merged_hits, "t2v")
-    steps, sampler, scheduler = _with_lora_preset(
-        lora_src, steps, sampler, scheduler, graph="fl2va"
-    )
-    lora_bits = _lora_fields(lora_src)
-    trig_spec = find_spec(
-        lora_id=lora_bits.get("lora_id") or "",
-        file=lora_bits.get("lora_name") or "",
-    )
-    texts = [apply_trigger(t, trig_spec) for t in texts]
-    script = "\n---\n".join(texts)
-    seed = body.seed if body.seed >= 0 else int(time.time() * 1000) % (2**53)
-    job = {
-        "id": str(uuid.uuid4()),
-        "status": "queued",
-        "prompt": script,
-        "script": script,
-        "duration": body.duration,
-        "aspect": body.aspect,
-        "quality": normalize_quality(body.quality),
-        "width": w,
-        "height": h,
-        "seed": seed,
-        "steps": steps,
-        "sampler": sampler,
-        "scheduler": scheduler,
-        "progress_label": "sırada · kesintisiz zincir",
-        "continue_from": None,
-        "first_frame_name": None,
-        "ref_images": [],
-        "progress": 0,
-        "error": None,
-        "output": None,
-        "created_at": time.time(),
-        "mode": "multishot",
-        "batch_index": 1,
-        "batch_total": 1,
-        "shot_count": len(parsed),
-        "silent_audio": silent,
-        "purpose": purpose,
-        "sage_attention": _sage_mode(body),
-        "cinema_batch": cinema_batch,
-        "batch_id": cinema_batch,
-        "lane": "director",
-        "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
-        "voice_refs": _voice_refs_from_hits(merged_hits.get("hits") or []),
-        "chain_normalize": True,
-        **_lora_fields(lora_src),
-    }
-    if audio.get("score_id"):
-        job["score_id"] = audio.get("score_id")
+        lora_bits = _lora_fields(lora_src)
+        trig_spec = find_spec(
+            lora_id=lora_bits.get("lora_id") or "",
+            file=lora_bits.get("lora_name") or "",
+        )
+        texts = [apply_trigger(t, trig_spec) for t in texts]
+        script = "\n---\n".join(texts)
+        seed = (base_seed + take_i - 1) if body.seed >= 0 else (base_seed + take_i - 1) % (2**53)
+        take_title = str((chunk_parsed[0] or {}).get("take_title") or "").strip()
+        if take_total == 1:
+            label = f"sırada · kesintisiz · {take_title}" if take_title else "sırada · kesintisiz zincir"
+        else:
+            core = f"{take_title} · " if take_title else ""
+            label = f"sırada · {core}take {take_i}/{take_total}"
+        job = {
+            "id": str(uuid.uuid4()),
+            "status": "queued",
+            "prompt": script,
+            "script": script,
+            "duration": body.duration,
+            "aspect": body.aspect,
+            "quality": normalize_quality(body.quality),
+            "width": w,
+            "height": h,
+            "seed": seed,
+            "steps": take_steps,
+            "sampler": take_sampler,
+            "scheduler": take_scheduler,
+            "progress_label": label,
+            "continue_from": None,
+            "first_frame_name": None,
+            "ref_images": [],
+            "progress": 0,
+            "error": None,
+            "output": None,
+            "created_at": time.time(),
+            "mode": "multishot",
+            "batch_index": take_i,
+            "batch_total": take_total,
+            "shot_count": len(chunk_parsed),
+            "silent_audio": silent,
+            "purpose": purpose,
+            "sage_attention": _sage_mode(body),
+            "cinema_batch": cinema_batch,
+            "batch_id": cinema_batch,
+            "lane": "director",
+            "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+            "voice_refs": _voice_refs_from_hits(merged_hits.get("hits") or []),
+            "chain_normalize": True,
+            "shot_id": (chunk_parsed[0] or {}).get("id") if chunk_parsed else None,
+            "shot_index": shot_offset + 1,
+            "take_title": take_title,
+            **_lora_fields(lora_src),
+        }
+        if audio.get("score_id"):
+            job["score_id"] = audio.get("score_id")
+        jobs.append(job)
+        shot_offset += len(chunk_parsed)
     async with _lock:
-        _jobs.append(job)
+        _jobs.extend(jobs)
         _save_jobs()
     slog.info(
         "cinema seamless queued",
         shots=len(parsed),
+        takes=take_total,
+        pack=pack,
         batch=cinema_batch,
         size=f"{w}x{h}",
         duration=body.duration,
     )
-    return {"jobs": [job], "count": 1}
+    return {"jobs": jobs, "count": len(jobs), "takes": take_total}
 
 
 def _brief_shot_modes(shots: list[dict]) -> list[str]:
@@ -4360,6 +4376,8 @@ async def cinema_produce(body: CinemaProduceBody):
         )
         queued = await batch(bb)
     for i, job in enumerate(queued.get("jobs") or []):
+        if (job.get("mode") or "").lower() == "multishot":
+            continue
         if i < len(parsed):
             job["shot_id"] = parsed[i].get("id")
             job["shot_index"] = i + 1
@@ -4371,6 +4389,7 @@ async def cinema_produce(body: CinemaProduceBody):
     queued["cinema_batch"] = cinema_batch
     queued["score_id"] = audio.get("score_id") or ""
     queued["seamless"] = bool(want_seamless)
+    queued["takes"] = int(queued.get("takes") or (len(queued.get("jobs") or []) if want_seamless else 0) or 0)
     queued["still_lock"] = still_lock
     queued["preview"] = cinema.produce_preview(lib)
     slog.info(

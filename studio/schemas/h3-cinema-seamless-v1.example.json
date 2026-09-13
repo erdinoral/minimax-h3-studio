@@ -1,7 +1,7 @@
 {
   "_instructions": {
-    "DELETE_BEFORE_RETURN": "Fill every empty field below IN ENGLISH, then DELETE this entire _instructions object. Return ONLY valid JSON (schema h3-cinema-seamless/v1). No markdown fences, no commentary.",
-    "SIL_SONRA_DON": "Asagidaki bos alanlari INGILIZCE doldur, sonra bu _instructions nesnesinin TAMAMINI sil. Sadece gecerli JSON dondur. Markdown kod blogu veya aciklama yazma.",
+    "DELETE_BEFORE_RETURN": "Read _user.scenes and _user.about. Build ONE continuing film. takes.length = _user.scenes. Each take has EXACTLY 8 filled English author fields. Studio will compose official H3 three-block prompts — you only fill author fields. Copy about into logline (English). Invent title. Then DELETE _instructions and _user. Return ONLY valid JSON.",
+    "SIL_SONRA_DON": "Insan sadece _user.scenes ve _user.about doldurdu. Sen gerisini yaz. N sahneli = N take, her take TAM 8 shot, tek film DEVAM. Alanlari INGILIZCE ve DETAYLI yaz (resmi H3 3 blok Studio birlestirir). Sonra _instructions ve _user sil. Sadece JSON don.",
     "language": {
       "required": "English",
       "why": "MiniMax H3 video prompts must be English. Turkish/other languages in visual fields hurt quality.",
@@ -9,20 +9,21 @@
         "setup.look, camera, palette, lighting, era, style",
         "characters[].notes, voice, trigger (names may stay as proper nouns)",
         "locations[].notes",
-        "sections: title, location, character, action, camera, visual_style, audio, music, important, logline"
+        "takes[].title (optional scene name), takes[].sections: title, location, character, action, camera, visual_style, audio, music, important, logline"
       ],
       "dialogue_exception": "dialogue may stay in the spoken story language (set dialogue_lang: tr|en|ar|…). Everything else = English."
     },
-    "what_this_is": "Text-only ONE-TAKE package for MiniMax H3 Studio Kesintisiz zincir (H3 Multishot). Import fills cards and switches the studio to Seamless. Studio renders ALL sections as a single clip (picture + audio, no cut). You do NOT create images, portraits, or image URLs — portraits kill Seamless and fall back to shot-by-shot Continue.",
+    "what_this_is": "Text-only Kesintisiz package for MiniMax H3 Studio. Human writes scene count + topic only. You write the film. Each take = one seamless Multishot clip of 8 beats (8x5s = 40s). Story continues take-to-take. Studio composes official H3: integrated_multimodal_description / overall_soundscape / non_diegetic_music. No images, portraits, or URLs.",
     "defaults": {
-      "duration_seconds_per_beat": 10,
-      "sections_count_max": 8,
-      "sections_count_recommended": 6,
-      "total_runtime": "6 beats x 10s ≈ 60s one take. 8 x 15s ≈ 2 min (pack limit). Do not exceed 8 sections.",
+      "duration_seconds_per_beat": 5,
+      "sections_per_take": 8,
+      "sections_count_recommended": "EXACTLY 8 filled sections per take.",
+      "total_runtime": "scenes x 40s at 5s/beat, then concat. 5 takes = 200s.",
       "quality_note": "Leave quality/steps as-is unless the user asks. Studio Produce uses the user's Draft/Final preset when they click Üret.",
       "quality": "736",
       "steps": 18,
-      "duration": 10
+      "duration": 5,
+      "take_count": "EQUALS _user.scenes. Clone/delete placeholder takes until takes.length == scenes."
     },
     "studio_mode": {
       "required": "seamless",
@@ -30,47 +31,73 @@
       "do_not_use": "h3-cinema/v1 is the 12×5s Film / face-lock package. This file is the long uninterrupted take."
     },
     "how_pipeline_works": [
-      "1) YOU write text only, IN ENGLISH: unique names + appearance notes for characters, then locations. Same spelling in section.character / section.location.",
-      "2) Fill 4–8 sections IN ENGLISH. Each section is ONE beat of the SAME continuous take (same space, wardrobe, time of day). Concrete visible action, not themes. No image files.",
-      "3) User imports JSON. Studio opens Kesintisiz. Cards sit ready. Nothing generates yet.",
-      "4) User clicks Üret. One H3MultishotSampler job: sections joined with --- . H3ChainNormalize runs automatically. Optional voice clips are uploaded later on the character card — do not put audio files in JSON.",
-      "5) Section mode is ignored (all beats are one take). Do not add portraits, stills, urls, or base64."
+      "1) Read _user.scenes and _user.about only. Invent the rest. Visual fields ENGLISH.",
+      "2) Write takes.length = scenes, each with EXACTLY 8 detailed author-field sections. One continuing film.",
+      "3) User imports. Studio opens Kesintisiz and composes the official 3-block H3 prompt per beat. Nothing generates yet.",
+      "4) User clicks Uret. Each take = one H3MultishotSampler job. Then concat.",
+      "5) No portraits, stills, urls, base64. No integrated_multimodal_description key in the JSON."
     ],
     "field_guide": {
-      "title": "Short beat title (optional).",
-      "location": "Place name — must match a locations[].name. Keep the SAME place across all beats unless the camera physically walks there in-shot.",
-      "character": "Who is on screen — match characters[].name (comma-separate if multiple). Same spelling everywhere.",
-      "action": "ENGLISH. What happens THIS beat only. Visual, specific, present tense. Continue the previous beat; do not jump night/city/costume.",
-      "dialogue": "Spoken lines in THIS beat only. Empty if silent. May stay in the story language; set dialogue_lang.",
-      "dialogue_lang": "auto | tr | en | ar | … — language of dialogue; auto keeps text as written.",
-      "camera": "ENGLISH. Shot size / move that can happen inside one take (e.g. slow push-in, follow, shoulder).",
-      "visual_style": "Leave empty to inherit setup. Do not restyle every beat.",
-      "audio": "ENGLISH. Diegetic sound that continues (room tone, footsteps, rain).",
-      "music": "N/A for dialogue+SFX takes (Studio mixes one score later).",
-      "important": "Must-lock continuity (wardrobe, prop in hand). Keep short."
+      "title": "Short English beat title.",
+      "location": "Place name matching locations[].name. Same place for all 8 beats of a take unless the camera walks there in-shot.",
+      "character": "Who is on screen — exact characters[].name (comma-separate if multiple).",
+      "action": "ENGLISH. THIS beat only. 2-5 present-tense visible sentences: body, hands, eyes, props, weather, light. Continue the previous beat. First beat of a later take continues the STORY. Not a theme. Not one verb.",
+      "dialogue": "Spoken lines THIS beat only. Empty if silent. May stay in the story language; set dialogue_lang. Studio wraps as says: <d>[Lang] ...</d>.",
+      "dialogue_lang": "auto | tr | en | ar | …",
+      "camera": "ENGLISH. Shot size + height + move for a take (slow push-in, follow, shoulder). Vary angle across the 8 beats. Not the same line copied 8 times.",
+      "visual_style": "Usually empty (inherit setup) or Live-action, cinematic.",
+      "audio": "ENGLISH. Diegetic only: room tone, Foley, weather, breath. This becomes overall_soundscape. No BGM.",
+      "music": "N/A unless the user asked for score. This becomes non_diegetic_music.",
+      "important": "Must-lock continuity (wardrobe, prop in hand). Short."
     },
     "cast_guide": {
-      "characters": "name + ENGLISH notes ONLY (appearance, age, wardrobe — this is the TEXT identity lock). Optional English voice tag. trigger = same as name. Leave lora_id empty. Do NOT add image/url/still/portrait fields. Do NOT ask Studio to generate face sheets.",
-      "locations": "name + ENGLISH notes (architecture, time of day, weather). Text only. Location stills are optional and do not kill Seamless.",
-      "creatures": "Usually empty for a one-take drama. If used: name + ENGLISH anatomy notes. No images."
+      "characters": "Invent unique names from about. notes = ENGLISH appearance, age, wardrobe (identity lock). voice optional English. trigger = same as name. lora_id empty. No images.",
+      "locations": "name + ENGLISH architecture, time of day, weather. Text only.",
+      "creatures": "Usually empty. If needed: name + ENGLISH anatomy. No images."
     },
     "setup_guide": {
-      "look_camera_palette_lighting_era": "Global film bible IN ENGLISH; use auto if unsure. Must stay constant for the whole take.",
+      "look_camera_palette_lighting_era": "Global film bible IN ENGLISH; use auto if unsure. Same look for the whole film. Location/time may change at a take boundary, not mid-take.",
       "purpose": "short_film",
       "style": "realistic | cinematic | …"
     },
     "rules": [
-      "Write ALL visual/prompt fields in English (H3 requirement). Dialogue may stay in the spoken language.",
-      "Keep schema exactly: h3-cinema-seamless/v1",
-      "Keep studio_mode: seamless and seamless: true",
-      "Keep duration: 10 unless the user asks 4–15",
-      "Keep 4–8 sections. Never more than 8. Prefer 6 for a one-minute take.",
-      "TEXT ONLY — no images, no URLs, no base64, no portrait files. Portraits disable Kesintisiz.",
-      "Same character name spelling everywhere (cast + sections)",
-      "One space, one wardrobe, one time of day across the take",
-      "Each section = one beat; do not cram the whole minute into one section",
-      "DELETE _instructions before final output"
-    ]
+      "Human input is ONLY _user.scenes + _user.about. Do not ask the human more questions.",
+      "Write ALL visual fields in English. Dialogue may stay in the spoken language.",
+      "Keep schema h3-cinema-seamless/v1, studio_mode seamless, seamless true, duration 5 unless asked.",
+      "takes.length = _user.scenes. Each take EXACTLY 8 filled sections. ONE continuing film.",
+      "Fill author fields in DETAIL (action 2-5 sentences, specific camera, diegetic audio). Studio composes the official 3-block H3 prompt.",
+      "Do NOT write integrated_multimodal_description / overall_soundscape / non_diegetic_music keys.",
+      "TEXT ONLY — no images/URLs/base64/portraits.",
+      "Same character name spelling everywhere.",
+      "DELETE _instructions and _user before final output."
+    ],
+    "take_guide": {
+      "scene_count": "takes.length MUST equal _user.scenes. Clone the last take{} if the file has fewer placeholders.",
+      "shots_per_scene": "EXACTLY 8 filled sections per take. action not empty.",
+      "one_continuing_film": "ONE story from about. Take 2 continues Take 1. Not separate shorts.",
+      "inside_a_take": "Seamless: same location, wardrobe, time of day for all 8 beats.",
+      "between_takes": "Hard cut OK. New location/time OK at the boundary. Plot and names continue.",
+      "titles": "takes[].title = Sahne 1, Sahne 2, ... in order."
+    },
+    "human_writes_only": {
+      "scenes": "Integer. 5 = 5 takes. Each take = EXACTLY 8 sections. 5 sahneli = 5 take x 8 shot.",
+      "about": "One paragraph: what the film is about (genre, place, who, conflict). Turkish OK here; YOU translate the film into English fields. Dialogue may stay in the story language."
+    },
+    "h3_prompt_format": {
+      "do_not_write_the_three_blocks": "Studio composes the official H3 prompt from author fields. Do NOT output integrated_multimodal_description / overall_soundscape / non_diegetic_music yourself. Do NOT paste those keys into action.",
+      "studio_composes_exactly": [
+        "integrated_multimodal_description: SCENE – {title}. [Shot 1] {visual_style} Location: {location} Main character: {character} Action: {action} Camera: {camera} {character} (S1) says: <d>[{Lang}] {dialogue}</d> Constraints: {important}",
+        "overall_soundscape: {audio}",
+        "non_diegetic_music: {music}"
+      ],
+      "quality": "Author fields must be DETAILED so the composed prompt is rich. Short generic beats (he walks, she looks) are rejected. Each action = 2-5 present-tense visible sentences for THIS beat only: body, hands, eyes, weather, props, light. Camera = size + lens feel + move + height (not just close-up). audio = diegetic room/Foley only. music = N/A unless the user asked for score."
+    }
+  },
+  "_user": {
+    "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
+    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, look, cast notes, locations, and every beat from that. Do not ask questions. Do not leave empty action/camera/audio.",
+    "scenes": 5,
+    "about": ""
   },
   "schema": "h3-cinema-seamless/v1",
   "studio_mode": "seamless",
@@ -87,7 +114,7 @@
     "purpose": "short_film",
     "style": "realistic"
   },
-  "duration": 10,
+  "duration": 5,
   "quality": "736",
   "steps": 18,
   "characters": [
@@ -108,84 +135,333 @@
     }
   ],
   "creatures": [],
-  "sections": [
+  "takes": [
     {
-      "title": "",
-      "location": "",
-      "character": "",
-      "action": "",
-      "dialogue": "",
-      "dialogue_lang": "auto",
-      "camera": "",
-      "visual_style": "",
-      "audio": "",
-      "music": "N/A",
-      "important": ""
+      "title": "Sahne 1",
+      "sections": [
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        }
+      ]
     },
     {
-      "title": "",
-      "location": "",
-      "character": "",
-      "action": "",
-      "dialogue": "",
-      "dialogue_lang": "auto",
-      "camera": "",
-      "visual_style": "",
-      "audio": "",
-      "music": "N/A",
-      "important": ""
+      "title": "Sahne 2",
+      "sections": [
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        }
+      ]
     },
     {
-      "title": "",
-      "location": "",
-      "character": "",
-      "action": "",
-      "dialogue": "",
-      "dialogue_lang": "auto",
-      "camera": "",
-      "visual_style": "",
-      "audio": "",
-      "music": "N/A",
-      "important": ""
-    },
-    {
-      "title": "",
-      "location": "",
-      "character": "",
-      "action": "",
-      "dialogue": "",
-      "dialogue_lang": "auto",
-      "camera": "",
-      "visual_style": "",
-      "audio": "",
-      "music": "N/A",
-      "important": ""
-    },
-    {
-      "title": "",
-      "location": "",
-      "character": "",
-      "action": "",
-      "dialogue": "",
-      "dialogue_lang": "auto",
-      "camera": "",
-      "visual_style": "",
-      "audio": "",
-      "music": "N/A",
-      "important": ""
-    },
-    {
-      "title": "",
-      "location": "",
-      "character": "",
-      "action": "",
-      "dialogue": "",
-      "dialogue_lang": "auto",
-      "camera": "",
-      "visual_style": "",
-      "audio": "",
-      "music": "N/A",
-      "important": ""
+      "title": "Sahne 3",
+      "sections": [
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        },
+        {
+          "title": "",
+          "location": "",
+          "character": "",
+          "action": "",
+          "dialogue": "",
+          "dialogue_lang": "auto",
+          "camera": "",
+          "visual_style": "",
+          "audio": "",
+          "music": "N/A",
+          "important": ""
+        }
+      ]
     }
   ]
 }

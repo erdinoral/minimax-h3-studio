@@ -1,7 +1,7 @@
 {
   "_instructions": {
-    "DELETE_BEFORE_RETURN": "Fill every empty field below IN ENGLISH, then DELETE this entire _instructions object. Return ONLY valid JSON (schema h3-cinema/v1). No markdown fences, no commentary.",
-    "SIL_SONRA_DON": "Asagidaki bos alanlari INGILIZCE doldur, sonra bu _instructions nesnesinin TAMAMINI sil. Sadece gecerli JSON dondur. Markdown kod blogu veya aciklama yazma.",
+    "DELETE_BEFORE_RETURN": "Read _user.scenes and _user.about. Write that many detailed sections (author fields only). Studio composes official H3 three-block prompts. Copy about into logline (English). Invent title. Then DELETE _instructions and _user. Return ONLY valid JSON.",
+    "SIL_SONRA_DON": "Insan sadece _user.scenes ve _user.about doldurdu. Sen gerisini yaz. N = clip sayisi (varsayilan 12). Alanlar INGILIZCE ve DETAYLI. Resmi H3 3 blok Studio birlestirir. Sonra _instructions ve _user sil.",
     "language": {
       "required": "English",
       "why": "MiniMax H3 still + video prompts must be English. Turkish/other languages in visual fields hurt quality.",
@@ -14,10 +14,10 @@
       ],
       "dialogue_exception": "dialogue may stay in the spoken story language (set dialogue_lang: tr|en|ar|…). Everything else = English."
     },
-    "what_this_is": "Text-only film package for MiniMax H3 Studio. Import fills cards. Studio generates stills and videos — you do NOT create images or image URLs.",
+    "what_this_is": "Text-only Film / face-lock package for MiniMax H3 Studio. Human writes clip count + topic only. You write the film. Studio later makes stills + per-clip video (t2v / continue). Studio composes official H3: integrated_multimodal_description / overall_soundscape / non_diegetic_music. No images or URLs from you.",
     "defaults": {
       "duration_seconds_per_clip": 5,
-      "sections_count": 12,
+      "sections_count": "EQUALS _user.scenes (default 12). Add/remove section objects to match.",
       "total_runtime": "12 clips x 5s = 60s (1 minute). Keep exactly 12 sections unless the user asks otherwise. 3 acts = 36 sections (3 x 12).",
       "quality_note": "Leave quality/steps as-is. Studio Produce uses the user's Draft/Final preset.",
       "quality": "736",
@@ -35,23 +35,23 @@
       "default_in_this_template": "section[0]=t2v, sections[1..11]=continue for one continuous minute. Change a later section to t2v for a hard cut."
     },
     "how_pipeline_works": [
-      "1) YOU write text only, IN ENGLISH: unique names + appearance notes for characters, then creatures, then locations. Same spelling in section.character / section.location.",
-      "2) Fill sections IN ENGLISH: each item is ONE 5s clip — concrete visible action, not themes. No image files.",
-      "3) User imports JSON. Cards sit ready. Nothing generates yet.",
-      "4) User clicks Produce. Studio order: character stills → creature stills → location stills (name + notes, same as Görsel oluştur), then scene videos with the selected preset (Draft or Final).",
-      "5) t2v = new clip; continue = last frame of previous clip. Studio may force t2v if cast does not overlap."
+      "1) Read _user.scenes and _user.about only. Invent the rest. Visual fields ENGLISH.",
+      "2) Write exactly that many detailed author-field sections. First t2v; later continue unless hard cut.",
+      "3) User imports. Studio composes the official 3-block H3 prompt per clip. Nothing generates yet.",
+      "4) User clicks Produce: character/location stills, then scene videos.",
+      "5) No portraits/urls/base64 from you. No integrated_multimodal_description key in the JSON."
     ],
     "field_guide": {
       "title": "Short section title (optional).",
       "location": "Place name — must match a locations[].name when possible.",
       "character": "Who is on screen — match characters[].name (comma-separate if multiple).",
-      "action": "ENGLISH. What happens THIS 5s clip only. Visual, specific, present tense.",
+      "action": "ENGLISH. THIS 5s clip only. 2-5 present-tense visible sentences: body, hands, eyes, props, weather, light. Not a theme. Not one verb.",
       "dialogue": "Spoken lines in THIS clip only. Empty if silent. May stay in the story language; set dialogue_lang. Do not force a language unless the story needs it.",
       "dialogue_lang": "auto | tr | en | ar | … — language of dialogue; auto keeps text as written.",
-      "camera": "ENGLISH. Shot size / move (e.g. medium close-up slow push-in).",
+      "camera": "ENGLISH. Shot size + height + move. Vary across clips. Not the same line copied 12 times.",
       "visual_style": "ENGLISH. Look for THIS clip if it differs from setup; else leave empty to inherit.",
-      "audio": "ENGLISH. Diegetic sound in the clip (room tone, footsteps, rain).",
-      "music": "Score cue or N/A.",
+      "audio": "ENGLISH. Diegetic only. Becomes overall_soundscape. No BGM.",
+      "music": "N/A unless the user asked for score. Becomes non_diegetic_music.",
       "important": "Must-lock details (costume, prop, continuity). Keep short."
     },
     "cast_guide": {
@@ -65,16 +65,34 @@
       "style": "realistic | anime | …"
     },
     "rules": [
-      "Write ALL visual/prompt fields in English (H3 requirement). Dialogue may stay in the spoken language.",
-      "Keep schema exactly: h3-cinema/v1",
-      "Keep duration: 5",
-      "Keep exactly 12 sections unless user requests a different length",
-      "TEXT ONLY — no images, no URLs, no base64, no portrait files. Studio creates stills from name+notes.",
-      "Do not nest commentary inside sections — use the fields only",
-      "Same character name spelling everywhere (cast + sections)",
-      "Each section = one 5s beat; do not cram a whole minute into one section",
-      "DELETE _instructions before final output"
-    ]
+      "Human input is ONLY _user.scenes + _user.about. Do not ask more questions.",
+      "Write ALL visual fields in English. Dialogue may stay in the spoken language.",
+      "Keep schema h3-cinema/v1. sections.length = _user.scenes (default 12).",
+      "Fill author fields in DETAIL. Studio composes the official 3-block H3 prompt.",
+      "Do NOT write integrated_multimodal_description / overall_soundscape / non_diegetic_music keys.",
+      "TEXT ONLY — no images/URLs/base64. Studio creates stills from name+notes.",
+      "Same character name spelling everywhere.",
+      "DELETE _instructions and _user before final output."
+    ],
+    "human_writes_only": {
+      "scenes": "Integer = how many 5s clips. Default 12 (one minute). 5 = 5 clips. First clip t2v, later continue unless a hard cut.",
+      "about": "One paragraph: what the film is about. Turkish OK here; YOU translate the film into English fields. Dialogue may stay in the story language."
+    },
+    "h3_prompt_format": {
+      "do_not_write_the_three_blocks": "Studio composes the official H3 prompt from author fields. Do NOT output integrated_multimodal_description / overall_soundscape / non_diegetic_music yourself. Do NOT paste those keys into action.",
+      "studio_composes_exactly": [
+        "integrated_multimodal_description: SCENE – {title}. [Shot 1] {visual_style} Location: {location} Main character: {character} Action: {action} Camera: {camera} {character} (S1) says: <d>[{Lang}] {dialogue}</d> Constraints: {important}",
+        "overall_soundscape: {audio}",
+        "non_diegetic_music: {music}"
+      ],
+      "quality": "Author fields must be DETAILED so the composed prompt is rich. Short generic beats (he walks, she looks) are rejected. Each action = 2-5 present-tense visible sentences for THIS beat only: body, hands, eyes, weather, props, light. Camera = size + lens feel + move + height (not just close-up). audio = diegetic room/Foley only. music = N/A unless the user asked for score."
+    }
+  },
+  "_user": {
+    "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
+    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, look, cast notes, locations, and every beat from that. Do not ask questions. Do not leave empty action/camera/audio.",
+    "scenes": 12,
+    "about": ""
   },
   "schema": "h3-cinema/v1",
   "title": "",

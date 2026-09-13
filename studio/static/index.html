@@ -12,11 +12,11 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema108" />
-  <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema108" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema112" />
+  <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema108" />
+  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema112" />
 </head>
 <body>
   <header class="topbar">
@@ -588,7 +588,7 @@
             <button type="button" class="chip" data-cinemamode="assets" id="cinema-mode-assets">Karakter / mekan</button>
           </div>
           <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
-          <p class="muted mode-hint" id="cinema-mode-hint">Tek take, kesiksiz ses · en fazla 8 shot · karakter/mekan kartı gerekmez</p>
+          <p class="muted mode-hint" id="cinema-mode-hint">JSON takes[] = sahne. 5 sahneli = 5 take × 8 shot, hikaye devam. Karakter/mekan kartı gerekmez</p>
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
           <label class="cinema-seamless-label" title="Kapalıysa Üret karakter sheet’ine dokunmaz">
             <input type="checkbox" id="cinema-force-sheets" />
@@ -766,7 +766,7 @@
             <button type="button" class="btn-ghost" id="btn-cinema-add-draft">Taslağı ekle</button>
           </div>
           <div id="cinema-shots" class="cinema-shots"></div>
-          <p class="muted" id="cinema-hint">Shot yaz → kuyruğa al. En fazla 8 shot · kesintisiz tek take.</p>
+          <p class="muted" id="cinema-hint">JSON’da kaç take varsa o kadar iş. 8 shot = 1 take (5sn → 40sn).</p>
           <details class="cinema-preview-fold" id="cinema-preview-fold">
             <summary id="cinema-preview-sum">Kuyruğa gidecek prompt</summary>
             <pre id="cinema-preview-text" class="cinema-preview-text"></pre>
@@ -826,7 +826,7 @@
             <h3 id="cinema-json-dialog-title">Film JSON</h3>
             <button type="button" class="menu-btn" id="btn-cinema-json-close">Kapat</button>
           </header>
-          <p class="muted cinema-scene-hint" id="cinema-json-hint">Kesintisiz örnek = tek take (max 8). Film örneği = 12×5sn yüz kilidi. İngilizce doldur, _instructions sil, içe aktar.</p>
+          <p class="muted cinema-scene-hint" id="cinema-json-hint">Şablonda sadece _user.scenes + _user.about yaz, AI’ya at. Resmi H3 3 bloğu Studio birleştirir. _instructions sil, içe aktar.</p>
           <label class="cinema-json-file-label file-pick">
             <input type="file" id="cinema-json-file" class="file-pick-input" accept=".json,application/json" />
             <span class="file-pick-btn" id="cinema-json-file-btn">JSON dosyası seç</span>
@@ -1163,8 +1163,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema108" charset="utf-8"></script>
-  <script src="/static/film-workspace.js?v=cinema108" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema108" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema112" charset="utf-8"></script>
+  <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema112" charset="utf-8"></script>
 </body>
 </html>

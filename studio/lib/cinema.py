@@ -742,6 +742,15 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     out = {"id": sid, "text": text, "mode": mode, "index": index}
     if _has_author_fields(structured):
         out["structured"] = structured
+    if item.get("take_id"):
+        out["take_id"] = str(item.get("take_id") or "").strip()
+    if item.get("take_title"):
+        out["take_title"] = str(item.get("take_title") or "").strip()
+    if item.get("take_index") not in (None, ""):
+        try:
+            out["take_index"] = max(1, int(item.get("take_index") or 1))
+        except Exception:
+            out["take_index"] = 1
     return out
 
 
@@ -1976,7 +1985,7 @@ CINEMA_SEAMLESS_SCHEMA = "h3-cinema-seamless/v1"
 CINEMA_JSON_TEMPLATE_FILE = STUDIO_ROOT / "schemas" / "h3-cinema-v1.example.json"
 CINEMA_SEAMLESS_TEMPLATE_FILE = STUDIO_ROOT / "schemas" / "h3-cinema-seamless-v1.example.json"
 SEAMLESS_MAX_SHOTS = 8
-SEAMLESS_DEFAULT_DURATION = 10
+SEAMLESS_DEFAULT_DURATION = 5
 
 
 def _clean_studio_mode(value: Any) -> str:
@@ -1988,6 +1997,50 @@ def _clean_studio_mode(value: Any) -> str:
     return ""
 
 
+def _looks_like_take_block(item: Any) -> bool:
+    if isinstance(item, list):
+        return True
+    if not isinstance(item, dict):
+        return False
+    return any(isinstance(item.get(k), list) for k in ("sections", "shots", "beats"))
+
+
+def extract_take_blocks(payload: Any) -> list[dict[str, Any]] | None:
+    """JSON takes[] / scenes[] → [{title, sections}]. Flat shot lists return None."""
+    if not isinstance(payload, dict):
+        return None
+    for key in ("takes", "scenes"):
+        raw = payload.get(key)
+        if not isinstance(raw, list) or not raw:
+            continue
+        if key == "scenes" and not all(_looks_like_take_block(x) for x in raw):
+            continue
+        if key == "takes" and not any(_looks_like_take_block(x) for x in raw):
+            continue
+        blocks: list[dict[str, Any]] = []
+        for i, block in enumerate(raw, start=1):
+            if isinstance(block, list):
+                block = {"title": f"Sahne {i}", "sections": block}
+            if not isinstance(block, dict):
+                continue
+            secs = (
+                block.get("sections")
+                if isinstance(block.get("sections"), list)
+                else block.get("shots")
+                if isinstance(block.get("shots"), list)
+                else block.get("beats")
+                if isinstance(block.get("beats"), list)
+                else []
+            )
+            title = str(
+                block.get("title") or block.get("name") or block.get("scene") or f"Sahne {i}"
+            ).strip() or f"Sahne {i}"
+            blocks.append({"title": title, "sections": secs})
+        if blocks:
+            return blocks
+    return None
+
+
 def is_seamless_package(payload: Any) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -1996,7 +2049,151 @@ def is_seamless_package(payload: Any) -> bool:
         return True
     if _clean_studio_mode(payload.get("studio_mode") or payload.get("produce")) == "seamless":
         return True
-    return payload.get("seamless") is True
+    if payload.get("seamless") is True:
+        return True
+    return bool(extract_take_blocks(payload))
+
+
+def group_seamless_takes(
+    parsed: list[dict[str, Any]],
+    prompts: Optional[list[str]] = None,
+    *,
+    pack: int = SEAMLESS_MAX_SHOTS,
+) -> list[tuple[list[dict[str, Any]], list[str]]]:
+    """One Multishot job per take. Prefer shot.take_index; else packs of 8."""
+    pack = max(1, int(pack or SEAMLESS_MAX_SHOTS))
+    items = [s for s in (parsed or []) if isinstance(s, dict)]
+    n = len(items)
+    texts = list(prompts or [])
+    while len(texts) < n:
+        texts.append(str(items[len(texts)].get("text") or ""))
+    texts = texts[:n]
+    if not n:
+        return []
+
+    def _parts(idxs: list[int]) -> list[tuple[list[dict[str, Any]], list[str]]]:
+        out: list[tuple[list[dict[str, Any]], list[str]]] = []
+        for j in range(0, len(idxs), pack):
+            part = idxs[j : j + pack]
+            out.append(([items[k] for k in part], [texts[k] for k in part]))
+        return out
+
+    if any(s.get("take_index") not in (None, "", 0) for s in items):
+        groups: dict[int, list[int]] = {}
+        order: list[int] = []
+        for i, s in enumerate(items):
+            try:
+                tid = int(s.get("take_index") or 0)
+            except Exception:
+                tid = 0
+            if tid < 1:
+                tid = order[-1] if order else 1
+            if tid not in groups:
+                groups[tid] = []
+                order.append(tid)
+            groups[tid].append(i)
+        chunks: list[tuple[list[dict[str, Any]], list[str]]] = []
+        for tid in order:
+            chunks.extend(_parts(groups[tid]))
+        return chunks
+    return [
+        (items[i : i + pack], texts[i : i + pack])
+        for i in range(0, n, pack)
+    ]
+
+
+def _stamp_take(shot: dict[str, Any], *, take_index: int, take_title: str, take_id: str) -> dict[str, Any]:
+    shot["take_index"] = take_index
+    shot["take_title"] = take_title
+    shot["take_id"] = take_id
+    return shot
+
+
+def _shots_from_take_blocks(
+    blocks: list[dict[str, Any]],
+    *,
+    look_id: str = "",
+    warnings: Optional[list[str]] = None,
+) -> list[dict[str, Any]]:
+    shots: list[dict[str, Any]] = []
+    idx = 0
+    take_n = 0
+    split_n = 0
+    notes = warnings if isinstance(warnings, list) else []
+    for block in blocks or []:
+        secs = [x for x in (block.get("sections") or []) if isinstance(x, (dict, str))]
+        if not secs:
+            continue
+        parts = [
+            secs[j : j + SEAMLESS_MAX_SHOTS]
+            for j in range(0, len(secs), SEAMLESS_MAX_SHOTS)
+        ]
+        if len(parts) > 1:
+            split_n += 1
+        base_title = str(block.get("title") or "").strip() or f"Sahne {take_n + 1}"
+        for pi, part in enumerate(parts):
+            take_n += 1
+            take_id = uuid.uuid4().hex[:8]
+            title = base_title if len(parts) == 1 else f"{base_title} ({pi + 1})"
+            for item in part:
+                shot = _shot_from_section(item, idx, look_id=look_id)
+                _stamp_take(shot, take_index=take_n, take_title=title, take_id=take_id)
+                if shot.get("text") or shot.get("structured"):
+                    shots.append(shot)
+                    idx += 1
+    if split_n:
+        notes.append(
+            f"{split_n} take {SEAMLESS_MAX_SHOTS} shot sınırını aştı — fazla beat sonraki take oldu"
+        )
+    if take_n:
+        notes.append(
+            f"Kesintisiz {len(shots)} shot → {take_n} take "
+            f"({SEAMLESS_MAX_SHOTS} shot/take, örn. 8×5sn = 40sn)"
+        )
+    return shots
+
+
+def _stamp_flat_takes(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    take_ids: dict[int, str] = {}
+    for i, shot in enumerate(shots):
+        ti = i // SEAMLESS_MAX_SHOTS + 1
+        if ti not in take_ids:
+            take_ids[ti] = uuid.uuid4().hex[:8]
+        _stamp_take(
+            shot,
+            take_index=ti,
+            take_title=str(shot.get("take_title") or f"Sahne {ti}").strip() or f"Sahne {ti}",
+            take_id=take_ids[ti],
+        )
+    return shots
+
+
+def _takes_from_shots(shots: list[Any]) -> list[dict[str, Any]]:
+    rows = [s for s in (shots or []) if isinstance(s, dict)]
+    if not rows:
+        return []
+    stamped = [s for s in rows if s.get("take_index") not in (None, "", 0)]
+    if len(stamped) == len(rows):
+        by: dict[int, dict[str, Any]] = {}
+        order: list[int] = []
+        for s in rows:
+            try:
+                ti = int(s.get("take_index") or 1)
+            except Exception:
+                ti = 1
+            if ti not in by:
+                title = str(s.get("take_title") or f"Sahne {ti}").strip() or f"Sahne {ti}"
+                by[ti] = {"title": title, "sections": []}
+                order.append(ti)
+            by[ti]["sections"].append(_section_from_shot(s))
+        return [by[i] for i in order]
+    out: list[dict[str, Any]] = []
+    for i in range(0, len(rows), SEAMLESS_MAX_SHOTS):
+        part = rows[i : i + SEAMLESS_MAX_SHOTS]
+        ti = len(out) + 1
+        title = str((part[0] or {}).get("take_title") or "").strip() or f"Sahne {ti}"
+        out.append({"title": title, "sections": [_section_from_shot(s) for s in part]})
+    return out
 
 
 def _blank_seamless_template() -> dict[str, Any]:
@@ -2044,12 +2241,19 @@ def _blank_seamless_template() -> dict[str, Any]:
         ],
         "locations": [{"name": "", "notes": "", "trigger": ""}],
         "creatures": [],
-        "sections": [dict(section) for _ in range(6)],
+        "_user": {"scenes": 5, "about": ""},
+        "takes": [
+            {
+                "title": f"Sahne {ti}",
+                "sections": [dict(section) for _ in range(SEAMLESS_MAX_SHOTS)],
+            }
+            for ti in range(1, 4)
+        ],
     }
 
 
 def project_json_template(kind: str = "") -> dict[str, Any]:
-    """Blank cinema package. kind=seamless → Kesintisiz (max 8 beats); else 12×5s Film."""
+    """Blank cinema package. kind=seamless → Kesintisiz (8-shot takes); else 12×5s Film."""
     want_seamless = str(kind or "").strip().lower() in (
         "seamless",
         "kesintisiz",
@@ -2192,6 +2396,9 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
     payload: dict[str, Any] = {"mode": mode, "text": text}
     if _has_author_fields(structured):
         payload["structured"] = structured
+    for key in ("take_index", "take_title", "take_id"):
+        if item.get(key) not in (None, ""):
+            payload[key] = item.get(key)
     return _clean_shot(payload, index, look_id=look_id)
 
 
@@ -2201,7 +2408,8 @@ def export_project_json() -> dict[str, Any]:
     look_id = str((_clean_setup(data.get("setup")).get("look") or "")).strip()
     studio_mode = _clean_studio_mode(data.get("studio_mode"))
     seamless = studio_mode == "seamless"
-    return {
+    shots = [s for s in (data.get("shots") or []) if isinstance(s, dict)]
+    payload: dict[str, Any] = {
         "schema": CINEMA_SEAMLESS_SCHEMA if seamless else CINEMA_JSON_SCHEMA,
         "studio_mode": studio_mode or "assets",
         "seamless": seamless,
@@ -2214,9 +2422,12 @@ def export_project_json() -> dict[str, Any]:
         "characters": [_asset_public(x, "character") for x in (data.get("characters") or [])],
         "locations": [_asset_public(x, "location") for x in (data.get("locations") or [])],
         "creatures": [_asset_public(x, "creature") for x in (data.get("creatures") or [])],
-        "sections": [_section_from_shot(s) for s in (data.get("shots") or [])],
+        "sections": [_section_from_shot(s) for s in shots],
         "look": look_id,
     }
+    if seamless:
+        payload["takes"] = _takes_from_shots(shots)
+    return payload
 
 
 def _coerce_project_payload(raw: Any) -> dict[str, Any]:
@@ -2231,6 +2442,7 @@ def _coerce_project_payload(raw: Any) -> dict[str, Any]:
             nested.get("sections")
             or nested.get("shots")
             or nested.get("scenes")
+            or nested.get("takes")
             or nested.get("characters")
         ):
             raw = nested
@@ -2255,6 +2467,7 @@ def import_project_json(
       - merge: merge assets by name; replace shots when sections present
     """
     payload = _coerce_project_payload(raw)
+    user_meta = payload.get("_user") if isinstance(payload.get("_user"), dict) else {}
     # Drop AI briefing / meta keys (e.g. _instructions) if the filler forgot to delete them
     payload = {
         k: v
@@ -2270,8 +2483,11 @@ def import_project_json(
     setup_raw = payload.get("setup") if isinstance(payload.get("setup"), dict) else {}
     look_hint = str(payload.get("look") or setup_raw.get("look") or "").strip()
 
+    take_blocks = extract_take_blocks(payload)
     sections = (
-        payload.get("sections")
+        []
+        if take_blocks
+        else payload.get("sections")
         if isinstance(payload.get("sections"), list)
         else payload.get("shots")
         if isinstance(payload.get("shots"), list)
@@ -2279,17 +2495,22 @@ def import_project_json(
         if isinstance(payload.get("scenes"), list)
         else []
     )
-    shots = [
-        _shot_from_section(item, i, look_id=look_hint)
-        for i, item in enumerate(sections)
-        if isinstance(item, (dict, str))
-    ]
-    shots = [s for s in shots if s.get("text") or s.get("structured")]
-    if seamless_pkg and len(shots) > SEAMLESS_MAX_SHOTS:
-        shots = shots[:SEAMLESS_MAX_SHOTS]
-        warnings.append(
-            f"Kesintisiz zincir en fazla {SEAMLESS_MAX_SHOTS} shot — fazlası kesildi"
-        )
+    if take_blocks:
+        shots = _shots_from_take_blocks(take_blocks, look_id=look_hint, warnings=warnings)
+    else:
+        shots = [
+            _shot_from_section(item, i, look_id=look_hint)
+            for i, item in enumerate(sections)
+            if isinstance(item, (dict, str))
+        ]
+        shots = [s for s in shots if s.get("text") or s.get("structured")]
+        if seamless_pkg and shots:
+            _stamp_flat_takes(shots)
+            takes = (len(shots) + SEAMLESS_MAX_SHOTS - 1) // SEAMLESS_MAX_SHOTS
+            warnings.append(
+                f"Kesintisiz {len(shots)} shot → {takes} take "
+                f"({SEAMLESS_MAX_SHOTS} shot/take, örn. 8×5sn = 40sn)"
+            )
 
     chars_in = payload.get("characters") or payload.get("cast") or []
     locs_in = payload.get("locations") or payload.get("places") or []
@@ -2308,7 +2529,10 @@ def import_project_json(
         data = cur
 
     title = str(payload.get("title") or payload.get("name") or data.get("title") or "").strip()
-    logline = str(payload.get("logline") or payload.get("role_script") or "").strip()
+    about = str(payload.get("about") or user_meta.get("about") or "").strip()
+    logline = str(
+        payload.get("logline") or payload.get("role_script") or about or ""
+    ).strip()
     if title:
         data["title"] = title
     if logline:
@@ -2412,6 +2636,13 @@ def import_project_json(
             "locations": len(out.get("locations") or []),
             "creatures": len(out.get("creatures") or []),
             "sections": len(out.get("shots") or []),
+            "takes": len(
+                {
+                    int(s.get("take_index") or 0)
+                    for s in (out.get("shots") or [])
+                    if isinstance(s, dict) and s.get("take_index") not in (None, "", 0)
+                }
+            ),
         },
         "stills_kept": stills_kept,
         "warnings": warnings,

@@ -34,20 +34,24 @@ from lib.comfy import (
     build_multishot_prompt,
     detect_sage_mode,
     detect_multishot_pack,
+    detect_vfi_model,
     enhance_ref_prompt,
     MULTISHOT_MAX_SHOTS,
 )
 from lib import h3_models
 from lib.loras import (
     LORAS_DIR,
+    apply_trigger,
     dest_for,
     file_ready,
     filename_from_url,
     find_spec,
     is_adult_lora,
     is_h3_lora_name,
+    is_still_lora,
     public_list,
     spec_ready,
+    still_catalog_spec,
 )
 from lib.director import (
     normalize_style,
@@ -113,6 +117,7 @@ FRAMES = DATA / "frames"
 GALLERY = DATA / "gallery"
 REFS = DATA / "refs"
 REF_VIDEOS = DATA / "ref_videos"
+REF_AUDIOS = DATA / "ref_audio"
 MUSIC = DATA / "music"
 CINEMA_FINALS = DATA / "cinema_finals"
 COMFY_ROOT = ROOT.parent / "app"
@@ -242,11 +247,113 @@ def _prompt_optimize_instruction(enabled: bool) -> str:
     if not enabled:
         return ""
     return (
-        "\n\nPROMPT OPTIMIZE: Rewrite and optimize raw scene text into production-ready "
-        "MiniMax H3 SCENE prompts. Preserve names, identity, wardrobe, location, "
-        "camera, duration, dialogue tags, and audio intent. Return structured prompts, "
-        "not an explanation."
+        "\n\nPROMPT OPTIMIZE: Edit the draft into H3 Studio author fields, then the "
+        "official three-block H3 prompt: integrated_multimodal_description / "
+        "overall_soundscape / non_diegetic_music. Keep names, wardrobe, location, "
+        "camera, <d>[Lang]…</d> dialogue, and silent/audio intent. No commentary."
     )
+
+
+def _seed_scene_structured(raw: str) -> dict[str, str]:
+    parsed = cinema.parse_h3_prompt(raw)
+    if cinema._has_author_fields(parsed):
+        return parsed
+    seeded = cinema._clean_structured({})
+    seeded["action"] = (raw or "").strip()
+    return seeded
+
+
+def _structured_from_rewrite_payload(raw: Any, seed: dict[str, str]) -> dict[str, str]:
+    src = raw if isinstance(raw, dict) else {}
+    if isinstance(src.get("structured"), dict):
+        src = src["structured"]
+    merged = cinema._clean_structured(seed)
+    for key in cinema._STRUCTURED_KEYS:
+        val = src.get(key)
+        if val is None:
+            continue
+        text = str(val).strip()
+        if text:
+            merged[key] = text
+    return merged
+
+
+async def _rewrite_scene_text(
+    raw: str,
+    *,
+    enabled: bool,
+    context: str = "",
+    require: bool = False,
+) -> str:
+    """Polish a Sahne draft into H3 Studio fields, then compose the official 3-block prompt."""
+    text = (raw or "").strip()
+    if not text or not enabled:
+        return text
+    try:
+        model = await llm.resolve_model(None)
+    except Exception as e:
+        if require:
+            raise HTTPException(503, "Yönetmen LLM hazır değil — Ayarlar’dan model/key aç") from e
+        return text
+    seed = _seed_scene_structured(text)
+    sys = (
+        "You are the MiniMax H3 prompt editor for H3 Studio. "
+        "Edit the user's draft into our author fields. Do not invent a new story. "
+        "Keep character and location names exactly. Visual fields in English. "
+        "Dialogue may stay in the spoken language; set dialogue_lang (auto|tr|en|ar|…). "
+        "Return ONLY JSON with string fields: "
+        "title, location, character, action, dialogue, dialogue_lang, camera, "
+        "visual_style, audio, music, important. "
+        "action = this clip only, present tense, visible. "
+        "camera = shot size / move. "
+        "visual_style = Live-action, cinematic unless the draft asks otherwise. "
+        "audio = diegetic. music = N/A unless the user asked for score. "
+        "important = must-lock constraints only. "
+        "No markdown, no extra keys, no explanation."
+        + _prompt_optimize_instruction(True)
+    )
+    if context.strip():
+        sys += "\n\nCONTEXT:\n" + context.strip()[:2000]
+    user = (
+        "DRAFT:\n"
+        + text[:8000]
+        + "\n\nCURRENT FIELDS:\n"
+        + json.dumps(seed, ensure_ascii=False)
+    )
+    try:
+        out = await llm.chat(
+            model,
+            [
+                {"role": "system", "content": sys},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.35,
+            think=False,
+            format_json=True,
+            retries=2,
+            num_predict=2048,
+        )
+        payload = extract_json_object(out) or {}
+        merged = _structured_from_rewrite_payload(payload, seed)
+        if not cinema._has_author_fields(merged) and cinema._looks_like_h3_prompt(out):
+            merged = cinema.parse_h3_prompt(out)
+        composed = cinema.compose_h3_prompt(merged)
+        if composed:
+            return composed
+        if cinema._looks_like_h3_prompt(out or ""):
+            recovered = cinema.compose_h3_prompt(cinema.parse_h3_prompt(out))
+            if recovered:
+                return recovered
+        if require:
+            raise HTTPException(502, "Rewrite H3 yapısına oturmadı — tekrar dene")
+        return text
+    except HTTPException:
+        raise
+    except Exception as e:
+        slog.warn("prompt rewrite skipped", err=e)
+        if require:
+            raise HTTPException(502, f"Rewrite hata: {e}") from e
+        return text
 
 def _normalize_http_url(raw: str, default: str) -> str:
     u = (raw or "").strip() or default
@@ -439,11 +546,18 @@ def resolve_size(aspect: str, quality: str = "736") -> tuple[int, int]:
     return snap32(base_w * scale), snap32(base_h * scale)
 
 
+def _normalize_post_pass(raw: Any) -> str:
+    v = str(raw or "").strip().lower()
+    return v if v in ("upscale", "vfi") else ""
+
+
 def _lora_fields(body: Any) -> dict[str, Any]:
     spec = find_spec(
         lora_id=getattr(body, "lora_id", None) or "",
         file=getattr(body, "lora_name", None) or "",
     )
+    if spec and is_still_lora(spec) and not getattr(body, "sheet_job", False):
+        return {"lora_id": "", "lora_name": "", "lora_strength": None}
     name = (getattr(body, "lora_name", None) or "").strip()
     if spec and spec.get("file"):
         name = spec["file"]
@@ -499,7 +613,11 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
     def _ok(spec: Optional[dict[str, Any]]) -> bool:
         if not spec or not spec.get("file"):
             return False
+        if is_still_lora(spec) and not getattr(body, "sheet_job", False):
+            return False
         graphs = spec.get("graphs") or ["fl2va", "ref2va"]
+        if getattr(body, "sheet_job", False) and is_still_lora(spec):
+            return True
         return graph in graphs
 
     char_id = ""
@@ -534,7 +652,9 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float]:
     graphs = (spec or {}).get("graphs") or ["fl2va", "ref2va"]
     mode = (job.get("mode") or "t2v").lower()
     graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue") else "fl2va"
-    if graph not in graphs:
+    if job.get("sheet_job") and spec and is_still_lora(spec):
+        pass
+    elif graph not in graphs:
         slog.info("lora skipped", lora=name, mode=mode, graph=graph)
         return None, 1.0
     st = job.get("lora_strength")
@@ -543,57 +663,27 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float]:
     return name, float(st)
 
 
+def _voice_refs_from_hits(hits: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for h in hits or []:
+        if h.get("kind") != "character":
+            continue
+        va = str(h.get("voice_audio") or "").strip()
+        if not va or va in seen:
+            continue
+        seen.add(va)
+        out.append(va)
+        if len(out) >= 3:
+            break
+    return out
+
+
 app = FastAPI(title="H3 Studio")
 comfy = ComfyClient(COMFY_URL)
 ollama = OllamaClient(OLLAMA_URL)
 llm = LlmRouter(LLM_SETTINGS_FILE, ollama=ollama)
 notifier = NotifyService(NOTIFY_SETTINGS_FILE)
-
-
-async def _rewrite_scene_text(
-    raw: str,
-    *,
-    enabled: bool,
-    context: str = "",
-) -> str:
-    """LLM SCENE polish when prompt-optimize toggle is on (instruction-following, not LoRA)."""
-    text = (raw or "").strip()
-    if not text or not enabled:
-        return text
-    try:
-        model = await llm.resolve_model(None)
-    except Exception:
-        return text
-    sys = (
-        "You are a MiniMax H3 prompt editor. Rewrite the user draft into ONE production-ready "
-        "cinematic SCENE screenplay paragraph block in English. "
-        "Preserve character names, wardrobe, location, camera intent, duration cues, "
-        "<d>[Lang]…</d> dialogue tags, and silent/audio policy. "
-        "Do not explain. Output only the rewritten SCENE body."
-        + _prompt_optimize_instruction(True)
-    )
-    if context.strip():
-        sys += "\n\nCONTEXT:\n" + context.strip()[:2000]
-    try:
-        out = await llm.chat(
-            model,
-            [
-                {"role": "system", "content": sys},
-                {"role": "user", "content": text},
-            ],
-            temperature=0.4,
-            think=False,
-            retries=2,
-            num_predict=4096,
-        )
-        cleaned = (out or "").strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```(?:\w+)?\s*", "", cleaned)
-            cleaned = re.sub(r"\s*```$", "", cleaned).strip()
-        return cleaned if len(cleaned) >= 40 else text
-    except Exception as e:
-        slog.warn("prompt rewrite skipped", err=e)
-        return text
 
 
 # job queue state
@@ -1045,6 +1135,8 @@ class GenerateBody(BaseModel):
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
     sage_attention: Optional[str] = "auto"
+    post_pass: Optional[str] = None
+    sheet_job: bool = False
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -1099,6 +1191,7 @@ class BatchBody(BaseModel):
     score_id: Optional[str] = None
     lane: Optional[str] = None
     prompt_rewriter_enabled: bool = False
+    post_pass: Optional[str] = None
 
 
 class CinemaProduceBody(BaseModel):
@@ -1125,6 +1218,9 @@ class CinemaProduceBody(BaseModel):
     seamless: bool = False
     # First queue missing character/creature/location sheets; scenes start after they finish
     prepare_sheets: bool = True
+    # If true, queue sheets even when the card already has a still
+    force_sheets: bool = False
+    post_pass: Optional[str] = None
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -1865,6 +1961,7 @@ async def system_stats():
         "comfy_online": False,
         "sage_mode": detect_sage_mode(COMFY_ROOT),
         "multishot": detect_multishot_pack(COMFY_ROOT),
+        "vfi_model": detect_vfi_model(COMFY_ROOT) or "",
     }
     # 1) Accurate board VRAM + util
     try:
@@ -2035,8 +2132,13 @@ async def generate(body: GenerateBody):
     )
 
     if body.prompt_rewriter_enabled:
+        if not await llm.healthy():
+            raise HTTPException(503, "Prompt düzenleme kapalı — Ayarlar’dan Yönetmen LLM aç")
         rewritten = await _rewrite_scene_text(
-            body.prompt, enabled=True, context=f"mode={body.mode or 't2v'}"
+            body.prompt,
+            enabled=True,
+            context=f"mode={body.mode or 't2v'}",
+            require=True,
         )
         if rewritten and rewritten.strip():
             body.prompt = rewritten.strip()
@@ -2178,6 +2280,7 @@ async def generate(body: GenerateBody):
     purpose = (body.purpose or "").strip() or None
     silent = bool(body.silent_audio)
     prompt_txt = cinema_bound["prompt"] if cinema_bound.get("hits") else body.prompt
+    lora_applied = _lora_fields(lora_src)
     if mode == "face":
         prompt_txt = enhance_ref_prompt(
             prompt_txt, n_images=len(ref_images), role="face"
@@ -2204,6 +2307,13 @@ async def generate(body: GenerateBody):
             "purpose": purpose or ("music_video" if silent else "short_film"),
             "silentAudio": silent,
         },
+    )
+    prompt_txt = apply_trigger(
+        prompt_txt,
+        find_spec(
+            lora_id=lora_applied.get("lora_id") or "",
+            file=lora_applied.get("lora_name") or "",
+        ),
     )
     job = {
         "id": str(uuid.uuid4()),
@@ -2238,7 +2348,9 @@ async def generate(body: GenerateBody):
         "lane": "director" if (body.lane or "").strip().lower() == "director" else "scene",
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
         "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
-        **_lora_fields(lora_src),
+        "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+        "sheet_job": bool(getattr(body, "sheet_job", False)),
+        **lora_applied,
     }
     async with _lock:
         _jobs.append(job)
@@ -2278,7 +2390,10 @@ async def batch(body: BatchBody):
         rewritten_prompts = []
         for i, p in enumerate(prompts):
             rp = await _rewrite_scene_text(
-                p, enabled=True, context=f"batch shot {i + 1}/{len(prompts)}"
+                p,
+                enabled=True,
+                context=f"batch shot {i + 1}/{len(prompts)}",
+                require=True,
             )
             rewritten_prompts.append((rp or p).strip() or p)
         prompts = rewritten_prompts
@@ -2375,6 +2490,14 @@ async def batch(body: BatchBody):
             shot_steps, shot_sampler, shot_scheduler = _with_lora_preset(
                 lora_src, base_steps, base_sampler, base_scheduler, graph=graph
             )
+            shot_lora = _lora_fields(lora_src)
+            shot_text = apply_trigger(
+                shot_text,
+                find_spec(
+                    lora_id=shot_lora.get("lora_id") or "",
+                    file=shot_lora.get("lora_name") or "",
+                ),
+            )
             job = {
                 "id": str(uuid.uuid4()),
                 "status": "queued",
@@ -2415,7 +2538,8 @@ async def batch(body: BatchBody):
                     else "scene"
                 ),
                 "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
-                **_lora_fields(lora_src),
+                "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+                **shot_lora,
             }
             if mode == "face" and shot_refs:
                 job["prompt"] = enhance_ref_prompt(
@@ -2738,6 +2862,48 @@ async def upload_ref_video(file: UploadFile = File(...)):
     }
 
 
+@app.post("/api/refs/upload-audio")
+async def upload_ref_audio(file: UploadFile = File(...)):
+    """Upload a voice clip to Studio + Comfy input/ for LoadAudio / Multishot voice_ref."""
+    if not await comfy.healthy():
+        raise HTTPException(503, "ComfyUI kapalı — ses yüklenemez")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "boş dosya")
+    if len(raw) > 40 * 1024 * 1024:
+        raise HTTPException(400, "ses çok büyük (max 40MB)")
+    orig = Path(file.filename or "voice.wav").name
+    ext = orig.rsplit(".", 1)[-1].lower() if "." in orig else "wav"
+    if ext not in ("wav", "mp3", "flac", "ogg", "m4a", "aac"):
+        ext = "wav"
+    rid = str(uuid.uuid4())[:12]
+    local_name = f"h3_voice_{rid}.{ext}"
+    REF_AUDIOS.mkdir(parents=True, exist_ok=True)
+    dest = REF_AUDIOS / local_name
+    dest.write_bytes(raw)
+    try:
+        comfy_name = await comfy.upload_audio(dest, local_name)
+    except Exception as e:
+        raise HTTPException(502, f"Comfy audio upload hata: {e}") from e
+    return {
+        "id": rid,
+        "name": comfy_name,
+        "filename": local_name,
+        "url": f"/api/ref-audio/{local_name}",
+        "bytes": len(raw),
+        "kind": "audio",
+    }
+
+
+@app.get("/api/ref-audio/{filename}")
+async def get_ref_audio(filename: str):
+    name = Path(filename).name
+    path = REF_AUDIOS / name
+    if not path.exists():
+        raise HTTPException(404, "ses yok")
+    return FileResponse(path)
+
+
 @app.get("/api/ref-videos/{filename}")
 async def get_ref_video(filename: str):
     name = Path(filename).name
@@ -2814,7 +2980,11 @@ async def prompt_rewrite(body: PromptRewriteBody):
         raise HTTPException(400, "prompt yok")
     if not body.prompt_rewriter_enabled:
         return {"prompt": raw, "rewritten": False}
-    out = await _rewrite_scene_text(raw, enabled=True, context=body.context or "")
+    if not await llm.healthy():
+        raise HTTPException(503, "Yönetmen LLM hazır değil — Ayarlar’dan model/key aç")
+    out = await _rewrite_scene_text(
+        raw, enabled=True, context=body.context or "", require=True
+    )
     return {"prompt": out, "rewritten": out.strip() != raw}
 
 
@@ -3486,6 +3656,12 @@ async def _queue_cinema_seamless(
     steps, sampler, scheduler = _with_lora_preset(
         lora_src, steps, sampler, scheduler, graph="fl2va"
     )
+    lora_bits = _lora_fields(lora_src)
+    trig_spec = find_spec(
+        lora_id=lora_bits.get("lora_id") or "",
+        file=lora_bits.get("lora_name") or "",
+    )
+    texts = [apply_trigger(t, trig_spec) for t in texts]
     script = "\n---\n".join(texts)
     seed = body.seed if body.seed >= 0 else int(time.time() * 1000) % (2**53)
     job = {
@@ -3520,6 +3696,9 @@ async def _queue_cinema_seamless(
         "cinema_batch": cinema_batch,
         "batch_id": cinema_batch,
         "lane": "director",
+        "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+        "voice_refs": _voice_refs_from_hits(merged_hits.get("hits") or []),
+        "chain_normalize": True,
         **_lora_fields(lora_src),
     }
     if audio.get("score_id"):
@@ -3873,7 +4052,13 @@ async def _queue_cinema_sheet_job(
         "purpose": "short_film",
         "lane": "director",
         "prompt_rewriter_enabled": False,
+        "sheet_job": True,
     }
+    still = still_catalog_spec()
+    if still and spec_ready(still):
+        gen_kwargs["lora_id"] = still.get("id") or ""
+        gen_kwargs["lora_name"] = still.get("file") or ""
+        gen_kwargs["lora_strength"] = still.get("strength") or 1.0
     if has_ref:
         if kind == "character":
             gen_kwargs["mode"] = "face"
@@ -3914,11 +4099,13 @@ async def _queue_cinema_sheet_job(
     }
 
 
-def _asset_needs_sheet(asset: Any) -> bool:
+def _asset_needs_sheet(asset: Any, *, force: bool = False) -> bool:
     if not isinstance(asset, dict):
         return False
     if not str(asset.get("name") or "").strip():
         return False
+    if force:
+        return True
     images = asset.get("images")
     if isinstance(images, list) and any(
         isinstance(x, dict) and str(x.get("file") or x.get("url") or "").strip() for x in images
@@ -3933,6 +4120,7 @@ async def _queue_sheets_for_cinema(
     cine: dict[str, Any],
     *,
     kinds: Optional[list[str]] = None,
+    force: bool = False,
 ) -> list[dict[str, Any]]:
     """Queue Görsel oluştur (sheet) for cast cards that still lack stills."""
     if not await comfy.healthy():
@@ -3958,7 +4146,9 @@ async def _queue_sheets_for_cinema(
         if kind not in want:
             continue
         for asset in cine.get(key) or []:
-            if not _asset_needs_sheet(asset):
+            if kind == "character" and not force:
+                continue
+            if not _asset_needs_sheet(asset, force=force and kind == "character"):
                 continue
             aid = str(asset.get("id") or "")
             if aid and any(
@@ -4025,7 +4215,7 @@ async def _maybe_continue_pending_produce() -> None:
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
-    if body.prepare_sheets:
+    if body.prepare_sheets and not body.seamless:
         lib0 = cinema.load()
         already = lib0.get("pending_produce")
         if isinstance(already, dict) and already.get("sheet_job_ids"):
@@ -4045,7 +4235,9 @@ async def cinema_produce(body: CinemaProduceBody):
         lib0["quality"] = normalize_quality(body.quality)
         lib0["steps"] = body.steps if body.steps and body.steps > 0 else 20
         cinema.save(lib0)
-        sheets = await _queue_sheets_for_cinema(cinema.load())
+        sheets = await _queue_sheets_for_cinema(
+            cinema.load(), force=bool(body.force_sheets)
+        )
         if sheets:
             lib0 = cinema.load()
             payload = body.model_dump()
@@ -4161,6 +4353,7 @@ async def cinema_produce(body: CinemaProduceBody):
             lora_name=body.lora_name,
             lora_strength=body.lora_strength,
             sage_attention=_sage_mode(body),
+            post_pass=body.post_pass,
             cinema_batch=cinema_batch,
             score_id=audio.get("score_id") or None,
             lane="director",
@@ -4216,6 +4409,7 @@ class CinemaProduceFilmBody(BaseModel):
     link_continue: bool = True
     seamless: bool = False
     brief: Optional[dict[str, Any]] = None
+    post_pass: Optional[str] = None
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -4372,6 +4566,7 @@ async def cinema_produce_film(body: CinemaProduceFilmBody):
         link_continue=bool(body.link_continue),
         append_to_chain=append_chain,
         seamless=bool(body.seamless) and seg_count == 1 and len(segment) <= MULTISHOT_MAX_SHOTS,
+        post_pass=body.post_pass,
     )
     queued = await cinema_produce(cp)
     batch_id = str(queued.get("cinema_batch") or "")
@@ -4576,9 +4771,9 @@ async def cinema_export_json():
 
 
 @app.get("/api/cinema/json-template")
-async def cinema_json_template():
-    """Blank h3-cinema/v1 template with every column — fill externally, then import."""
-    return cinema.project_json_template()
+async def cinema_json_template(kind: str = ""):
+    """Blank cinema template. kind=seamless → Kesintisiz (max 8); else 12×5s Film."""
+    return cinema.project_json_template(kind or "")
 
 
 class CinemaImportJsonBody(BaseModel):
@@ -4588,6 +4783,8 @@ class CinemaImportJsonBody(BaseModel):
     save_to_library: bool = False
     new_film: bool = True
     generate_sheets: bool = False
+    keep_stills: bool = True
+    redo_characters: bool = False
 
 
 @app.post("/api/cinema/import-json")
@@ -4606,6 +4803,8 @@ async def cinema_import_json(body: CinemaImportJsonBody):
             mode=body.mode or "replace",
             save_to_library=bool(body.save_to_library),
             new_film=bool(body.new_film),
+            keep_stills=bool(body.keep_stills),
+            redo_characters=bool(body.redo_characters),
         )
     except ValueError as e:
         raise HTTPException(400, str(e)[:400]) from e
@@ -4879,18 +5078,22 @@ async def proxy_view(filename: str, subfolder: str = "", type: str = "output"):
         return Response(content=r.content, media_type=r.headers.get("content-type", "video/mp4"))
 
 
-# ─── Director LLM (Ollama / OpenAI / Gemini / Grok / Claude) ───────
+# ─── Director LLM (Ollama / LM Studio / llama.cpp / cloud) ───────
 
 
 class LlmSettingsBody(BaseModel):
     provider: Optional[str] = None
     ollama_base_url: Optional[str] = None
+    lmstudio_base_url: Optional[str] = None
+    llamacpp_base_url: Optional[str] = None
     openai_api_key: Optional[str] = None
     nvidia_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
     grok_api_key: Optional[str] = None
     claude_api_key: Optional[str] = None
     ollama_model: Optional[str] = None
+    lmstudio_model: Optional[str] = None
+    llamacpp_model: Optional[str] = None
     openai_model: Optional[str] = None
     nvidia_model: Optional[str] = None
     gemini_model: Optional[str] = None
@@ -4938,6 +5141,13 @@ async def production_save(body: dict[str, Any]):
 @app.get("/api/llm/settings")
 async def llm_settings_get():
     return {"ok": True, **llm.public_settings()}
+
+
+@app.get("/api/llm/models")
+async def llm_models_list(provider: Optional[str] = None, base_url: Optional[str] = None):
+    """Models for the given provider. Does not change the saved active provider."""
+    data = await llm.list_models_for(provider, base_url=base_url)
+    return data
 
 
 @app.post("/api/llm/settings")
@@ -6730,6 +6940,9 @@ async def _run_job(job: dict):
                 lora_name=lora_name,
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
+                post_pass=_normalize_post_pass(job.get("post_pass")),
+                chain_normalize=bool(job.get("chain_normalize", True)),
+                voice_names=[str(x) for x in (job.get("voice_refs") or []) if x][:3],
             )
         elif mode in ("ref", "face", "v2v"):
             refs = [str(x) for x in (job.get("ref_images") or []) if x]
@@ -6755,6 +6968,7 @@ async def _run_job(job: dict):
                 lora_name=lora_name,
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
+                post_pass=_normalize_post_pass(job.get("post_pass")),
             )
         elif mode == "face_continue" or (
             (mode == "continue" or job.get("continue_from")) and face_refs
@@ -6793,6 +7007,7 @@ async def _run_job(job: dict):
                 lora_name=lora_name,
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
+                post_pass=_normalize_post_pass(job.get("post_pass")),
             )
             job["mode"] = "face_continue"
             job["ref_role"] = "face"
@@ -6814,6 +7029,7 @@ async def _run_job(job: dict):
                 lora_name=lora_name,
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
+                post_pass=_normalize_post_pass(job.get("post_pass")),
             )
         job["progress"] = 10
         job["progress_label"] = "Comfy kuyruğa"

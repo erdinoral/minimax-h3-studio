@@ -1,0 +1,191 @@
+{
+  "_instructions": {
+    "DELETE_BEFORE_RETURN": "Fill every empty field below IN ENGLISH, then DELETE this entire _instructions object. Return ONLY valid JSON (schema h3-cinema-seamless/v1). No markdown fences, no commentary.",
+    "SIL_SONRA_DON": "Asagidaki bos alanlari INGILIZCE doldur, sonra bu _instructions nesnesinin TAMAMINI sil. Sadece gecerli JSON dondur. Markdown kod blogu veya aciklama yazma.",
+    "language": {
+      "required": "English",
+      "why": "MiniMax H3 video prompts must be English. Turkish/other languages in visual fields hurt quality.",
+      "write_in_english": [
+        "setup.look, camera, palette, lighting, era, style",
+        "characters[].notes, voice, trigger (names may stay as proper nouns)",
+        "locations[].notes",
+        "sections: title, location, character, action, camera, visual_style, audio, music, important, logline"
+      ],
+      "dialogue_exception": "dialogue may stay in the spoken story language (set dialogue_lang: tr|en|ar|…). Everything else = English."
+    },
+    "what_this_is": "Text-only ONE-TAKE package for MiniMax H3 Studio Kesintisiz zincir (H3 Multishot). Import fills cards and switches the studio to Seamless. Studio renders ALL sections as a single clip (picture + audio, no cut). You do NOT create images, portraits, or image URLs — portraits kill Seamless and fall back to shot-by-shot Continue.",
+    "defaults": {
+      "duration_seconds_per_beat": 10,
+      "sections_count_max": 8,
+      "sections_count_recommended": 6,
+      "total_runtime": "6 beats x 10s ≈ 60s one take. 8 x 15s ≈ 2 min (pack limit). Do not exceed 8 sections.",
+      "quality_note": "Leave quality/steps as-is unless the user asks. Studio Produce uses the user's Draft/Final preset when they click Üret.",
+      "quality": "736",
+      "steps": 18,
+      "duration": 10
+    },
+    "studio_mode": {
+      "required": "seamless",
+      "schema": "h3-cinema-seamless/v1",
+      "do_not_use": "h3-cinema/v1 is the 12×5s Film / face-lock package. This file is the long uninterrupted take."
+    },
+    "how_pipeline_works": [
+      "1) YOU write text only, IN ENGLISH: unique names + appearance notes for characters, then locations. Same spelling in section.character / section.location.",
+      "2) Fill 4–8 sections IN ENGLISH. Each section is ONE beat of the SAME continuous take (same space, wardrobe, time of day). Concrete visible action, not themes. No image files.",
+      "3) User imports JSON. Studio opens Kesintisiz. Cards sit ready. Nothing generates yet.",
+      "4) User clicks Üret. One H3MultishotSampler job: sections joined with --- . H3ChainNormalize runs automatically. Optional voice clips are uploaded later on the character card — do not put audio files in JSON.",
+      "5) Section mode is ignored (all beats are one take). Do not add portraits, stills, urls, or base64."
+    ],
+    "field_guide": {
+      "title": "Short beat title (optional).",
+      "location": "Place name — must match a locations[].name. Keep the SAME place across all beats unless the camera physically walks there in-shot.",
+      "character": "Who is on screen — match characters[].name (comma-separate if multiple). Same spelling everywhere.",
+      "action": "ENGLISH. What happens THIS beat only. Visual, specific, present tense. Continue the previous beat; do not jump night/city/costume.",
+      "dialogue": "Spoken lines in THIS beat only. Empty if silent. May stay in the story language; set dialogue_lang.",
+      "dialogue_lang": "auto | tr | en | ar | … — language of dialogue; auto keeps text as written.",
+      "camera": "ENGLISH. Shot size / move that can happen inside one take (e.g. slow push-in, follow, shoulder).",
+      "visual_style": "Leave empty to inherit setup. Do not restyle every beat.",
+      "audio": "ENGLISH. Diegetic sound that continues (room tone, footsteps, rain).",
+      "music": "N/A for dialogue+SFX takes (Studio mixes one score later).",
+      "important": "Must-lock continuity (wardrobe, prop in hand). Keep short."
+    },
+    "cast_guide": {
+      "characters": "name + ENGLISH notes ONLY (appearance, age, wardrobe — this is the TEXT identity lock). Optional English voice tag. trigger = same as name. Leave lora_id empty. Do NOT add image/url/still/portrait fields. Do NOT ask Studio to generate face sheets.",
+      "locations": "name + ENGLISH notes (architecture, time of day, weather). Text only. Location stills are optional and do not kill Seamless.",
+      "creatures": "Usually empty for a one-take drama. If used: name + ENGLISH anatomy notes. No images."
+    },
+    "setup_guide": {
+      "look_camera_palette_lighting_era": "Global film bible IN ENGLISH; use auto if unsure. Must stay constant for the whole take.",
+      "purpose": "short_film",
+      "style": "realistic | cinematic | …"
+    },
+    "rules": [
+      "Write ALL visual/prompt fields in English (H3 requirement). Dialogue may stay in the spoken language.",
+      "Keep schema exactly: h3-cinema-seamless/v1",
+      "Keep studio_mode: seamless and seamless: true",
+      "Keep duration: 10 unless the user asks 4–15",
+      "Keep 4–8 sections. Never more than 8. Prefer 6 for a one-minute take.",
+      "TEXT ONLY — no images, no URLs, no base64, no portrait files. Portraits disable Kesintisiz.",
+      "Same character name spelling everywhere (cast + sections)",
+      "One space, one wardrobe, one time of day across the take",
+      "Each section = one beat; do not cram the whole minute into one section",
+      "DELETE _instructions before final output"
+    ]
+  },
+  "schema": "h3-cinema-seamless/v1",
+  "studio_mode": "seamless",
+  "seamless": true,
+  "title": "",
+  "logline": "",
+  "look": "auto",
+  "setup": {
+    "look": "auto",
+    "camera": "auto",
+    "palette": "auto",
+    "lighting": "auto",
+    "era": "auto",
+    "purpose": "short_film",
+    "style": "realistic"
+  },
+  "duration": 10,
+  "quality": "736",
+  "steps": 18,
+  "characters": [
+    {
+      "name": "",
+      "notes": "",
+      "voice": "",
+      "trigger": "",
+      "lora_id": "",
+      "lora_strength": 0.8
+    }
+  ],
+  "locations": [
+    {
+      "name": "",
+      "notes": "",
+      "trigger": ""
+    }
+  ],
+  "creatures": [],
+  "sections": [
+    {
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    },
+    {
+      "title": "",
+      "location": "",
+      "character": "",
+      "action": "",
+      "dialogue": "",
+      "dialogue_lang": "auto",
+      "camera": "",
+      "visual_style": "",
+      "audio": "",
+      "music": "N/A",
+      "important": ""
+    }
+  ]
+}

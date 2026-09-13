@@ -31,6 +31,11 @@
         { "title": "H3 Turbo 6-step", "value": "https://huggingface.co/SanDiegoDude/H3-Turbo-6-Step-LoRA-Comfy" },
         { "title": "H3 Turbo v4", "value": "https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora" },
         { "title": "Realism People", "value": "https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA" },
+        { "title": "Cinematic Look", "value": "https://civitai.com/models/2908686" },
+        { "title": "Better Motion", "value": "https://civitai.com/models/2734359" },
+        { "title": "Spatial & Physics", "value": "https://huggingface.co/Jojocodex/minimax-h3-spatial-physics-lora" },
+        { "title": "Ref2V Turbo 8-step", "value": "https://huggingface.co/Alex995647/loras-minimax-h3" },
+        { "title": "Photoreal still", "value": "https://civitai.com/models/2884206" },
         { "title": "PinkFluffyBunny", "value": "https://huggingface.co/SexGod1979/PinkFluffyBunny-MiniMax-H3" }
       ]
     },

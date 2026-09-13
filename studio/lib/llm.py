@@ -1,6 +1,6 @@
 """Multi-provider LLM client for H3 Director.
 
-Providers: ollama | openai | nvidia | gemini | grok | claude
+Providers: ollama | lmstudio | llamacpp | openai | nvidia | gemini | grok | claude
 API keys live in studio/data/llm_settings.json (gitignored).
 """
 from __future__ import annotations
@@ -14,7 +14,19 @@ import httpx
 
 from lib.ollama import OllamaClient, OLLAMA_URL
 
-PROVIDERS = ("ollama", "openai", "nvidia", "gemini", "grok", "claude")
+PROVIDERS = (
+    "ollama",
+    "lmstudio",
+    "llamacpp",
+    "openai",
+    "nvidia",
+    "gemini",
+    "grok",
+    "claude",
+)
+LOCAL_COMPAT_PROVIDERS = ("lmstudio", "llamacpp")
+LMSTUDIO_DEFAULT_URL = "http://127.0.0.1:1234/v1"
+LLAMACPP_DEFAULT_URL = "http://127.0.0.1:8080/v1"
 NVIDIA_API_BASE = "https://integrate.api.nvidia.com/v1"
 
 # Prefer current AI Studio models — gemini-2.5-* is closed to many new keys (404).
@@ -97,18 +109,30 @@ def _migrate_provider_keys(cfg: dict[str, Any]) -> bool:
 DEFAULT_SETTINGS: dict[str, Any] = {
     "provider": "ollama",
     "ollama_base_url": "",
+    "lmstudio_base_url": "",
+    "llamacpp_base_url": "",
     "openai_api_key": "",
     "nvidia_api_key": "",
     "gemini_api_key": "",
     "grok_api_key": "",
     "claude_api_key": "",
     "ollama_model": "",
+    "lmstudio_model": "",
+    "llamacpp_model": "",
     "openai_model": OPENAI_MODELS[0],
     "nvidia_model": NVIDIA_MODELS[0],
     "gemini_model": GEMINI_MODELS[0],
     "grok_model": GROK_MODELS[0],
     "claude_model": CLAUDE_MODELS[0],
 }
+
+
+def _normalize_openai_compat_base(url: str, default: str) -> str:
+    raw = (url or "").strip() or default
+    raw = raw.rstrip("/")
+    if raw.endswith("/v1"):
+        return raw
+    return f"{raw}/v1"
 
 
 def _mask(key: str) -> str:
@@ -214,7 +238,11 @@ class LlmRouter:
             "provider": cfg.get("provider") or "ollama",
             "providers": list(PROVIDERS),
             "ollama_base_url": cfg.get("ollama_base_url") or "",
+            "lmstudio_base_url": cfg.get("lmstudio_base_url") or "",
+            "llamacpp_base_url": cfg.get("llamacpp_base_url") or "",
             "ollama_model": cfg.get("ollama_model") or "",
+            "lmstudio_model": cfg.get("lmstudio_model") or "",
+            "llamacpp_model": cfg.get("llamacpp_model") or "",
             "openai_model": cfg.get("openai_model") or OPENAI_MODELS[0],
             "nvidia_model": cfg.get("nvidia_model") or NVIDIA_MODELS[0],
             "gemini_model": _normalize_gemini_model(cfg.get("gemini_model")),
@@ -257,7 +285,114 @@ class LlmRouter:
             return await self._probe_grok(cfg)
         if provider == "claude":
             return await self._probe_claude(cfg)
+        if provider in LOCAL_COMPAT_PROVIDERS:
+            return await self._probe_local_compat(cfg, provider)
         return await self._probe_ollama(cfg)
+
+    async def list_models_for(
+        self,
+        provider: Optional[str] = None,
+        *,
+        base_url: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """List models for a provider without changing the saved active provider."""
+        cfg = dict(self.load())
+        provider = (provider or cfg.get("provider") or "ollama").lower()
+        if provider not in PROVIDERS:
+            provider = "ollama"
+        extra = (base_url or "").strip()
+        if extra:
+            if provider == "ollama":
+                cfg["ollama_base_url"] = extra
+            elif provider == "lmstudio":
+                cfg["lmstudio_base_url"] = extra
+            elif provider == "llamacpp":
+                cfg["llamacpp_base_url"] = extra
+
+        static = {
+            "openai": list(OPENAI_MODELS),
+            "nvidia": list(NVIDIA_MODELS),
+            "gemini": list(GEMINI_MODELS),
+            "grok": list(GROK_MODELS),
+            "claude": list(CLAUDE_MODELS),
+        }
+        preferred = {
+            "openai": (cfg.get("openai_model") or OPENAI_MODELS[0]),
+            "nvidia": (cfg.get("nvidia_model") or NVIDIA_MODELS[0]),
+            "gemini": _normalize_gemini_model(cfg.get("gemini_model")),
+            "grok": (cfg.get("grok_model") or GROK_MODELS[0]),
+            "claude": (cfg.get("claude_model") or CLAUDE_MODELS[0]),
+            "ollama": (cfg.get("ollama_model") or ""),
+            "lmstudio": (cfg.get("lmstudio_model") or ""),
+            "llamacpp": (cfg.get("llamacpp_model") or ""),
+        }.get(provider, "")
+        preferred = str(preferred or "").strip()
+
+        if provider in static:
+            models = list(static[provider])
+            online = False
+            detail = "catalog"
+            try:
+                key_field = {
+                    "openai": "openai_api_key",
+                    "nvidia": "nvidia_api_key",
+                    "gemini": "gemini_api_key",
+                    "grok": "grok_api_key",
+                    "claude": "claude_api_key",
+                }[provider]
+                key = str(cfg.get(key_field) or "").strip()
+                live: list[str] = []
+                if key:
+                    if provider == "openai":
+                        live = await self._openai_list_models(key)
+                    elif provider == "nvidia":
+                        live = await self._nvidia_list_models(key)
+                    elif provider == "gemini":
+                        live = await self._gemini_list_models(key)
+                    elif provider == "grok":
+                        live = await self._grok_list_models(key)
+                    elif provider == "claude":
+                        live = list(CLAUDE_MODELS)
+                if live:
+                    models = live
+                    online = True
+                    detail = "ok"
+                elif key:
+                    detail = "api_key_set"
+            except Exception as e:
+                detail = str(e)[:160]
+            if preferred and preferred not in models:
+                models = [preferred] + [m for m in models if m != preferred]
+            return {
+                "ok": True,
+                "provider": provider,
+                "models": models,
+                "preferred": preferred or (models[0] if models else ""),
+                "online": online,
+                "detail": detail,
+            }
+
+        prev_ollama = self.ollama.base_url
+        try:
+            if provider == "ollama":
+                self._sync_ollama_url(cfg)
+                probe = await self._probe_ollama(cfg)
+            else:
+                probe = await self._probe_local_compat(cfg, provider)
+        finally:
+            self.ollama.base_url = prev_ollama
+        models = list(probe.get("models") or [])
+        picked = str(probe.get("default_model") or preferred or "").strip()
+        if picked and picked not in models:
+            models = [picked] + models
+        return {
+            "ok": True,
+            "provider": provider,
+            "models": models,
+            "preferred": picked or (models[0] if models else ""),
+            "online": bool(probe.get("online")),
+            "detail": probe.get("detail") or ("ok" if models else "offline"),
+        }
 
     async def _probe_ollama(self, cfg: dict[str, Any]) -> dict[str, Any]:
         probe = await self.ollama.probe()
@@ -270,6 +405,84 @@ class LlmRouter:
             "detail": probe.get("detail") or ("ok" if probe.get("online") else "offline"),
             "default_model": default,
             "ollama_url": self.ollama.base_url,
+        }
+
+    def _local_compat_base(self, cfg: dict[str, Any], provider: str) -> str:
+        if provider == "lmstudio":
+            return _normalize_openai_compat_base(
+                str(cfg.get("lmstudio_base_url") or ""),
+                LMSTUDIO_DEFAULT_URL,
+            )
+        return _normalize_openai_compat_base(
+            str(cfg.get("llamacpp_base_url") or ""),
+            LLAMACPP_DEFAULT_URL,
+        )
+
+    def _local_compat_key(self, provider: str) -> str:
+        return "lm-studio" if provider == "lmstudio" else "local"
+
+    async def _compat_list_models(self, base_url: str, key: str) -> list[str]:
+        headers = {
+            "Authorization": f"Bearer {key}",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=8.0) as c:
+            r = await c.get(f"{base_url.rstrip('/')}/models", headers=headers)
+            if r.status_code >= 400:
+                raise RuntimeError(self._http_err(r, label="local"))
+            data = r.json()
+        out: list[str] = []
+        for m in data.get("data") or []:
+            if not isinstance(m, dict):
+                continue
+            mid = str(m.get("id") or "").strip()
+            if mid:
+                out.append(mid)
+        return out
+
+    async def _probe_local_compat(
+        self, cfg: dict[str, Any], provider: str
+    ) -> dict[str, Any]:
+        base = self._local_compat_base(cfg, provider)
+        key = self._local_compat_key(provider)
+        saved = str(cfg.get(f"{provider}_model") or "").strip()
+        try:
+            models = await self._compat_list_models(base, key)
+        except httpx.ConnectError:
+            return {
+                "online": False,
+                "provider": provider,
+                "models": [saved] if saved else [],
+                "detail": "connect_refused",
+                "default_model": saved,
+                f"{provider}_url": base,
+            }
+        except httpx.TimeoutException:
+            return {
+                "online": False,
+                "provider": provider,
+                "models": [saved] if saved else [],
+                "detail": "timeout",
+                "default_model": saved,
+                f"{provider}_url": base,
+            }
+        except Exception as e:
+            return {
+                "online": False,
+                "provider": provider,
+                "models": [saved] if saved else [],
+                "detail": str(e)[:160] or "offline",
+                "default_model": saved,
+                f"{provider}_url": base,
+            }
+        picked = saved if saved and saved in models else (models[0] if models else saved)
+        return {
+            "online": bool(models),
+            "provider": provider,
+            "models": models,
+            "detail": "ok" if models else "no models loaded",
+            "default_model": picked,
+            f"{provider}_url": base,
         }
 
     async def _probe_openai(self, cfg: dict[str, Any]) -> dict[str, Any]:
@@ -491,6 +704,17 @@ class LlmRouter:
             return (cfg.get("grok_model") or GROK_MODELS[0]).strip()
         if provider == "claude":
             return (cfg.get("claude_model") or CLAUDE_MODELS[0]).strip()
+        if provider in LOCAL_COMPAT_PROVIDERS:
+            saved = str(cfg.get(f"{provider}_model") or "").strip()
+            if saved:
+                return saved
+            names = await self._compat_list_models(
+                self._local_compat_base(cfg, provider),
+                self._local_compat_key(provider),
+            )
+            if not names:
+                raise RuntimeError(f"{provider}: yüklü model yok — sunucuda bir model aç")
+            return names[0]
         if cfg.get("ollama_model"):
             return str(cfg["ollama_model"]).strip()
         names = await self.ollama.list_models()
@@ -544,6 +768,11 @@ class LlmRouter:
                 model, messages, temperature=temperature, format_json=format_json,
                 num_predict=num_predict, retries=retries,
             )
+        if provider in LOCAL_COMPAT_PROVIDERS:
+            return await self._local_compat_chat(
+                model, messages, temperature=temperature, format_json=format_json,
+                num_predict=num_predict, retries=retries,
+            )
         return await self.ollama.chat(
             model, messages, temperature=temperature, format_json=format_json,
             keep_alive=keep_alive, think=think, retries=retries, num_predict=num_predict,
@@ -553,6 +782,48 @@ class LlmRouter:
         if self.provider() != "ollama":
             return []
         return await self.ollama.unload_all()
+
+    async def _local_compat_chat(
+        self, model, messages, *, temperature, format_json, num_predict, retries
+    ) -> str:
+        cfg = self.load()
+        provider = self.provider()
+        base = self._local_compat_base(cfg, provider)
+        key = self._local_compat_key(provider)
+        picked = (model or cfg.get(f"{provider}_model") or "").strip()
+        if not picked:
+            names = await self._compat_list_models(base, key)
+            picked = names[0] if names else ""
+        if not picked:
+            raise RuntimeError(f"{provider}: model yok — LM Studio / llama.cpp içinde bir model yükle")
+        label = "LM Studio" if provider == "lmstudio" else "llama.cpp"
+        try:
+            return await self._openai_compat_chat(
+                base_url=base,
+                key=key,
+                model=picked,
+                messages=messages,
+                temperature=temperature,
+                format_json=format_json,
+                num_predict=num_predict,
+                retries=retries,
+                label=label,
+            )
+        except RuntimeError:
+            if not format_json:
+                raise
+            # Older llama.cpp / some LM Studio builds reject response_format.
+            return await self._openai_compat_chat(
+                base_url=base,
+                key=key,
+                model=picked,
+                messages=messages,
+                temperature=temperature,
+                format_json=False,
+                num_predict=num_predict,
+                retries=retries,
+                label=label,
+            )
 
     # ── OpenAI ─────────────────────────────────────────────────────
 

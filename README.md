@@ -73,11 +73,13 @@ Bugs and ideas: Studio top bar **Destek / Support**, or [GitHub Issues](https://
 
 ### H3 Yönetmen (Director persona)
 
-Bottom chat uses the local **H3 Yönetmen** persona (`studio/prompts/director_system.md`) over **Ollama** (`http://127.0.0.1:11434`). It interviews for purpose / style / 5·10·15s clips, then returns a FilmBrief + shot list with H3-ready prompts. Every chat turn injects the current shot board (and Direktör studio cards) so the model can see shot text. **Plan** mode is for reading/editing those SCENE prompts without queuing; say “shot 3’ü değiştir” and save, then **Üretime al**. Production still runs on Comfy; on generate the LLM is unloaded to free VRAM. When the last clip in the queue finishes (or you reset production), Studio asks ComfyUI to unload H3 models (`POST /free`) so VRAM is released. Continue / cinema shots in the same batch keep the models loaded between clips.
+Bottom chat uses the local **H3 Yönetmen** persona (`studio/prompts/director_system.md`) over a Director LLM. Default is **Ollama** (`http://127.0.0.1:11434`). You can also pick **LM Studio** (`http://127.0.0.1:1234/v1`) or **llama.cpp** (`http://127.0.0.1:8080/v1`) — both use the OpenAI-compatible `/v1/chat/completions` API, no cloud key. Cloud providers (OpenAI, NVIDIA NIM, Gemini, Grok, Claude) stay available. The Director interviews for purpose / style / 5·10·15s clips, then returns a FilmBrief + shot list with H3-ready prompts. Every chat turn injects the current shot board (and Direktör studio cards) so the model can see shot text. **Plan** mode is for reading/editing those SCENE prompts without queuing; say “shot 3’ü değiştir” and save, then **Üretime al**. Production still runs on Comfy; on generate a local Ollama model is unloaded to free VRAM. When the last clip in the queue finishes (or you reset production), Studio asks ComfyUI to unload H3 models (`POST /free`) so VRAM is released. Continue / cinema shots in the same batch keep the models loaded between clips.
 
-1. Start Ollama (`ollama serve`) with a chat model (e.g. `qwen3:8b` or smaller during production days).
-2. Pick the model under **Ayarlar → Yönetmen modeli**.
+1. Start a Director backend: Ollama (`ollama serve` + a chat model such as `qwen3:8b`), **or** LM Studio Local Server with a loaded model (Gemma etc.), **or** `llama-server --port 8080`.
+2. Pick the provider and model under **Ayarlar → Yönetmen LLM**.
 3. Chat or tap chips → when brief is ready: **Sahneye aktar** or **Aktar + kuyruğa al**.
+
+These local servers power **Director / Rewrite only**. H3 video still needs Comfy + DiT weights.
 
 **Music video from a song:** expand the Director dock → **Şarkı seç** → optional concept/lyrics → **Şarkıdan brief**. Studio measures loudness per clip window (not beat-sync) and the Director writes a silent continue chain (same face/wardrobe). Queue with **Üretime al**, keep **Devam zincirine ekle** on, then **Şarkılı final** to mux your track. Face/reference stills in Reference mode help identity further. H3 will not lipsync to the file.
 
@@ -127,13 +129,20 @@ Production **Ayarlar**: named list — **click a LoRA to download it**, then **U
 | **H3 Turbo 6-step EMA** | ~0.8 GB | FL2VA 6-step · same skip on Ref / face. |
 | **H3 Turbo v4 EMA** | ~0.7 GB | FL2VA turbo (`step600` is training, not 4 inference steps) — set steps yourself. |
 | **H3 Realism People** | ~125 MB | T2V / I2V / Ref · keeps your step/sampler. |
+| **Cinematic Look (DY)** | ~148 MB | Film texture · trigger `DY` · tensor-error fix · T2V + Ref. |
+| **Better Motion** | ~296 MB | Movement quality · strength 0.4–0.8 · T2V + Ref. |
+| **Spatial & Physics** | ~148 MB | Collision / gravity / objects · stacks with turbo. |
+| **Ref2V Turbo (8 step)** | ~933 MB | Ref/face only · 8-step · skipped on T2V (fills the Ref turbo gap). |
+| **Photoreal still** | ~148 MB | Character/location sheets only · trigger `ph0t0r34l` · **not** applied to the video queue. |
 | **PinkFluffyBunny** | ~2.3 GB | Character LoRA · works on new video and Ref/face. |
 
 Missing files download into `app/models/loras` from Hugging Face when you click the name (or **Uygula**). Same files are also in Pinokio **Download Models**.
 
 Drop extra H3 `.safetensors` via **LoRA ekle**, paste a Hugging Face **resolve** URL into **URL’den al**, or copy the file into `app/models/loras` — they appear in the same list. Studio hides SDXL / Pony / Wan / Flux / ClipProj files; those are not MiniMax H3 video LoRAs. Catalog hints may mention 4-step / 6-step as a recommendation only.
 
-Cinema studio has the **same LoRA list** next to duration/steps (film-wide). Character cards still have an optional per-character LoRA for Ref2VA identity shots. For a consistent person without a character LoRA, use **Yüz referansı** or a Direktör still (Ref2VA).
+Cinema studio has the **same LoRA list** next to duration/steps (film-wide; still-only rows stay in the shop). Character cards still have an optional per-character LoRA for Ref2VA identity shots. For a consistent person without a character LoRA, use **Yüz referansı** or a Direktör still (Ref2VA). If **Photoreal still** is on disk, sheet jobs pick it automatically.
+
+**Post-pass (one, no community workflow JSON):** next to quality chips — **1.5× upscale** (`ImageScaleBy` lanczos) or **24→48 VFI** when a FILM/RIFE file is in `app/models/frame_interpolation`. Not both.
 
 ```text
 GET  /api/loras
@@ -144,13 +153,55 @@ POST /api/loras/import     # { url, filename? } direct HF / .safetensors link
 
 ### H3 Multishot — Kesintisiz zincir (Seamless Chain)
 
-[ComfyUI-H3-Multishot](https://github.com/jlucasmcrell/ComfyUI-H3-Multishot) (jlucasmcrell) is a **custom node pack**, not a LoRA. It welds 10–15s H3 blocks into **one take** (picture + audio, no cut at the join). Studio queues that as a single Comfy graph (`H3MultishotSampler`, CORE path — last-frame hand-off, no Motion-Context / JoyEcho).
+[ComfyUI-H3-Multishot](https://github.com/jlucasmcrell/ComfyUI-H3-Multishot) (jlucasmcrell) is a **custom node pack**, not a LoRA. It welds 10–15s H3 blocks into **one take** (picture + audio, no cut at the join). Studio queues that as a single Comfy graph (`H3MultishotSampler`, CORE path — last-frame hand-off, no Motion-Context / JoyEcho). v2.7: decoded frames pass through **`H3ChainNormalize`** (colour/texture drift) and optional character **voice clips** (`voice_ref` / `_2` / `_3`) from the character card.
 
 **Install (existing Pinokio install):** menu **Download Models → H3 Multishot (Seamless Chain) nodes**, or **Update**. Then **Stop → Start** so Comfy loads the pack.
 
 **Cinema:** **Kesintisiz zincir** (on when the pack is present). Shot texts are joined with `---` and render as one clip. Pack limit: **8 shots**. Uncheck it to use the older per-shot Continue chain (last-frame I2V, up to 80 shots).
 
-Optional full v2 extras (LLM writer, `context_pin`, accelerators) stay out of Studio; CORE is enough for cinema.
+**Kesintisiz JSON** (`h3-cinema-seamless/v1`): Direktör → **JSON → Kesintisiz örnek**. Fill English text only (delete `_instructions`), import, then **Üret**. Studio switches to Seamless, skips face sheets, and queues one Multishot take. Do not add portraits — they disable Seamless. The older **Film örneği** (`h3-cinema/v1`) is the 12×5s face-lock package.
+
+```text
+GET  /api/cinema/json-template              # 12×5s Film (h3-cinema/v1)
+GET  /api/cinema/json-template?kind=seamless  # 6×10s Kesintisiz (h3-cinema-seamless/v1)
+POST /api/cinema/import-json                # { payload, mode: replace|merge }
+POST /api/cinema/produce                    # seamless: true → one take (max 8)
+```
+
+```javascript
+const tmpl = await fetch("/api/cinema/json-template?kind=seamless").then((r) => r.json());
+// fill tmpl.title / characters / sections, delete tmpl._instructions
+await fetch("/api/cinema/import-json", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ payload: tmpl, mode: "replace" }),
+});
+await fetch("/api/cinema/produce", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ seamless: true, duration: 10, prepare_sheets: false }),
+});
+```
+
+```python
+import requests
+base = "http://127.0.0.1:8787"
+pkg = requests.get(f"{base}/api/cinema/json-template", params={"kind": "seamless"}).json()
+pkg.pop("_instructions", None)
+# fill pkg["title"], pkg["characters"], pkg["sections"]
+requests.post(f"{base}/api/cinema/import-json", json={"payload": pkg, "mode": "replace"})
+requests.post(f"{base}/api/cinema/produce", json={"seamless": True, "duration": 10, "prepare_sheets": False})
+```
+
+```bash
+curl -s "http://127.0.0.1:8787/api/cinema/json-template?kind=seamless" -o take.json
+# fill take.json, delete _instructions
+curl -s -X POST http://127.0.0.1:8787/api/cinema/import-json \
+  -H "Content-Type: application/json" \
+  -d "{\"payload\":$(cat take.json),\"mode\":\"replace\"}"
+```
+
+Optional full v2 extras (LLM writer, `context_pin`, accelerators) stay out of Studio; CORE + v2.7 normalize / voice refs is enough for cinema. Continuum (chunked latent long-form) is not installed this round.
 
 ### Direktör · Sinema stüdyosu
 
@@ -228,6 +279,7 @@ PUT  /api/cinema
 POST /api/cinema/character
 POST /api/cinema/location
 POST /api/cinema/produce   # shots: [{ text, mode }], seamless: true → one Multishot take (max 8)
+                          # optional post_pass: "" | "upscale" | "vfi"
 POST /api/cinema/produce-film
 GET  /api/cinema/film-plan
 POST /api/cinema/film-plan/concat
@@ -237,6 +289,36 @@ GET  /api/cinema/final/{batch_id}
 POST /api/director/chat            # plan_mode: true → shot tahtasını görür, patch ile düzenler
 POST /api/director/plan            # { session_id, shots, apply_cinema } Plan kaydet / stüdyoya aktar
 POST /api/director/commit          # cinema_studio → cinema/produce + face lock
+GET  /api/llm/settings
+GET  /api/llm/models               # ?provider=gemini|ollama|lmstudio|llamacpp|…  (does not switch saved provider)
+POST /api/llm/settings             # provider: ollama | lmstudio | llamacpp | openai | nvidia | gemini | grok | claude
+```
+
+```javascript
+await fetch("/api/llm/settings", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    provider: "lmstudio",
+    lmstudio_base_url: "http://127.0.0.1:1234/v1",
+    lmstudio_model: "google/gemma-4-e4b",
+  }),
+});
+```
+
+```python
+import requests
+requests.post("http://127.0.0.1:8787/api/llm/settings", json={
+    "provider": "llamacpp",
+    "llamacpp_base_url": "http://127.0.0.1:8080/v1",
+    "llamacpp_model": "gemma-4-e4b",
+})
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/llm/settings \
+  -H "Content-Type: application/json" \
+  -d '{"provider":"lmstudio","lmstudio_base_url":"http://127.0.0.1:1234/v1"}'
 ```
 
 ```bash

@@ -61,12 +61,18 @@
     loraDownload: {},
     adultContentEnabled: false,
     multishot: false,
+    postPass: "",
+    vfiModel: "",
     // Director tabs: per-session chat state
     directorSessions: [], // { id, title, messages: [ {role, content} ] }
     directorSessionCounter: 0,
     directorTab: "chat",
     llmPub: null,
+    llmDraftProvider: "",
+    llmModelsSeq: 0,
     ollamaModels: [],
+    lmstudioModels: [],
+    llamacppModels: [],
   };
 
   const CHROME_FIT_KEY = "h3-chrome-fit";
@@ -131,6 +137,33 @@
     const catalog = state.loraCatalog || [];
     if (state.adultContentEnabled) return catalog;
     return catalog.filter((spec) => !isAdultLoraSpec(spec));
+  }
+
+  function isStillLoraSpec(spec) {
+    return !!(spec && (spec.graphs || []).includes("still"));
+  }
+
+  function videoLoraCatalog() {
+    return visibleLoraCatalog().filter((spec) => !isStillLoraSpec(spec));
+  }
+
+  function setPostPass(v) {
+    const raw = String(v || "").trim().toLowerCase();
+    const next = raw === "upscale" || (raw === "vfi" && state.vfiModel) ? raw : "";
+    state.postPass = next;
+    document.querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip").forEach((b) => {
+      const p = b.dataset.post || "";
+      b.classList.toggle("on", p === next);
+      b.textContent = p === "upscale" ? tt("ayar.postUpscale") : p === "vfi" ? tt("ayar.postVfi") : tt("ayar.postOff");
+    });
+  }
+
+  function syncVfiChips() {
+    const on = !!state.vfiModel;
+    document.querySelectorAll(".post-pass-vfi").forEach((el) => {
+      el.classList.toggle("hidden", !on);
+    });
+    if (!on && state.postPass === "vfi") setPostPass("");
   }
 
   function syncAdultContentUi() {
@@ -597,6 +630,7 @@
       characters: [],
       locations: [],
       creatures: [],
+      studio_mode: "",
     };
   }
 
@@ -1267,8 +1301,12 @@
         characters: Array.isArray(data.characters) ? data.characters : [],
         locations: Array.isArray(data.locations) ? data.locations : [],
         creatures: Array.isArray(data.creatures) ? data.creatures : [],
+        studio_mode: data.studio_mode || "",
       };
       state.cinemaLoaded = true;
+      if (data.studio_mode === "seamless" || data.studio_mode === "assets") {
+        setCinemaStudioMode(data.studio_mode, { persist: true });
+      }
     } catch {
       state.cinema = ensureCinema();
       state.cinemaLoaded = true;
@@ -1342,6 +1380,7 @@
       characters: c.characters || [],
       locations: c.locations || [],
       creatures: c.creatures || [],
+      studio_mode: cinemaStudioMode(),
     };
   }
 
@@ -1695,9 +1734,35 @@
     $("cinema-character-name").value = item.name || "";
     $("cinema-character-notes").value = item.notes || "";
     $("cinema-character-voice").value = item.voice || "";
+    const voiceName = $("cinema-character-voice-file-name");
+    if (voiceName) {
+      voiceName.textContent = item.voice_audio
+        ? item.voice_audio
+        : tt("pick.none");
+    }
     $("cinema-character-lora").innerHTML = cinemaLoraOptions(item.lora_id || "");
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
+  }
+
+  async function uploadCinemaVoiceClip(file) {
+    const item = state.selectedCharacter;
+    if (!item || !file) return;
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/refs/upload-audio", { method: "POST", body: fd });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      const name = data.name || data.filename || "";
+      if (!name) throw new Error(tt("err.voiceUpload"));
+      item.voice_audio = name;
+      const voiceName = $("cinema-character-voice-file-name");
+      if (voiceName) voiceName.textContent = name;
+      toast(tt("toast.voiceClipOk"));
+    } catch (e) {
+      toast(String(e.message || e));
+    }
   }
 
   function closeCinemaCharacterModal() {
@@ -1710,12 +1775,14 @@
   async function saveCinemaCharacterModal() {
     const item = state.selectedCharacter;
     if (!item) return;
-    const saved = await patchCinemaAsset("character", item.id, {
+    const payload = {
       name: $("cinema-character-name")?.value || "",
       notes: $("cinema-character-notes")?.value || "",
       voice: $("cinema-character-voice")?.value || "",
       lora_id: $("cinema-character-lora")?.value || "",
-    });
+    };
+    if (item.voice_audio) payload.voice_audio = item.voice_audio;
+    const saved = await patchCinemaAsset("character", item.id, payload);
     if (!saved) return;
     closeCinemaCharacterModal();
     renderCinema();
@@ -1946,6 +2013,109 @@
     return out;
   }
 
+  function cinemaHasAuthorFields(s) {
+    return Object.keys(s || {}).some((k) => k !== "dialogue_lang" && String(s[k] || "").trim());
+  }
+
+  function parseH3Prompt(text) {
+    const raw = String(text || "").trim();
+    const out = emptyCinemaStructured();
+    if (!raw) return out;
+    const packed = raw.replace(/\s+/g, " ").trim();
+    const blocks = packed.match(
+      /integrated[_\s]+multimodal[_\s]+description\s*[?:]\s*(.*?)(?:\s+overall_soundscape\s*[?:]\s*(.*?))?(?:\s+non_diegetic_music\s*[?:]\s*(.*?))?$/i
+    );
+    let body = packed;
+    if (blocks) {
+      body = String(blocks[1] || "").trim();
+      out.audio = String(blocks[2] || "").trim();
+      out.music = String(blocks[3] || "").trim();
+    }
+    const markers = [
+      ["location", /\bLocation:\s*/i],
+      ["character", /\bMain character:\s*/i],
+      ["action", /\bAction:\s*/i],
+      ["camera", /\bCamera:\s*/i],
+      ["important", /\bConstraints:\s*/i],
+    ];
+    const hits = [];
+    markers.forEach(([key, rx]) => {
+      const m = rx.exec(body);
+      if (m) hits.push({ key, start: m.index, end: m.index + m[0].length });
+    });
+    if (!hits.length && !blocks) return emptyCinemaStructured();
+    hits.sort((a, b) => a.start - b.start);
+    const head = (hits.length ? body.slice(0, hits[0].start) : body).trim();
+    const hm = head.match(
+      /^(?:SCENE\s*[–—-]\s*(.+?)\.\s+)?\[Shot\s*\d+\]\s*(.*?)\s*$/i
+    );
+    if (hm) {
+      out.title = String(hm[1] || "").trim();
+      out.visual_style = String(hm[2] || "").trim();
+    } else if (/^scene/i.test(head)) {
+      out.title = head.replace(/^SCENE\s*[–—-]\s*/i, "").replace(/[. ]+$/, "");
+    }
+    hits.forEach((hit, i) => {
+      const stop = i + 1 < hits.length ? hits[i + 1].start : body.length;
+      out[hit.key] = body.slice(hit.end, stop).trim();
+    });
+    const cam = String(out.camera || "");
+    const dm = cam.match(
+      /\s+\(S\d+\)\s+says:\s*(?:<d>\[([^\]]+)\]\s*)?(.*?)<\/d>\s*$/i
+    );
+    if (dm) {
+      const before = cam.slice(0, dm.index).trim();
+      const who = String(out.character || "").trim();
+      if (who && before.endsWith(who)) {
+        out.camera = before.slice(0, -who.length).trim();
+      } else {
+        const wm = before.match(/^(.+)\s+([A-Z][^()]+)$/);
+        if (wm) {
+          out.camera = String(wm[1] || "").trim();
+          if (!who) out.character = String(wm[2] || "").trim();
+        } else {
+          out.camera = before;
+        }
+      }
+      const line = String(dm[2] || "").trim();
+      if (line) {
+        out.dialogue = line;
+        if (dm[1]) out.dialogue_lang = String(dm[1]).trim();
+      }
+    }
+    if (out.music && /^(n\/a|na|none|no|yok|off)$/i.test(out.music)) out.music = "N/A";
+    return out;
+  }
+
+  function cinemaShotStructured(shot) {
+    const s = cleanCinemaStructured(shot && shot.structured);
+    const blob = String((shot && shot.text) || s.action || "").trim();
+    const onlyBlob =
+      /integrated[_\s]+multimodal[_\s]+description/i.test(blob) &&
+      !s.title &&
+      !s.location &&
+      !s.character &&
+      !s.camera;
+    if (cinemaHasAuthorFields(s) && !onlyBlob) return s;
+    const parsed = parseH3Prompt(blob);
+    return cinemaHasAuthorFields(parsed) ? parsed : s;
+  }
+
+  function hydrateCinemaStructuredShots(c) {
+    const film = c || ensureCinema();
+    (film.shots || []).forEach((shot) => {
+      const recovered = cinemaShotStructured(shot);
+      if (!cinemaHasAuthorFields(recovered)) return;
+      const rawS = cleanCinemaStructured(shot.structured);
+      const dumped =
+        /integrated[_\s]+multimodal[_\s]+description/i.test(rawS.action || shot.text || "") &&
+        !rawS.title &&
+        !rawS.location;
+      if (!cinemaHasAuthorFields(rawS) || dumped) shot.structured = recovered;
+    });
+    return film;
+  }
+
   function cinemaDialogueLangLabel(structured) {
     const explicit = String(structured.dialogue_lang || "").trim();
     if (explicit && explicit.toLowerCase() !== "auto") return explicit;
@@ -2011,7 +2181,7 @@
   }
 
   function cinemaShotSummary(shot) {
-    const s = cleanCinemaStructured(shot && shot.structured);
+    const s = cinemaShotStructured(shot);
     if (s.title) return s.title;
     const bits = [s.location, s.character, s.action, s.dialogue].filter(Boolean);
     if (bits.length) return bits.join(" · ");
@@ -2027,7 +2197,7 @@
     const jobMeta = cinemaShotJobMeta(shot.id, index);
     const jobCls = jobMeta.cls;
     const jobLabel = jobMeta.label;
-    const structured = cleanCinemaStructured(shot.structured);
+    const structured = cinemaShotStructured(shot);
     const title = structured.title;
     const summary = cinemaShotSummary(shot) || tt("cinema.sectionEmpty");
     const modeHtml =
@@ -2123,12 +2293,15 @@
     const shot = shotId ? cinemaShotById(shotId) : null;
     if (shot) {
       cinemaSceneEditMode = shot.mode === "continue" ? "continue" : "t2v";
-      const structured = cleanCinemaStructured(shot.structured);
-      const hasStructured = Object.keys(structured).some(
-        (k) => k !== "dialogue_lang" && structured[k]
-      );
-      if (hasStructured) {
+      const structured = cinemaShotStructured(shot);
+      if (cinemaHasAuthorFields(structured)) {
         fillCinemaSceneForm(structured);
+        const rawS = cleanCinemaStructured(shot.structured);
+        const dumped =
+          /integrated[_\s]+multimodal[_\s]+description/i.test(rawS.action || shot.text || "") &&
+          !rawS.title &&
+          !rawS.location;
+        if (!cinemaHasAuthorFields(rawS) || dumped) shot.structured = structured;
       } else if (shot.text) {
         const seeded = emptyCinemaStructured();
         seeded.action = shot.text;
@@ -2507,7 +2680,7 @@
   }
 
   function renderCinema() {
-    const c = ensureCinema();
+    const c = hydrateCinemaStructuredShots(ensureCinema());
     if ($("cinema-title") && document.activeElement !== $("cinema-title")) {
       $("cinema-title").value = c.title || "";
     }
@@ -2799,6 +2972,7 @@
   function setCinemaStudioMode(mode, { persist = true } = {}) {
     state.cinemaStudioMode = mode === "assets" ? "assets" : "seamless";
     state.filmMode = state.cinemaStudioMode === "seamless";
+    if (state.cinema) state.cinema.studio_mode = state.cinemaStudioMode;
     if (persist) {
       try {
         localStorage.setItem("h3-cinema-mode", state.cinemaStudioMode);
@@ -3729,6 +3903,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           silent_audio: !filmMode,
           purpose,
           brief: state.directorBrief || undefined,
+          post_pass: state.postPass || "",
           ...collectLoraPayload(),
         }),
       });
@@ -3889,7 +4064,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           silent_audio: !filmMode,
           link_continue: true,
           seamless: wantSeamless,
-          prepare_sheets: true,
+          prepare_sheets: !wantSeamless,
+          force_sheets: !!$("cinema-force-sheets")?.checked,
+          post_pass: state.postPass || "",
           ...collectLoraPayload(),
         }),
       });
@@ -4878,16 +5055,56 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   function llmPubHasKey(pub, provider) {
     const p = (provider || "").toLowerCase();
-    if (p === "ollama") return true;
+    if (p === "ollama" || p === "lmstudio" || p === "llamacpp") return true;
     const field = LLM_PROVIDER_KEY_SET[p];
     return !!(field && pub && pub[field]);
+  }
+
+  const LOCAL_LLM_URLS = {
+    ollama: {
+      wrap: "llm-ollama-url-wrap",
+      input: "llm-ollama-url",
+      field: "ollama_base_url",
+      ph: "http://127.0.0.1:11434",
+    },
+    lmstudio: {
+      wrap: "llm-lmstudio-url-wrap",
+      input: "llm-lmstudio-url",
+      field: "lmstudio_base_url",
+      ph: "http://127.0.0.1:1234/v1",
+    },
+    llamacpp: {
+      wrap: "llm-llamacpp-url-wrap",
+      input: "llm-llamacpp-url",
+      field: "llamacpp_base_url",
+      ph: "http://127.0.0.1:8080/v1",
+    },
+  };
+
+  function syncLocalLlmUrlWraps(prov, pub) {
+    const p = (prov || "ollama").toLowerCase();
+    for (const [id, spec] of Object.entries(LOCAL_LLM_URLS)) {
+      $(spec.wrap)?.classList.toggle("hidden", p !== id);
+      const el = $(spec.input);
+      if (el && pub && el.dataset.dirty !== "1") {
+        el.value = pub[spec.field] || "";
+        el.placeholder = spec.ph;
+      }
+    }
+  }
+
+  function _urlBodyForProvider(provider) {
+    const spec = LOCAL_LLM_URLS[(provider || "").toLowerCase()];
+    if (!spec) return {};
+    const el = $(spec.input);
+    return el ? { [spec.field]: (el.value || "").trim() } : {};
   }
 
   function syncProviderSelects(prov) {
     const p = (prov || "ollama").toLowerCase();
     if ($("llm-provider")) $("llm-provider").value = p;
     if ($("llm-provider-settings")) $("llm-provider-settings").value = p;
-    $("llm-ollama-url-wrap")?.classList.toggle("hidden", p !== "ollama");
+    syncLocalLlmUrlWraps(p, state.llmPub);
   }
 
   function syncModelSelects(model) {
@@ -5030,6 +5247,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         preferred: cfg.claude_model,
       };
     }
+    if (p === "lmstudio") {
+      return { models: state.lmstudioModels || [], preferred: cfg.lmstudio_model };
+    }
+    if (p === "llamacpp") {
+      return { models: state.llamacppModels || [], preferred: cfg.llamacpp_model };
+    }
     return { models: state.ollamaModels || [], preferred: cfg.ollama_model };
   }
 
@@ -5047,6 +5270,46 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const m1 = _fillModelSelect($("director-model"), models, preferred, { reset });
     const m2 = _fillModelSelect($("director-model-settings"), models, preferred, { reset });
     syncModelSelects(m1 || m2 || preferred);
+  }
+
+  function _setModelSelectLoading() {
+    const label = tt("llm.loadingModels");
+    for (const id of ["director-model", "director-model-settings"]) {
+      const sel = $(id);
+      if (!sel) continue;
+      sel.innerHTML = `<option value="">${label}</option>`;
+    }
+  }
+
+  function _rememberLiveModels(prov, models) {
+    const p = (prov || "").toLowerCase();
+    if (!models || !models.length) return;
+    if (p === "ollama") state.ollamaModels = models;
+    else if (p === "lmstudio") state.lmstudioModels = models;
+    else if (p === "llamacpp") state.llamacppModels = models;
+    else if (state.llmPub) {
+      const key = p + "_models";
+      if (state.llmPub[key] || p === "openai" || p === "nvidia" || p === "gemini" || p === "grok" || p === "claude") {
+        state.llmPub[key] = models;
+      }
+    }
+  }
+
+  function _draftUrlForProvider(prov) {
+    const spec = LOCAL_LLM_URLS[(prov || "").toLowerCase()];
+    if (!spec) return "";
+    return ($(spec.input)?.value || "").trim();
+  }
+
+  async function fetchLlmModels(prov) {
+    const p = String(prov || "ollama").toLowerCase();
+    const q = new URLSearchParams({ provider: p });
+    const url = _draftUrlForProvider(p);
+    if (url) q.set("base_url", url);
+    const r = await fetch("/api/llm/models?" + q.toString());
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errDetail(data));
+    return data;
   }
 
   async function ensureLlmPub(opts) {
@@ -5068,24 +5331,46 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function onLlmProviderChanged(prov) {
-    syncProviderSelects(prov);
+    const p = String(prov || "ollama").toLowerCase();
+    state.llmDraftProvider = p;
+    const seq = ++state.llmModelsSeq;
+    syncProviderSelects(p);
     const pub = await ensureLlmPub();
-    syncLlmSettingsUi({ ...pub, provider: prov }, { provider: prov });
-    fillDirectorModelsForProvider(prov, pub, { keepSelection: true });
+    if (state.llmModelsSeq !== seq) return;
+    syncLlmSettingsUi({ ...pub, provider: p }, { provider: p });
+    const cat = _catalogForProvider(p, pub);
+    const local = p === "ollama" || p === "lmstudio" || p === "llamacpp";
+    if (local && !(cat.models && cat.models.length)) {
+      _setModelSelectLoading();
+    } else {
+      fillDirectorModelsForProvider(p, pub, { keepSelection: false });
+    }
+    try {
+      const live = await fetchLlmModels(p);
+      if (state.llmModelsSeq !== seq || state.llmDraftProvider !== p) return;
+      if (live.models && live.models.length) {
+        _rememberLiveModels(p, live.models);
+        fillDirectorModelsForProvider(p, state.llmPub || pub, {
+          liveModels: live.models,
+          preferred: live.preferred,
+          keepSelection: false,
+        });
+      } else if (local) {
+        fillDirectorModelsForProvider(p, pub, { keepSelection: false });
+      }
+    } catch {
+      if (state.llmModelsSeq === seq) {
+        fillDirectorModelsForProvider(p, pub, { keepSelection: false });
+      }
+    }
   }
 
   function syncLlmSettingsUi(pub, probe) {
     const prov = (pub && pub.provider) || (probe && probe.provider) || "ollama";
     syncProviderSelects(prov);
-    const urlWrap = $("llm-ollama-url-wrap");
-    if (urlWrap) urlWrap.classList.toggle("hidden", prov !== "ollama");
+    syncLocalLlmUrlWraps(prov, pub);
     const prodModelWrap = $("llm-prod-model-wrap");
     if (prodModelWrap) prodModelWrap.classList.remove("hidden");
-    const urlIn = $("llm-ollama-url");
-    if (urlIn && pub && !urlIn.dataset.dirty) {
-      urlIn.value = pub.ollama_base_url || "";
-      urlIn.placeholder = "http://127.0.0.1:11434";
-    }
     for (const f of LLM_KEY_FIELDS) {
       const el = $(f.id);
       if (!el || !pub) continue;
@@ -5107,6 +5392,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     };
     const tips = {
       ollama: tt("llm.tip.ollama"),
+      lmstudio: tt("llm.tip.lmstudio"),
+      llamacpp: tt("llm.tip.llamacpp"),
       openai: ready.openai ? tt("llm.tip.openaiReady") : tt("llm.tip.openai"),
       nvidia: ready.nvidia ? tt("llm.tip.nvidiaReady") : tt("llm.tip.nvidia"),
       gemini: ready.gemini ? tt("llm.tip.geminiReady") : tt("llm.tip.gemini"),
@@ -5128,6 +5415,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (provider === "gemini") return { gemini_model: model };
     if (provider === "grok") return { grok_model: model };
     if (provider === "claude") return { claude_model: model };
+    if (provider === "lmstudio") return { lmstudio_model: model };
+    if (provider === "llamacpp") return { llamacpp_model: model };
     return { ollama_model: model };
   }
 
@@ -5220,8 +5509,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await _postLlmSettings({
         provider,
         ..._modelBodyForProvider(provider, model),
+        ..._urlBodyForProvider(provider),
       });
       state.llmPub = data;
+      state.llmDraftProvider = (data.provider || provider || "").toLowerCase();
       syncProviderSelects(data.provider || provider);
       syncLlmKeyFields(data);
       const activeModel =
@@ -5265,6 +5556,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       ($("director-model") && $("director-model").value);
     const urlIn = $("llm-ollama-url");
     if (urlIn) body.ollama_base_url = urlIn.value.trim();
+    const lmsIn = $("llm-lmstudio-url");
+    if (lmsIn) body.lmstudio_base_url = lmsIn.value.trim();
+    const llcIn = $("llm-llamacpp-url");
+    if (llcIn) body.llamacpp_base_url = llcIn.value.trim();
     for (const f of LLM_KEY_FIELDS) {
       const el = $(f.id);
       if (el && el.value.trim()) body[f.body] = el.value.trim();
@@ -5281,6 +5576,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     try {
       const data = await _postLlmSettings(body);
       state.llmPub = data;
+      state.llmDraftProvider = (data.provider || provider || "").toLowerCase();
       syncProviderSelects(data.provider || provider);
       syncLlmKeyFields(data);
       for (const f of LLM_KEY_FIELDS) {
@@ -5291,6 +5587,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         }
       }
       if (urlIn) delete urlIn.dataset.dirty;
+      if (lmsIn) delete lmsIn.dataset.dirty;
+      if (llcIn) delete llcIn.dataset.dirty;
       fillDirectorModelsForProvider(data.provider || provider, data, {
         liveModels: data.models,
         preferred:
@@ -5336,20 +5634,33 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (s.llm) state.llmPub = s.llm;
       const models = s.models || [];
       if (provider === "ollama") state.ollamaModels = models;
-      syncProviderSelects(provider);
-      syncLlmSettingsUi(s.llm || {}, s);
-      const cat = _catalogForProvider(provider, s.llm || state.llmPub);
-      const savedModel = cat.preferred;
-      fillDirectorModelsForProvider(provider, s.llm || state.llmPub, {
-        liveModels: models,
-        preferred: savedModel || s.default_model,
-        keepSelection: true,
-      });
-      const activeModel =
-        ($("director-model") && $("director-model").value) ||
-        savedModel ||
-        s.default_model ||
-        "model";
+      if (provider === "lmstudio") state.lmstudioModels = models;
+      if (provider === "llamacpp") state.llamacppModels = models;
+      const draft = (state.llmDraftProvider || "").toLowerCase();
+      const browsing = draft && draft !== String(provider || "").toLowerCase();
+      let savedModel = "";
+      if (!browsing) {
+        state.llmDraftProvider = String(provider || "").toLowerCase();
+        syncProviderSelects(provider);
+        syncLlmSettingsUi(s.llm || {}, s);
+        const cat = _catalogForProvider(provider, s.llm || state.llmPub);
+        savedModel = cat.preferred;
+        fillDirectorModelsForProvider(provider, s.llm || state.llmPub, {
+          liveModels: models,
+          preferred: savedModel || s.default_model,
+          keepSelection: true,
+        });
+      } else {
+        syncLlmKeyFields(s.llm || state.llmPub);
+      }
+      const activeModel = browsing
+        ? (s.default_model || "model")
+        : (
+            ($("director-model") && $("director-model").value) ||
+            savedModel ||
+            s.default_model ||
+            "model"
+          );
       if (s.online) {
         const nvidiaWarn = _directorNvidiaStatusLabel(activeModel, s.detail);
         state.directorOfflineDetail = nvidiaWarn ? s.detail || "" : "";
@@ -5368,10 +5679,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         let help = tt("llm.helpOff");
         if (why === "api_key_missing") {
           help = tt("llm.help." + provider) || help;
-        } else if (provider === "ollama" && why === "connect_refused") {
-          help = tt("llm.help.ollamaRefused");
-        } else if (provider === "ollama" && why === "timeout") {
-          help = tt("llm.help.ollamaTimeout");
+        } else if (
+          (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp") &&
+          why === "connect_refused"
+        ) {
+          help = tt("llm.help." + provider + "Refused") || help;
+        } else if (
+          (provider === "ollama" || provider === "lmstudio" || provider === "llamacpp") &&
+          why === "timeout"
+        ) {
+          help = tt("llm.help." + provider + "Timeout") || help;
         } else if (why && why !== "offline") {
           help = `${provider}: ${why}`;
         }
@@ -6418,6 +6735,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       $("sys-comfy-item")?.classList.toggle("comfy-on", !!s.comfy_online);
       $("sys-comfy-item")?.classList.toggle("comfy-off", !s.comfy_online);
       state.multishot = !!s.multishot;
+      state.vfiModel = s.vfi_model || "";
+      syncVfiChips();
       syncCinemaStudioMode();
     } catch {
       /* ignore */
@@ -7340,6 +7659,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       scheduler: $("scheduler")?.value || "simple",
       sage_attention: "disabled",
       prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
+      post_pass: state.postPass || "",
       ...collectLoraPayload(),
     };
   }
@@ -7348,7 +7668,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const sel = $("lora-select");
     if (!sel) return;
     const prev = state.loraApplied && state.loraId ? state.loraId : sel.value || state.loraId || "";
-    const catalog = visibleLoraCatalog();
+    const catalog = videoLoraCatalog();
     sel.innerHTML = "";
     if (!catalog.length) {
       const opt = document.createElement("option");
@@ -7360,9 +7680,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         const opt = document.createElement("option");
         opt.value = spec.id;
         const graphs = spec.graphs || [];
-        const flOnly = graphs.length && !graphs.includes("ref2va");
+        const still = graphs.includes("still");
+        const refOnly = graphs.includes("ref2va") && !graphs.includes("fl2va") && !still;
+        const flOnly = graphs.length && !graphs.includes("ref2va") && !still;
         const miss = spec.file && !spec.ready ? tt("ayar.loraNeed") : "";
-        const tag = flOnly ? " · T2V" : "";
+        const tag = still ? " · still" : refOnly ? " · Ref" : flOnly ? " · T2V" : "";
         opt.textContent = `${spec.label}${tag}${miss}`;
         sel.appendChild(opt);
       });
@@ -7400,9 +7722,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (spec.ready) btn.classList.add("is-ready");
       if (busyId && busyId === spec.id) btn.classList.add("is-busy");
       const graphs = spec.graphs || [];
-      const flOnly = graphs.length && !graphs.includes("ref2va");
+      const still = graphs.includes("still");
+      const refOnly = graphs.includes("ref2va") && !graphs.includes("fl2va") && !still;
+      const flOnly = graphs.length && !graphs.includes("ref2va") && !still;
       const size = loraSizeLabel(spec);
-      const bits = [size, flOnly ? "T2V" : ""].filter(Boolean);
+      const bits = [size, still ? "still" : refOnly ? "Ref" : flOnly ? "T2V" : ""].filter(Boolean);
       let status = spec.ready ? tt("ayar.loraReady") : (spec.downloadable ? tt("ayar.loraGet") : "");
       if (busyId && busyId === spec.id) status = tt("ayar.loraGetting");
       const name = document.createElement("span");
@@ -7437,8 +7761,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       return;
     }
     const graphs = spec.graphs || [];
-    const flOnly = graphs.length && !graphs.includes("ref2va");
-    const extra = flOnly ? tt("ayar.loraSkipRef") : "";
+    const still = graphs.includes("still");
+    const refOnly = graphs.includes("ref2va") && !graphs.includes("fl2va") && !still;
+    const flOnly = graphs.length && !graphs.includes("ref2va") && !still;
+    const extra = still
+      ? tt("ayar.loraStillOnly")
+      : refOnly
+        ? tt("ayar.loraSkipT2v")
+        : flOnly
+          ? tt("ayar.loraSkipRef")
+          : "";
     el.textContent = tf("ayar.loraHintOn", {
       label: spec.label,
       steps: uiSteps || "?",
@@ -7581,6 +7913,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       return;
     }
     state.loraId = spec?.id || "";
+    if (spec && isStillLoraSpec(spec)) {
+      toast(tt("toast.loraStillOnly"));
+      return;
+    }
     if (!spec || !spec.file) {
       state.loraApplied = false;
       if ($("steps")) $("steps").value = "20";
@@ -7714,6 +8050,18 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!spec) return;
     if (isAdultLoraSpec(spec) && !state.adultContentEnabled) {
       toast(tt("settings.adultNeedEnable"));
+      return;
+    }
+    if (isStillLoraSpec(spec)) {
+      if (!spec.ready) {
+        try {
+          spec = await downloadCatalogLora(spec);
+        } catch (e) {
+          toast(String(e.message || e));
+          return;
+        }
+      }
+      toast(tt("toast.loraStillOnly"));
       return;
     }
     if ($("lora-select")) $("lora-select").value = id;
@@ -7895,6 +8243,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
   document.querySelectorAll("#quality-chips .chip, #quality-chips-cont .chip").forEach((btn) => {
     btn.addEventListener("click", () => setQuality(btn.dataset.q));
+  });
+  document
+    .querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip")
+    .forEach((btn) => {
+      btn.addEventListener("click", () => setPostPass(btn.dataset.post || ""));
+    });
+  $("cinema-character-voice-file")?.addEventListener("change", (e) => {
+    syncFilePickName(e.target);
+    const f = e.target.files && e.target.files[0];
+    if (f) void uploadCinemaVoiceClip(f);
+    e.target.value = "";
   });
   document.querySelectorAll("#aspect-chips .chip").forEach((btn) => {
     btn.addEventListener("click", () => setAspect(btn.dataset.aspect));
@@ -8171,10 +8530,21 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const extra = c
       ? ` · ${c.characters || 0} char / ${c.locations || 0} loc / ${c.creatures || 0} yaratık / ${c.sections || 0} bölüm`
       : "";
-    toast(tt("cinema.jsonImported") + extra);
+    const kept = data && data.stills_kept ? data.stills_kept : {};
+    const keptN =
+      Number(kept.characters || 0) +
+      Number(kept.locations || 0) +
+      Number(kept.creatures || 0);
+    const keptTxt = keptN ? ` · ${tf("cinema.jsonStillsKept", { n: String(keptN) })}` : "";
+    const warn = Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [];
+    toast(tt("cinema.jsonImported") + extra + keptTxt + (warn.length ? " · " + warn[0] : ""));
+    const isSeamless = !!(data.seamless || cinemaData.studio_mode === "seamless" || data.studio_mode === "seamless");
+    if (isSeamless) setCinemaStudioMode("seamless");
     const hint = $("cinema-prod-hint");
     if (hint) {
-      hint.textContent = tt("cinema.jsonReadyProduce");
+      hint.textContent = isSeamless
+        ? tt("cinema.jsonReadyProduceSeamless")
+        : tt("cinema.jsonReadyProduce");
       hint.classList.remove("hidden");
     }
     $("btn-cinema-produce")?.classList.add("is-ready");
@@ -8184,6 +8554,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   async function importCinemaJsonPayload(payload) {
     const merge = !!$("cinema-json-merge")?.checked;
     const toLib = !!$("cinema-json-library")?.checked;
+    const redoChars = !!$("cinema-json-redo-chars")?.checked;
+    if ($("cinema-force-sheets")) $("cinema-force-sheets").checked = redoChars;
     const r = await fetch("/api/cinema/import-json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -8193,6 +8565,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         save_to_library: toLib,
         new_film: !merge,
         generate_sheets: false,
+        keep_stills: true,
+        redo_characters: redoChars,
       }),
     });
     const data = await r.json().catch(() => ({}));
@@ -8245,8 +8619,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       })
       .catch((err) => toast(String(err.message || err)));
   });
-  $("btn-cinema-json-template")?.addEventListener("click", () => {
-    void fetch("/api/cinema/json-template")
+  function downloadCinemaJsonTemplate(kind) {
+    const qs = kind === "seamless" ? "?kind=seamless" : "";
+    const file =
+      kind === "seamless"
+        ? "h3-cinema-seamless-v1-template.json"
+        : "h3-cinema-v1-template.json";
+    void fetch("/api/cinema/json-template" + qs)
       .then(async (r) => {
         const data = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(errDetail(data));
@@ -8255,12 +8634,23 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         const blob = new Blob([text], { type: "application/json;charset=utf-8" });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
-        a.download = "h3-cinema-v1-template.json";
+        a.download = file;
         a.click();
         URL.revokeObjectURL(a.href);
-        toast(tt("cinema.jsonTemplateDone"));
+        toast(
+          kind === "seamless"
+            ? tt("cinema.jsonTemplateSeamlessDone")
+            : tt("cinema.jsonTemplateDone")
+        );
       })
       .catch((err) => toast(String(err.message || err)));
+  }
+
+  $("btn-cinema-json-template")?.addEventListener("click", () => {
+    downloadCinemaJsonTemplate("");
+  });
+  $("btn-cinema-json-template-seamless")?.addEventListener("click", () => {
+    downloadCinemaJsonTemplate("seamless");
   });
   $("btn-cinema-json-import")?.addEventListener("click", () => {
     void (async () => {
@@ -8794,6 +9184,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("llm-ollama-url")?.addEventListener("input", () => {
     if ($("llm-ollama-url")) $("llm-ollama-url").dataset.dirty = "1";
+  });
+  $("llm-lmstudio-url")?.addEventListener("input", () => {
+    if ($("llm-lmstudio-url")) $("llm-lmstudio-url").dataset.dirty = "1";
+  });
+  $("llm-llamacpp-url")?.addEventListener("input", () => {
+    if ($("llm-llamacpp-url")) $("llm-llamacpp-url").dataset.dirty = "1";
   });
   const KEY_TO_PROVIDER = {
     "llm-openai-key": "openai",
@@ -9421,6 +9817,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   setQuality(state.quality);
+  setPostPass(state.postPass);
   setProduceMode("t2v");
   syncChromeFitFromStorage();
   setStudioWorkspace("scene");

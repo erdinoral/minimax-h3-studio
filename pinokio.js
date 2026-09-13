@@ -20,6 +20,11 @@ module.exports = {
       "download/lora-turbo6.js",
       "download/lora-turbov4.js",
       "download/lora-realism.js",
+      "download/lora-cinematic.js",
+      "download/lora-better-motion.js",
+      "download/lora-spatial-physics.js",
+      "download/lora-ref2v-turbo.js",
+      "download/lora-photoreal.js",
       "download/lora-pinkfluffybunny.js",
       "download/multishot.js",
       "download/text_encoder_int8.js",
@@ -45,6 +50,11 @@ module.exports = {
       loraTurbo6: info.exists("app/models/loras/minimax_h3_turbo_6step_ema_fl2va_pruned.safetensors"),
       loraTurboV4: info.exists("app/models/loras/minimax_h3_turbo_v4_step600_ema.safetensors"),
       loraRealism: info.exists("app/models/loras/h3-realism-people-t2v-i2v-r2v.safetensors"),
+      loraCinematic: info.exists("app/models/loras/minimax_h3_cinematic_look_v01.safetensors"),
+      loraBetterMotion: info.exists("app/models/loras/mvmt_h3_lora_v1_500.safetensors"),
+      loraSpatial: info.exists("app/models/loras/wushu_spatial_physics_clean_3000_pruned.safetensors"),
+      loraRef2vTurbo: info.exists("app/models/loras/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors"),
+      loraPhotoreal: info.exists("app/models/loras/h3_photoreal_ph0t0r34l_1024-step00003780.safetensors"),
       loraPink: info.exists("app/models/loras/PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors") || info.exists("app/models/loras/PinkFluffyBunny-pruned-v1-rank128.safetensors"),
       multishot: info.exists("app/custom_nodes/ComfyUI-H3-Multishot")
     }
@@ -166,6 +176,46 @@ module.exports = {
           icon: "fa-solid fa-download",
           text: "H3 Realism People LoRA (~125MB)",
           href: "download/lora-realism.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraCinematic) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "Cinematic Look LoRA (~148MB)",
+          href: "download/lora-cinematic.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraBetterMotion) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "Better Motion LoRA (~296MB)",
+          href: "download/lora-better-motion.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraSpatial) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "Spatial & Physics LoRA (~148MB)",
+          href: "download/lora-spatial-physics.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraRef2vTurbo) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "Ref2V Turbo 8-step LoRA (~933MB)",
+          href: "download/lora-ref2v-turbo.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.loraPhotoreal) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "Photoreal still LoRA (~148MB)",
+          href: "download/lora-photoreal.js",
           mode: "refresh"
         })
       }

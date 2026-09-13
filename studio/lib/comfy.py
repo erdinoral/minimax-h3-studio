@@ -320,6 +320,39 @@ class ComfyClient:
                 await asyncio.sleep(1.2 * (attempt + 1))
         raise RuntimeError(f"Comfy video upload başarısız: {last_err}")
 
+    async def upload_audio(self, path: Path, name: Optional[str] = None) -> str:
+        """Upload audio into Comfy input/ (same endpoint as images; LoadAudio reads it)."""
+        filename = name or path.name
+        mime = "audio/wav"
+        low = filename.lower()
+        if low.endswith(".mp3"):
+            mime = "audio/mpeg"
+        elif low.endswith(".flac"):
+            mime = "audio/flac"
+        elif low.endswith(".ogg"):
+            mime = "audio/ogg"
+        elif low.endswith(".m4a"):
+            mime = "audio/mp4"
+        elif low.endswith(".aac"):
+            mime = "audio/aac"
+        last_err: Exception | None = None
+        for attempt in range(4):
+            try:
+                async with httpx.AsyncClient(timeout=180.0) as c:
+                    with path.open("rb") as f:
+                        r = await c.post(
+                            f"{self.base_url}/upload/image",
+                            files={"image": (filename, f, mime)},
+                            data={"overwrite": "true"},
+                        )
+                    r.raise_for_status()
+                    data = r.json()
+                    return data.get("name") or filename
+            except Exception as e:
+                last_err = e
+                await asyncio.sleep(1.2 * (attempt + 1))
+        raise RuntimeError(f"Comfy audio upload başarısız: {last_err}")
+
     async def download_view(
         self, filename: str, subfolder: str = "", type_: str = "output", dest: Path = None
     ) -> Path:
@@ -351,6 +384,7 @@ def build_t2v_prompt(
     lora_name: Optional[str] = None,
     lora_strength: float = 0.75,
     sage_attention: Optional[str] = "auto",
+    post_pass: str = "",
 ) -> dict[str, Any]:
     """Build FL2VA graph. silent_audio skips AudioVAE load + VAEDecodeAudio (faster end)."""
     m = {**DEFAULT_MODELS, **(models or {})}
@@ -466,7 +500,10 @@ def build_t2v_prompt(
             "inputs": {"image": last_frame_name},
         }
         g["104"]["inputs"]["last_frame"] = ["201", 0]
-    return apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention)
+    return apply_image_post(
+        apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),
+        post_pass=post_pass,
+    )
 
 
 MULTISHOT_MAX_SHOTS = 8
@@ -498,6 +535,9 @@ def build_multishot_prompt(
     lora_strength: float = 0.75,
     sage_attention: Optional[str] = "auto",
     start_image_name: Optional[str] = None,
+    post_pass: str = "",
+    chain_normalize: bool = True,
+    voice_names: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """CORE Seamless Chain: H3MultishotSampler (last-frame weld, no Motion-Context).
 
@@ -579,7 +619,19 @@ def build_multishot_prompt(
             "inputs": {"image": start_image_name},
         }
         g["104"]["inputs"]["start_image"] = ["200", 0]
-    return apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention)
+    voice_keys = ("voice_ref", "voice_ref_2", "voice_ref_3")
+    for i, vname in enumerate([n for n in (voice_names or []) if n][:3]):
+        nid = str(210 + i)
+        g[nid] = {
+            "class_type": "LoadAudio",
+            "inputs": {"audio": vname},
+        }
+        g["104"]["inputs"][voice_keys[i]] = [nid, 0]
+    return apply_image_post(
+        apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),
+        post_pass=post_pass,
+        chain_normalize=chain_normalize,
+    )
 
 
 def build_ref2va_prompt(
@@ -602,6 +654,7 @@ def build_ref2va_prompt(
     lora_name: Optional[str] = None,
     lora_strength: float = 0.75,
     sage_attention: Optional[str] = "auto",
+    post_pass: str = "",
 ) -> dict[str, Any]:
     """Build Ref2VA graph (MiniMaxH3ReferenceToVideo + Ref2VA UNET).
 
@@ -745,7 +798,89 @@ def build_ref2va_prompt(
                 "fps": 24.0,
             },
         }
-    return apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention)
+    return apply_image_post(
+        apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),
+        post_pass=post_pass,
+    )
+
+
+def detect_vfi_model(comfy_root: Optional[Path] = None) -> Optional[str]:
+    """First FILM/RIFE file in models/frame_interpolation, if any."""
+    root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
+    folder = root / "models" / "frame_interpolation"
+    if not folder.is_dir():
+        return None
+    for p in sorted(folder.iterdir()):
+        if p.is_file() and p.suffix.lower() in (".pth", ".pt", ".safetensors", ".ckpt"):
+            return p.name
+    return None
+
+
+def apply_image_post(
+    g: dict[str, Any],
+    *,
+    post_pass: str = "",
+    chain_normalize: bool = False,
+    fps: float = 24.0,
+) -> dict[str, Any]:
+    """Optional H3ChainNormalize + one post-pass before CreateVideo."""
+    create = g.get("91")
+    if not isinstance(create, dict):
+        return g
+    inputs = create.setdefault("inputs", {})
+    src = inputs.get("images")
+    if not src:
+        return g
+    nid = 80
+    if chain_normalize:
+        g[str(nid)] = {
+            "class_type": "H3ChainNormalize",
+            "inputs": {
+                "images": src,
+                "baseline_seconds": 10.0,
+                "skip_seconds": 2.0,
+                "fps": float(fps),
+                "strength": 1.0,
+                "deadband": 1.06,
+                "ema": 0.10,
+                "colour_match": True,
+            },
+        }
+        src = [str(nid), 0]
+        nid += 1
+    kind = str(post_pass or "").strip().lower()
+    if kind == "vfi":
+        model = detect_vfi_model()
+        if model:
+            g[str(nid)] = {
+                "class_type": "FrameInterpolationModelLoader",
+                "inputs": {"model_name": model},
+            }
+            g[str(nid + 1)] = {
+                "class_type": "FrameInterpolate",
+                "inputs": {
+                    "interp_model": [str(nid), 0],
+                    "images": src,
+                    "multiplier": 2,
+                },
+            }
+            src = [str(nid + 1), 0]
+            inputs["fps"] = float(fps) * 2
+            nid += 2
+        else:
+            kind = "upscale"
+    if kind == "upscale":
+        g[str(nid)] = {
+            "class_type": "ImageScaleBy",
+            "inputs": {
+                "image": src,
+                "upscale_method": "lanczos",
+                "scale_by": 1.5,
+            },
+        }
+        src = [str(nid), 0]
+    inputs["images"] = src
+    return g
 
 
 def apply_lora(

@@ -12,11 +12,11 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema102" />
-  <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema102" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema108" />
+  <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema108" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema102" />
+  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema108" />
 </head>
 <body>
   <header class="topbar">
@@ -155,6 +155,12 @@
             <button type="button" data-q="1088" class="chip warn">1088p</button>
           </div>
           <div class="muted" id="quality-hint">1280×736 · H3 (×32)</div>
+          <label id="scene-post-label">Son geçiş</label>
+          <div class="chips" id="post-pass-chips">
+            <button type="button" class="chip on" data-post="">Kapalı</button>
+            <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
+            <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
+          </div>
         </div>
 
         <div id="panel-mode-ref" class="hidden">
@@ -230,6 +236,12 @@
             <button type="button" data-q="1088" class="chip warn">1088p</button>
           </div>
           <div class="muted" id="quality-hint-cont">1280×736</div>
+          <label id="cont-post-label">Son geçiş</label>
+          <div class="chips" id="post-pass-chips-cont">
+            <button type="button" class="chip on" data-post="">Kapalı</button>
+            <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
+            <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
+          </div>
           <label id="cont-which-label">Hangi videodan devam?</label>
           <select id="continue-source">
             <option value="">— bitmiş video seç —</option>
@@ -353,6 +365,8 @@
       <label id="llm-prod-provider-label"><span data-i18n="ayar.llm">Yönetmen (hangi LLM)</span>
         <select id="llm-provider">
           <option value="ollama">Ollama (yerel)</option>
+          <option value="lmstudio">LM Studio (yerel)</option>
+          <option value="llamacpp">llama.cpp (yerel)</option>
           <option value="openai">OpenAI</option>
           <option value="nvidia">NVIDIA NIM</option>
           <option value="gemini">Gemini (Google)</option>
@@ -548,6 +562,12 @@
             <button type="button" class="chip" data-quality="768">768p</button>
             <button type="button" class="chip" data-quality="1088">1088p</button>
           </div>
+          <label id="cinema-post-label">Son geçiş</label>
+          <div class="chips cinema-quality-chips" id="cinema-post-pass-chips">
+            <button type="button" class="chip on" data-post="">Kapalı</button>
+            <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
+            <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
+          </div>
           <label><span id="cinema-steps-label">Adım</span>
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
           </label>
@@ -570,6 +590,10 @@
           <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
           <p class="muted mode-hint" id="cinema-mode-hint">Tek take, kesiksiz ses · en fazla 8 shot · karakter/mekan kartı gerekmez</p>
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
+          <label class="cinema-seamless-label" title="Kapalıysa Üret karakter sheet’ine dokunmaz">
+            <input type="checkbox" id="cinema-force-sheets" />
+            <span id="cinema-force-sheets-label">Karakterleri tekrar üret</span>
+          </label>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
           <button type="button" class="cta" id="btn-cinema-produce">Üret</button>
         </div>
@@ -783,7 +807,12 @@
           </header>
           <label><span>Karakter adı</span><input id="cinema-character-name" type="text" /></label>
           <label><span>Görünüm / tanım</span><textarea id="cinema-character-notes" rows="4"></textarea></label>
-          <label><span>Ses</span><textarea id="cinema-character-voice" rows="2"></textarea></label>
+          <label><span id="cinema-character-voice-label">Ses</span><textarea id="cinema-character-voice" rows="2"></textarea></label>
+          <label class="file-pick">
+            <input type="file" id="cinema-character-voice-file" class="file-pick-input" accept="audio/*,.wav,.mp3,.flac,.ogg,.m4a,.aac" />
+            <span class="file-pick-btn" id="cinema-character-voice-file-btn">Ses klibi (v2.7)</span>
+            <span class="file-pick-name" id="cinema-character-voice-file-name">Seçilmedi</span>
+          </label>
           <label><span>Karakter LoRA</span><select id="cinema-character-lora"></select></label>
           <div class="row-btns">
             <button type="button" class="btn-secondary" id="btn-cinema-character-cancel">İptal</button>
@@ -797,21 +826,23 @@
             <h3 id="cinema-json-dialog-title">Film JSON</h3>
             <button type="button" class="menu-btn" id="btn-cinema-json-close">Kapat</button>
           </header>
-          <p class="muted cinema-scene-hint" id="cinema-json-hint">Örnek indir → başka AI’ya ver. Sadece İngilizce metin doldursun (_instructions silinsin). İçe aktar = kartlar hazır. Görsel ve sahneler Üret ile, seçili ön ayarla sırayla üretilir.</p>
+          <p class="muted cinema-scene-hint" id="cinema-json-hint">Kesintisiz örnek = tek take (max 8). Film örneği = 12×5sn yüz kilidi. İngilizce doldur, _instructions sil, içe aktar.</p>
           <label class="cinema-json-file-label file-pick">
             <input type="file" id="cinema-json-file" class="file-pick-input" accept=".json,application/json" />
             <span class="file-pick-btn" id="cinema-json-file-btn">JSON dosyası seç</span>
           </label>
           <label class="cinema-json-paste-label">
             <span id="cinema-json-lbl-paste">JSON yapıştır</span>
-            <textarea id="cinema-json-text" rows="14" spellcheck="false" placeholder='{ "schema": "h3-cinema/v1", "title": "...", "characters": [], "sections": [] }'></textarea>
+            <textarea id="cinema-json-text" rows="14" spellcheck="false" placeholder='{ "schema": "h3-cinema-seamless/v1", "studio_mode": "seamless", "title": "...", "characters": [], "sections": [] }'></textarea>
           </label>
           <div class="cinema-json-opts">
+            <label class="check"><input type="checkbox" id="cinema-json-redo-chars" /><span id="cinema-json-lbl-redo">Karakterleri tekrar üret</span></label>
             <label class="check"><input type="checkbox" id="cinema-json-merge" /><span id="cinema-json-lbl-merge">Mevcut karta birleştir (merge)</span></label>
             <label class="check"><input type="checkbox" id="cinema-json-library" /><span id="cinema-json-lbl-library">Kütüphaneye de kaydet</span></label>
           </div>
           <div class="row-btns">
-            <button type="button" class="btn-secondary" id="btn-cinema-json-template">Örnek indir</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-json-template-seamless">Kesintisiz örnek</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-json-template">Film örneği</button>
             <button type="button" class="btn-secondary" id="btn-cinema-json-export">JSON indir</button>
             <button type="button" class="btn-secondary" id="btn-cinema-json-cancel">İptal</button>
             <button type="button" class="cta" id="btn-cinema-json-import">İçe aktar</button>
@@ -973,6 +1004,8 @@
         <label><span id="llm-active-label">Aktif sağlayıcı</span>
           <select id="llm-provider-settings">
             <option value="ollama">Ollama (yerel)</option>
+            <option value="lmstudio">LM Studio (yerel)</option>
+            <option value="llamacpp">llama.cpp (yerel)</option>
             <option value="openai">OpenAI</option>
             <option value="nvidia">NVIDIA NIM</option>
             <option value="gemini">Gemini (Google)</option>
@@ -983,6 +1016,14 @@
         <label id="llm-ollama-url-wrap"><span id="settings-ollama-url-label">Ollama URL</span>
           <input type="text" id="llm-ollama-url" placeholder="http://127.0.0.1:11434" autocomplete="off" />
           <small class="muted" id="settings-ollama-url-hint">Boş = varsayılan localhost · API key gerekmez</small>
+        </label>
+        <label id="llm-lmstudio-url-wrap" class="hidden"><span id="settings-lmstudio-url-label">LM Studio URL</span>
+          <input type="text" id="llm-lmstudio-url" placeholder="http://127.0.0.1:1234/v1" autocomplete="off" />
+          <small class="muted" id="settings-lmstudio-url-hint">Local Server açık olsun · API key gerekmez</small>
+        </label>
+        <label id="llm-llamacpp-url-wrap" class="hidden"><span id="settings-llamacpp-url-label">llama.cpp URL</span>
+          <input type="text" id="llm-llamacpp-url" placeholder="http://127.0.0.1:8080/v1" autocomplete="off" />
+          <small class="muted" id="settings-llamacpp-url-hint">llama-server --port 8080 · API key gerekmez</small>
         </label>
         <label><span id="settings-openai-key-label">OpenAI API key</span>
           <input type="password" id="llm-openai-key" placeholder="sk-… (platform.openai.com)" autocomplete="off" />
@@ -1122,8 +1163,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema102" charset="utf-8"></script>
-  <script src="/static/film-workspace.js?v=cinema102" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema102" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema108" charset="utf-8"></script>
+  <script src="/static/film-workspace.js?v=cinema108" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema108" charset="utf-8"></script>
 </body>
 </html>

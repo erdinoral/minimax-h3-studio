@@ -131,6 +131,102 @@ CATALOG: list[dict[str, Any]] = [
         ),
         "preset": False,
     },
+    {
+        "id": "cinematic-look",
+        "label": "Cinematic Look (DY)",
+        "file": "minimax_h3_cinematic_look_v01.safetensors",
+        "aliases": [
+            "Minimax H3真实电影质感V0.1（解决张量报错）.safetensors",
+        ],
+        "steps": None,
+        "sampler": None,
+        "scheduler": None,
+        "strength": 0.7,
+        "graphs": ["fl2va", "ref2va"],
+        "hint": "Film dokusu · trigger DY · strength 0.7 (harekette 0.5)",
+        "size_hint": "~148 MB",
+        "trigger": "DY",
+        "url": (
+            "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/"
+            "minimax-h3-cinematic-look-no-tensor-errors/"
+            "Minimax%20H3%E7%9C%9F%E5%AE%9E%E7%94%B5%E5%BD%B1%E8%B4%A8%E6%84%9F"
+            "V0.1%EF%BC%88%E8%A7%A3%E5%86%B3%E5%BC%A0%E9%87%8F%E6%8A%A5%E9%94%99"
+            "%EF%BC%89.safetensors?download=true"
+        ),
+        "preset": False,
+    },
+    {
+        "id": "better-motion",
+        "label": "Better Motion",
+        "file": "mvmt_h3_lora_v1_500.safetensors",
+        "steps": None,
+        "sampler": None,
+        "scheduler": None,
+        "strength": 0.6,
+        "graphs": ["fl2va", "ref2va"],
+        "hint": "Hareket kalitesi · strength 0.4–0.8",
+        "size_hint": "~296 MB",
+        "url": (
+            "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/"
+            "better-motion-ltx-minimax-h3/mvmt_h3_lora_v1_500.safetensors?download=true"
+        ),
+        "preset": False,
+    },
+    {
+        "id": "spatial-physics",
+        "label": "Spatial & Physics",
+        "file": "wushu_spatial_physics_clean_3000_pruned.safetensors",
+        "steps": None,
+        "sampler": None,
+        "scheduler": None,
+        "strength": 0.85,
+        "graphs": ["fl2va", "ref2va"],
+        "hint": "Çarpışma / yerçekimi / cisim · strength 0.8–1.0 · turbo ile üst üste",
+        "size_hint": "~148 MB",
+        "url": (
+            "https://huggingface.co/Jojocodex/minimax-h3-spatial-physics-lora/resolve/main/"
+            "wushu_spatial_physics_clean_3000_pruned.safetensors?download=true"
+        ),
+        "preset": False,
+    },
+    {
+        "id": "ref2v-turbo-8step",
+        "label": "Ref2V Turbo (8 step)",
+        "file": "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors",
+        "steps": 8,
+        "sampler": "er_sde",
+        "scheduler": "simple",
+        "strength": 0.8,
+        "graphs": ["ref2va"],
+        "hint": "Ref/yüz 8 step turbo · T2V’de kullanılmaz · er_sde",
+        "size_hint": "~933 MB",
+        "url": (
+            "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/"
+            "ref2v-turbo-8-step-v1-0-768p-rank-64/"
+            "minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16"
+            ".safetensors?download=true"
+        ),
+        "preset": True,
+    },
+    {
+        "id": "photoreal-still",
+        "label": "Photoreal still (ph0t0r34l)",
+        "file": "h3_photoreal_ph0t0r34l_1024-step00003780.safetensors",
+        "steps": None,
+        "sampler": None,
+        "scheduler": None,
+        "strength": 1.0,
+        "graphs": ["still"],
+        "hint": "Karakter/mekan stilli · video kuyruğuna uygulanmaz · trigger ph0t0r34l",
+        "size_hint": "~148 MB",
+        "trigger": "ph0t0r34l",
+        "url": (
+            "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/"
+            "minimax-h3-photorealistic-image-generator-lora-workflow/"
+            "h3_photoreal_ph0t0r34l_1024-step00003780.safetensors?download=true"
+        ),
+        "preset": False,
+    },
 ]
 
 # Shared Comfy loras/ often has SDXL/Pony/Wan/Flux files. H3 cannot use them.
@@ -226,6 +322,29 @@ def _copy_spec(spec: dict[str, Any]) -> dict[str, Any]:
     item["aliases"] = list(spec.get("aliases") or [])
     item["file"] = resolved_file(spec) or spec.get("file") or ""
     return item
+
+
+def is_still_lora(spec: Optional[dict[str, Any]]) -> bool:
+    graphs = (spec or {}).get("graphs") or []
+    return "still" in graphs
+
+
+def still_catalog_spec() -> Optional[dict[str, Any]]:
+    for spec in CATALOG:
+        if is_still_lora(spec):
+            return _copy_spec(spec)
+    return None
+
+
+def apply_trigger(text: str, spec: Optional[dict[str, Any]] = None) -> str:
+    """Prepend a LoRA trigger word when the prompt does not already include it."""
+    trig = str((spec or {}).get("trigger") or "").strip()
+    body = text or ""
+    if not trig:
+        return body
+    if trig.lower() in body.lower():
+        return body
+    return f"{trig}, {body}".strip()
 
 
 def is_adult_lora(*, lora_id: str = "", file: str = "", spec: Optional[dict[str, Any]] = None) -> bool:

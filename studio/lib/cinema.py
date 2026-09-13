@@ -167,6 +167,7 @@ _EMPTY: dict[str, Any] = {
     "characters": [],
     "locations": [],
     "creatures": [],
+    "studio_mode": "",
     "film_plan": None,
     "pending_produce": None,
     "updated_at": 0,
@@ -628,6 +629,92 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
     )
 
 
+_H3_MARKERS = (
+    ("location", re.compile(r"\bLocation:\s*", re.I)),
+    ("character", re.compile(r"\bMain character:\s*", re.I)),
+    ("action", re.compile(r"\bAction:\s*", re.I)),
+    ("camera", re.compile(r"\bCamera:\s*", re.I)),
+    ("important", re.compile(r"\bConstraints:\s*", re.I)),
+)
+_H3_HEAD = re.compile(
+    r"(?is)^\s*(?:SCENE\s*[–—-]\s*(?P<title>.+?)\.\s+)?\[Shot\s*\d+\]\s*(?P<style>.*?)\s*$"
+)
+_H3_SAYS = re.compile(
+    r"(?is)\s+\(S\d+\)\s+says:\s*(?:<d>\[(?P<lang>[^\]]+)\]\s*)?(?P<line>.*?)</d>\s*$"
+)
+_H3_WHO = re.compile(r"^(?P<camera>.+)\s+(?P<who>[A-Z][^()]+)$")
+_H3_BLOCKS = re.compile(
+    r"(?is)integrated[_\s]+multimodal[_\s]+description\s*[?:]\s*(?P<body>.*?)"
+    r"(?:\s+overall_soundscape\s*[?:]\s*(?P<audio>.*?))?"
+    r"(?:\s+non_diegetic_music\s*[?:]\s*(?P<music>.*?))?\s*$"
+)
+
+
+def _has_author_fields(structured: dict[str, str]) -> bool:
+    return any(structured.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang")
+
+
+def _looks_like_h3_prompt(text: Any) -> bool:
+    return bool(re.search(r"(?i)integrated[_\s]+multimodal[_\s]+description", str(text or "")))
+
+
+def parse_h3_prompt(text: Any) -> dict[str, str]:
+    """Reverse compose_h3_prompt so Director fields refill from a compiled clip."""
+    raw = str(text or "").strip()
+    out = _clean_structured({})
+    if not raw:
+        return out
+    packed = re.sub(r"\s+", " ", raw).strip()
+    blocks = _H3_BLOCKS.search(packed)
+    body = packed
+    if blocks:
+        body = (blocks.group("body") or "").strip()
+        out["audio"] = (blocks.group("audio") or "").strip()
+        out["music"] = (blocks.group("music") or "").strip()
+    hits: list[tuple[int, int, str]] = []
+    for key, rx in _H3_MARKERS:
+        m = rx.search(body)
+        if m:
+            hits.append((m.start(), m.end(), key))
+    if not hits and not blocks:
+        return _clean_structured({})
+    hits.sort()
+    head = body[: hits[0][0]].strip() if hits else body
+    hm = _H3_HEAD.match(head)
+    if hm:
+        out["title"] = (hm.group("title") or "").strip()
+        out["visual_style"] = (hm.group("style") or "").strip()
+    elif head.lower().startswith("scene"):
+        out["title"] = re.sub(r"(?i)^SCENE\s*[–—-]\s*", "", head).strip(" .")
+    for i, (_start, end, key) in enumerate(hits):
+        stop = hits[i + 1][0] if i + 1 < len(hits) else len(body)
+        out[key] = body[end:stop].strip()
+    cam = out.get("camera") or ""
+    dm = _H3_SAYS.search(cam)
+    if dm:
+        before = cam[: dm.start()].strip()
+        who = (out.get("character") or "").strip()
+        if who and before.endswith(who):
+            out["camera"] = before[: -len(who)].strip()
+        else:
+            wm = _H3_WHO.match(before)
+            if wm:
+                out["camera"] = (wm.group("camera") or "").strip()
+                if not who:
+                    out["character"] = (wm.group("who") or "").strip()
+            else:
+                out["camera"] = before
+        line = (dm.group("line") or "").strip()
+        if line:
+            out["dialogue"] = line
+            lang = (dm.group("lang") or "").strip()
+            if lang:
+                out["dialogue_lang"] = lang
+    if out.get("music") and out["music"].lower() in ("n/a", "na", "none", "no", "yok", "off"):
+        out["music"] = "N/A"
+    return out
+
+
 def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     if isinstance(item, str):
         item = {"text": item}
@@ -635,6 +722,14 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
         item = {}
     structured = _clean_structured(item.get("structured"))
     text = str(item.get("text") or item.get("prompt") or item.get("h3Prompt") or "").strip()
+    blob = text or structured.get("action") or ""
+    only_blob = _looks_like_h3_prompt(blob) and not any(
+        structured.get(k) for k in ("title", "location", "character", "camera")
+    )
+    if (not _has_author_fields(structured) or only_blob) and blob:
+        parsed = parse_h3_prompt(blob)
+        if _has_author_fields(parsed):
+            structured = parsed
     composed = compose_h3_prompt(structured, look_id=look_id)
     if composed:
         text = composed
@@ -645,7 +740,7 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
         mode = "t2v"
     sid = str(item.get("id") or "").strip() or str(uuid.uuid4())
     out = {"id": sid, "text": text, "mode": mode, "index": index}
-    if any(structured.values()):
+    if _has_author_fields(structured):
         out["structured"] = structured
     return out
 
@@ -725,6 +820,7 @@ def load() -> dict[str, Any]:
     except (TypeError, ValueError):
         data["seed"] = -1
     data["seed_lock"] = bool(data.get("seed_lock"))
+    data["studio_mode"] = _clean_studio_mode(data.get("studio_mode"))
     if not data.get("script"):
         data["script"] = "\n\n---\n\n".join(s["text"] for s in data["shots"] if s.get("text"))
     fp = data.get("film_plan")
@@ -750,10 +846,24 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
     for key in ("duration", "quality", "steps"):
         if key not in data and prev.get(key) is not None:
             data = {**data, key: prev.get(key)}
-    shots = [
-        _clean_shot(x, i, look_id=str((_clean_setup(data.get("setup")).get("look") or "")).strip())
-        for i, x in enumerate(data.get("shots") or [])
-    ]
+    look_id = str((_clean_setup(data.get("setup")).get("look") or "")).strip()
+    prev_by_id = {
+        str(s.get("id") or ""): s
+        for s in (prev.get("shots") or [])
+        if isinstance(s, dict) and s.get("id")
+    }
+    merged_shots: list[Any] = []
+    for i, x in enumerate(data.get("shots") or []):
+        row = dict(x) if isinstance(x, dict) else {"text": x}
+        incoming = _clean_structured(row.get("structured"))
+        if not _has_author_fields(incoming):
+            older = prev_by_id.get(str(row.get("id") or ""))
+            if isinstance(older, dict):
+                prev_s = _clean_structured(older.get("structured"))
+                if _has_author_fields(prev_s):
+                    row["structured"] = prev_s
+        merged_shots.append(_clean_shot(row, i, look_id=look_id))
+    shots = merged_shots
     script = str(data.get("script") or "").strip()
     if shots:
         script = "\n\n---\n\n".join(s["text"] for s in shots if s.get("text"))
@@ -805,6 +915,9 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
                 prev.get("creatures") or [],
             )
         ],
+        "studio_mode": _clean_studio_mode(
+            data["studio_mode"] if "studio_mode" in data else prev.get("studio_mode")
+        ),
         "updated_at": _now(),
     }
     outline = data.get("shotOutline")
@@ -862,6 +975,62 @@ def _asset_image_files(item: Any) -> list[str]:
     return files
 
 
+def _asset_name_key(item: Any) -> str:
+    if isinstance(item, str):
+        return item.strip().lower()
+    if isinstance(item, dict):
+        return str(item.get("name") or "").strip().lower()
+    return ""
+
+
+def _stills_donor_index(donors: list[Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for src in donors or []:
+        if not isinstance(src, dict) or not _asset_has_still(src):
+            continue
+        key = _asset_name_key(src)
+        if key and key not in out:
+            out[key] = src
+    return out
+
+
+def _copy_asset_stills(dest: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
+    row = dict(dest)
+    row["images"] = list(src.get("images") or [])
+    row["image"] = src.get("image") or ""
+    row["url"] = src.get("url") or ""
+    if src.get("id") and not _asset_has_still(dest):
+        row["id"] = src.get("id") or row.get("id")
+    if src.get("library_id"):
+        row["library_id"] = src.get("library_id")
+    if src.get("lora_id"):
+        row["lora_id"] = src.get("lora_id")
+        row["lora_strength"] = src.get("lora_strength") or row.get("lora_strength") or 0.8
+    if src.get("voice_audio"):
+        row["voice_audio"] = src.get("voice_audio")
+    return row
+
+
+def _adopt_stills_by_name(incoming: list[Any], *donor_lists: list[Any]) -> tuple[list[dict[str, Any]], int]:
+    """Reuse stills from current film / library when the imported name already exists."""
+    donors: list[Any] = []
+    for block in donor_lists:
+        donors.extend(block or [])
+    by_name = _stills_donor_index(donors)
+    out: list[dict[str, Any]] = []
+    kept = 0
+    for raw in incoming or []:
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        prev = by_name.get(_asset_name_key(item))
+        if prev and not _asset_has_still(item):
+            item = _copy_asset_stills(item, prev)
+            kept += 1
+        out.append(item)
+    return out, kept
+
+
 def _keep_asset_stills(incoming: list[Any], previous: list[Any]) -> list[Any]:
     """Keep sheet stills if a stale UI PUT sends empty or older 1-frame collages."""
     prev_by_id = {
@@ -869,12 +1038,15 @@ def _keep_asset_stills(incoming: list[Any], previous: list[Any]) -> list[Any]:
         for x in (previous or [])
         if isinstance(x, dict) and x.get("id")
     }
+    prev_by_name = _stills_donor_index(previous or [])
     out: list[Any] = []
     for row in incoming or []:
         if not isinstance(row, dict):
             continue
         item = dict(row)
-        prev = prev_by_id.get(str(item.get("id") or ""))
+        prev = prev_by_id.get(str(item.get("id") or "")) or prev_by_name.get(
+            _asset_name_key(item)
+        )
         if prev and _asset_has_still(prev):
             prev_files = _asset_image_files(prev)
             inc_files = _asset_image_files(item)
@@ -974,6 +1146,9 @@ def _clean_asset(item: Any, kind: str) -> dict[str, Any]:
         "notes": notes,
         "voice": str(item.get("voice") or "").strip(),
     }
+    voice_audio = str(item.get("voice_audio") or "").strip()
+    if voice_audio:
+        out["voice_audio"] = Path(voice_audio).name
     if kind == "character":
         out["lora_id"] = str(item.get("lora_id") or "").strip()
         try:
@@ -1797,11 +1972,102 @@ def _ref_files_in(lib: dict[str, Any]) -> list[str]:
 
 
 CINEMA_JSON_SCHEMA = "h3-cinema/v1"
+CINEMA_SEAMLESS_SCHEMA = "h3-cinema-seamless/v1"
 CINEMA_JSON_TEMPLATE_FILE = STUDIO_ROOT / "schemas" / "h3-cinema-v1.example.json"
+CINEMA_SEAMLESS_TEMPLATE_FILE = STUDIO_ROOT / "schemas" / "h3-cinema-seamless-v1.example.json"
+SEAMLESS_MAX_SHOTS = 8
+SEAMLESS_DEFAULT_DURATION = 10
 
 
-def project_json_template() -> dict[str, Any]:
-    """Blank h3-cinema/v1 package with every required column present (fill externally)."""
+def _clean_studio_mode(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in ("seamless", "kesintisiz", "multishot"):
+        return "seamless"
+    if raw in ("assets", "asset", "karakter", "face", "film"):
+        return "assets"
+    return ""
+
+
+def is_seamless_package(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    schema = str(payload.get("schema") or "").strip().lower()
+    if schema in (CINEMA_SEAMLESS_SCHEMA, "h3-cinema-seamless", "h3-cinema-seamless/v1"):
+        return True
+    if _clean_studio_mode(payload.get("studio_mode") or payload.get("produce")) == "seamless":
+        return True
+    return payload.get("seamless") is True
+
+
+def _blank_seamless_template() -> dict[str, Any]:
+    section = {
+        "title": "",
+        "location": "",
+        "character": "",
+        "action": "",
+        "dialogue": "",
+        "dialogue_lang": "auto",
+        "camera": "",
+        "visual_style": "",
+        "audio": "",
+        "music": "N/A",
+        "important": "",
+    }
+    return {
+        "schema": CINEMA_SEAMLESS_SCHEMA,
+        "studio_mode": "seamless",
+        "seamless": True,
+        "title": "",
+        "logline": "",
+        "look": "auto",
+        "setup": {
+            "look": "auto",
+            "camera": "auto",
+            "palette": "auto",
+            "lighting": "auto",
+            "era": "auto",
+            "purpose": "short_film",
+            "style": "realistic",
+        },
+        "duration": SEAMLESS_DEFAULT_DURATION,
+        "quality": "736",
+        "steps": 18,
+        "characters": [
+            {
+                "name": "",
+                "notes": "",
+                "voice": "",
+                "trigger": "",
+                "lora_id": "",
+                "lora_strength": 0.8,
+            }
+        ],
+        "locations": [{"name": "", "notes": "", "trigger": ""}],
+        "creatures": [],
+        "sections": [dict(section) for _ in range(6)],
+    }
+
+
+def project_json_template(kind: str = "") -> dict[str, Any]:
+    """Blank cinema package. kind=seamless → Kesintisiz (max 8 beats); else 12×5s Film."""
+    want_seamless = str(kind or "").strip().lower() in (
+        "seamless",
+        "kesintisiz",
+        "multishot",
+        CINEMA_SEAMLESS_SCHEMA,
+    )
+    if want_seamless:
+        if CINEMA_SEAMLESS_TEMPLATE_FILE.is_file():
+            try:
+                raw = json.loads(CINEMA_SEAMLESS_TEMPLATE_FILE.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    raw["schema"] = CINEMA_SEAMLESS_SCHEMA
+                    raw["studio_mode"] = "seamless"
+                    raw["seamless"] = True
+                    return raw
+            except Exception:
+                pass
+        return _blank_seamless_template()
     if CINEMA_JSON_TEMPLATE_FILE.is_file():
         try:
             raw = json.loads(CINEMA_JSON_TEMPLATE_FILE.read_text(encoding="utf-8"))
@@ -1881,7 +2147,7 @@ def _section_from_shot(shot: Any) -> dict[str, Any]:
     if not isinstance(shot, dict):
         return {"text": str(shot or "").strip(), "mode": "t2v"}
     structured = _clean_structured(shot.get("structured"))
-    has_struct = any(structured.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang")
+    has_struct = _has_author_fields(structured)
     mode = str(shot.get("mode") or "t2v").strip().lower()
     if mode not in ("continue", "devam", "i2v", "last_frame"):
         mode = "t2v"
@@ -1919,8 +2185,12 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
     text = str(
         item.get("text") or item.get("h3Prompt") or item.get("prompt") or item.get("action") or ""
     ).strip()
+    if not _has_author_fields(structured) and text:
+        parsed = parse_h3_prompt(text)
+        if _has_author_fields(parsed):
+            structured = parsed
     payload: dict[str, Any] = {"mode": mode, "text": text}
-    if any(structured.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang"):
+    if _has_author_fields(structured):
         payload["structured"] = structured
     return _clean_shot(payload, index, look_id=look_id)
 
@@ -1929,8 +2199,12 @@ def export_project_json() -> dict[str, Any]:
     """Portable film package: cast + structured sections (LLM-friendly)."""
     data = load()
     look_id = str((_clean_setup(data.get("setup")).get("look") or "")).strip()
+    studio_mode = _clean_studio_mode(data.get("studio_mode"))
+    seamless = studio_mode == "seamless"
     return {
-        "schema": CINEMA_JSON_SCHEMA,
+        "schema": CINEMA_SEAMLESS_SCHEMA if seamless else CINEMA_JSON_SCHEMA,
+        "studio_mode": studio_mode or "assets",
+        "seamless": seamless,
         "title": str(data.get("title") or "").strip(),
         "logline": str(data.get("role_script") or "").strip()[:4000],
         "setup": _clean_setup(data.get("setup")),
@@ -1970,6 +2244,8 @@ def import_project_json(
     mode: str = "replace",
     save_to_library: bool = False,
     new_film: bool = True,
+    keep_stills: bool = True,
+    redo_characters: bool = False,
 ) -> dict[str, Any]:
     """
     Build cinema cast + sections from portable JSON.
@@ -1985,6 +2261,8 @@ def import_project_json(
         for k, v in payload.items()
         if not (isinstance(k, str) and k.startswith("_"))
     }
+    seamless_pkg = is_seamless_package(payload)
+    warnings: list[str] = []
     mode_l = (mode or "replace").strip().lower()
     if mode_l not in ("replace", "merge"):
         mode_l = "replace"
@@ -2007,6 +2285,11 @@ def import_project_json(
         if isinstance(item, (dict, str))
     ]
     shots = [s for s in shots if s.get("text") or s.get("structured")]
+    if seamless_pkg and len(shots) > SEAMLESS_MAX_SHOTS:
+        shots = shots[:SEAMLESS_MAX_SHOTS]
+        warnings.append(
+            f"Kesintisiz zincir en fazla {SEAMLESS_MAX_SHOTS} shot — fazlası kesildi"
+        )
 
     chars_in = payload.get("characters") or payload.get("cast") or []
     locs_in = payload.get("locations") or payload.get("places") or []
@@ -2041,6 +2324,12 @@ def import_project_json(
     for key in ("duration", "quality", "steps"):
         if payload.get(key) is not None:
             data[key] = payload.get(key)
+    if seamless_pkg:
+        data["studio_mode"] = "seamless"
+        if payload.get("duration") is None:
+            data["duration"] = SEAMLESS_DEFAULT_DURATION
+    elif _clean_studio_mode(payload.get("studio_mode")):
+        data["studio_mode"] = _clean_studio_mode(payload.get("studio_mode"))
 
     if mode_l == "replace":
         data["characters"] = _merge_named_assets("character", [], chars_in)
@@ -2066,6 +2355,26 @@ def import_project_json(
         if shots:
             data["shots"] = shots
 
+    stills_kept = {"characters": 0, "locations": 0, "creatures": 0}
+    if keep_stills:
+        lib_assets = load_library()
+        data["locations"], stills_kept["locations"] = _adopt_stills_by_name(
+            data.get("locations") or [],
+            cur.get("locations") or [],
+            lib_assets.get("locations") or [],
+        )
+        data["creatures"], stills_kept["creatures"] = _adopt_stills_by_name(
+            data.get("creatures") or [],
+            cur.get("creatures") or [],
+            lib_assets.get("creatures") or [],
+        )
+        if not redo_characters and not seamless_pkg:
+            data["characters"], stills_kept["characters"] = _adopt_stills_by_name(
+                data.get("characters") or [],
+                cur.get("characters") or [],
+                lib_assets.get("characters") or [],
+            )
+
     out = save(data)
 
     if save_to_library:
@@ -2082,9 +2391,19 @@ def import_project_json(
                 except Exception:
                     pass
 
+    if seamless_pkg:
+        for ch in out.get("characters") or []:
+            if character_portrait_files(ch):
+                warnings.append(
+                    "Kartta portre var — Üret Kesintisiz yerine yüz kilitli Continue’a düşer"
+                )
+                break
+
     return {
         "ok": True,
-        "schema": CINEMA_JSON_SCHEMA,
+        "schema": CINEMA_SEAMLESS_SCHEMA if seamless_pkg else CINEMA_JSON_SCHEMA,
+        "studio_mode": "seamless" if seamless_pkg else (_clean_studio_mode(out.get("studio_mode")) or "assets"),
+        "seamless": bool(seamless_pkg),
         "mode": mode_l,
         "title": out.get("title") or "",
         "film_id": out.get("film_id") or "",
@@ -2094,6 +2413,8 @@ def import_project_json(
             "creatures": len(out.get("creatures") or []),
             "sections": len(out.get("shots") or []),
         },
+        "stills_kept": stills_kept,
+        "warnings": warnings,
         "cinema": out,
     }
 

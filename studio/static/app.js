@@ -59,7 +59,6 @@
     loraApplied: false,
     loraCatalog: [],
     loraDownload: {},
-    adultContentEnabled: false,
     multishot: false,
     postPass: "",
     vfiModel: "",
@@ -116,147 +115,7 @@
     "documentary",
     "intro",
     "outro",
-    "adult",
   ];
-  const ADULT_LORA_ID = "erosmax-4step";
-  const ADULT_PURPOSE = "adult";
-
-  function purposeKeysForUi() {
-    if (state.adultContentEnabled) return PURPOSE_KEYS;
-    return PURPOSE_KEYS.filter((k) => k !== ADULT_PURPOSE);
-  }
-
-  function isAdultLoraSpec(spec) {
-    if (!spec) return false;
-    if (spec.adult) return true;
-    const blob = `${spec.id || ""} ${spec.file || ""} ${spec.label || ""}`.toLowerCase();
-    return blob.includes("erosmax");
-  }
-
-  function visibleLoraCatalog() {
-    const catalog = state.loraCatalog || [];
-    if (state.adultContentEnabled) return catalog;
-    return catalog.filter((spec) => !isAdultLoraSpec(spec));
-  }
-
-  function isStillLoraSpec(spec) {
-    return !!(spec && (spec.graphs || []).includes("still"));
-  }
-
-  function videoLoraCatalog() {
-    return visibleLoraCatalog().filter((spec) => !isStillLoraSpec(spec));
-  }
-
-  function setPostPass(v) {
-    const raw = String(v || "").trim().toLowerCase();
-    const next = raw === "upscale" || (raw === "vfi" && state.vfiModel) ? raw : "";
-    state.postPass = next;
-    document.querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip").forEach((b) => {
-      const p = b.dataset.post || "";
-      b.classList.toggle("on", p === next);
-      b.textContent = p === "upscale" ? tt("ayar.postUpscale") : p === "vfi" ? tt("ayar.postVfi") : tt("ayar.postOff");
-    });
-  }
-
-  function syncVfiChips() {
-    const on = !!state.vfiModel;
-    document.querySelectorAll(".post-pass-vfi").forEach((el) => {
-      el.classList.toggle("hidden", !on);
-    });
-    if (!on && state.postPass === "vfi") setPostPass("");
-  }
-
-  function syncAdultContentUi() {
-    const on = !!state.adultContentEnabled;
-    document.querySelectorAll(".adult-only").forEach((el) => {
-      el.classList.toggle("hidden", !on);
-    });
-    $("settings-adult-on")?.classList.toggle("hidden", !on);
-    $("settings-adult-off")?.classList.toggle("hidden", on);
-    const status = $("settings-adult-status");
-    if (status) status.textContent = on ? tt("settings.adultOn") : "";
-    if (!on) {
-      if (state.projectPurpose === ADULT_PURPOSE) {
-        state.projectPurpose = null;
-        syncProjectChips();
-      }
-      if (state.loraApplied && (state.loraId === ADULT_LORA_ID || isAdultLoraSpec(appliedLoraSpec()))) {
-        if ($("lora-select")) $("lora-select").value = "";
-        if ($("cinema-lora-select")) $("cinema-lora-select").value = "";
-        state.loraId = "";
-        state.loraApplied = false;
-        if ($("steps")) $("steps").value = "20";
-        if ($("sampler")) $("sampler").value = "res_multistep";
-        updateLoraHint();
-      }
-      const bg = $("bible-genre");
-      if (bg && bg.value === ADULT_PURPOSE) bg.value = "short_film";
-    }
-    fillLoraSelect();
-    fillLoraShop();
-  }
-  window.syncAdultContentUi = syncAdultContentUi;
-
-  async function loadStudioSettings() {
-    try {
-      const data = await fetch("/api/studio/settings").then((r) => r.json());
-      state.adultContentEnabled = !!data.adult_content_enabled;
-    } catch (_) {
-      state.adultContentEnabled = false;
-    }
-    syncAdultContentUi();
-  }
-
-  async function setAdultContentEnabled(enabled) {
-    const on = !!enabled;
-    if (on) {
-      const ok = !!$("settings-adult-confirm")?.checked;
-      if (!ok) {
-        toast(tt("settings.adultNeedConfirm"));
-        return;
-      }
-    }
-    try {
-      const r = await fetch("/api/studio/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ adult_content_enabled: on }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(errDetail(data) || tt("settings.adultSaveFail"));
-      state.adultContentEnabled = !!data.adult_content_enabled;
-      syncAdultContentUi();
-      toast(on ? tt("settings.adultEnabledToast") : tt("settings.adultDisabledToast"));
-    } catch (e) {
-      toast(String(e.message || e));
-    }
-  }
-
-  async function applyAdultProductionPreset() {
-    setProduceMode("t2v");
-    setDuration(5);
-    setQuality("736");
-    if ($("steps")) $("steps").value = "4";
-    const samp = $("sampler");
-    if (samp) {
-      if (![...samp.options].some((o) => o.value === "er_sde")) {
-        const opt = document.createElement("option");
-        opt.value = "er_sde";
-        opt.textContent = "er_sde";
-        samp.appendChild(opt);
-      }
-      samp.value = "er_sde";
-    }
-    if ($("prompt-rewriter-enabled")) $("prompt-rewriter-enabled").checked = false;
-    if (!state.loraCatalog.length) await loadLoras();
-    const sel = $("lora-select");
-    if (sel && [...sel.options].some((o) => o.value === ADULT_LORA_ID)) {
-      sel.value = ADULT_LORA_ID;
-      if ($("cinema-lora-select")) $("cinema-lora-select").value = ADULT_LORA_ID;
-    }
-    await applyLora();
-    toast(tt("toast.adultPreset"));
-  }
   const STYLE_KEYS = [
     "realistic",
     "anime",
@@ -5725,8 +5584,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const silent = state.projectSilent || state.projectPurpose === "music_video";
     if (state.projectPurpose === "music_video") {
       el.textContent = tt("project.mvHint");
-    } else if (state.projectPurpose === ADULT_PURPOSE) {
-      el.textContent = tt("project.adultHint");
     } else if (state.projectPurpose) {
       const label = purposeLabel(state.projectPurpose) || state.projectPurpose;
       const style = state.projectStyle
@@ -5786,10 +5643,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!fromScene) setDirectorOpen(true);
     if (g === "purpose") {
       const p = btn.dataset.purpose;
-      if (p === ADULT_PURPOSE && !state.adultContentEnabled) {
-        toast(tt("settings.adultNeedEnable"));
-        return;
-      }
       state.projectPurpose = state.projectPurpose === p ? null : p;
       // Music video = silent visual only; all other purposes keep MiniMax audio
       state.projectSilent = state.projectPurpose === "music_video";
@@ -5803,11 +5656,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       let note = tf("dir.purposeSet", { label });
       if (state.projectPurpose === "music_video") {
         note += tt("dir.purposeMv");
-        if (fromScene) toast(tt("toast.purposeMv"));
-      } else if (state.projectPurpose === ADULT_PURPOSE) {
-        note += tt("dir.purposeAdult");
-        void applyAdultProductionPreset();
-      } else {
+        if (fromScene) toast(tt("toast.purposeMv")); } else {
         const extra =
           state.projectPurpose === "documentary"
             ? tt("dir.extra.documentary")
@@ -7845,10 +7694,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await fetch("/api/loras").then((r) => r.json());
       state.loraCatalog = data.loras || [];
       state.loraDownload = data.download || {};
-      if (typeof data.adult_content_enabled === "boolean") {
-        state.adultContentEnabled = data.adult_content_enabled;
-        syncAdultContentUi();
-      }
       fillLoraSelect();
     } catch {
       /* until Studio restart */
@@ -7896,10 +7741,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   async function applyLora() {
     const spec = currentLoraSpec();
-    if (spec && isAdultLoraSpec(spec) && !state.adultContentEnabled) {
-      toast(tt("settings.adultNeedEnable"));
-      return;
-    }
     state.loraId = spec?.id || "";
     if (spec && isStillLoraSpec(spec)) {
       toast(tt("toast.loraStillOnly"));
@@ -8036,10 +7877,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!id) return;
     let spec = (state.loraCatalog || []).find((x) => x.id === id);
     if (!spec) return;
-    if (isAdultLoraSpec(spec) && !state.adultContentEnabled) {
-      toast(tt("settings.adultNeedEnable"));
-      return;
-    }
     if (isStillLoraSpec(spec)) {
       if (!spec.ready) {
         try {
@@ -9397,8 +9234,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("btn-h3-models-save")?.addEventListener("click", () => void saveH3Models(false));
   $("btn-h3-models-reset")?.addEventListener("click", () => void saveH3Models(true));
-  $("btn-adult-enable")?.addEventListener("click", () => void setAdultContentEnabled(true));
-  $("btn-adult-disable")?.addEventListener("click", () => void setAdultContentEnabled(false));
   $("btn-settings-close")?.addEventListener("click", () => {
     void saveNotifySettings({ quiet: true });
     $("view-settings")?.classList.add("hidden");

@@ -46,7 +46,6 @@ from lib.loras import (
     file_ready,
     filename_from_url,
     find_spec,
-    is_adult_lora,
     is_h3_lora_name,
     is_still_lora,
     public_list,
@@ -130,54 +129,9 @@ GALLERY_FILE = DATA / "gallery.json"
 SESSIONS_FILE = DATA / "director_sessions.json"
 LLM_SETTINGS_FILE = DATA / "llm_settings.json"
 NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
-STUDIO_SETTINGS_FILE = DATA / "studio_settings.json"
 PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
-
-
-def _load_studio_settings() -> dict[str, Any]:
-    if not STUDIO_SETTINGS_FILE.is_file():
-        return {"adult_content_enabled": False}
-    try:
-        raw = json.loads(STUDIO_SETTINGS_FILE.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return {"adult_content_enabled": False}
-        return raw
-    except Exception:
-        return {"adult_content_enabled": False}
-
-
-def _save_studio_settings(patch: dict[str, Any]) -> dict[str, Any]:
-    DATA.mkdir(parents=True, exist_ok=True)
-    cur = _load_studio_settings()
-    for key, val in patch.items():
-        if val is None:
-            continue
-        cur[key] = val
-    STUDIO_SETTINGS_FILE.write_text(
-        json.dumps(cur, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return cur
-
-
-def _adult_content_enabled() -> bool:
-    return bool(_load_studio_settings().get("adult_content_enabled"))
-
-
-def _enforce_adult_policy(*, purpose: Optional[str] = None, lora_id: str = "", lora_name: str = "") -> None:
-    """Block adult LoRA / purpose until +18 is enabled in Studio settings."""
-    adult_use = (purpose or "").strip().lower() in ("adult", "18+", "nsfw", "mature")
-    if is_adult_lora(lora_id=lora_id or "", file=lora_name or ""):
-        adult_use = True
-    if not adult_use:
-        return
-    if not _adult_content_enabled():
-        raise HTTPException(
-            403,
-            "Yetişkin içerik kapalı — Ayarlar → +18 bölümünü açın (ErosMax / yetişkin türü)",
-        )
 
 
 def _slug_clip(text: str, *, max_len: int = 36) -> str:
@@ -2125,11 +2079,6 @@ async def generate(body: GenerateBody):
         raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
 
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=body.purpose,
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
 
     if body.prompt_rewriter_enabled:
         if not await llm.healthy():
@@ -2377,11 +2326,6 @@ async def batch(body: BatchBody):
     await _free_llm_for_production()
     purpose = (body.purpose or "").strip() or None
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=purpose,
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
     silent = bool(body.silent_audio) or bool(body.music_id)
     prompts = [p.strip() for p in body.prompts if p.strip()]
     if not prompts:
@@ -4292,11 +4236,6 @@ async def cinema_produce(body: CinemaProduceBody):
     if setup_purpose and setup_purpose not in ("auto", ""):
         purpose = setup_purpose
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=purpose,
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
     silent = audio.get("mode") == "silent" or bool(body.silent_audio)
     if audio.get("mode") == "film":
         silent = False
@@ -5225,33 +5164,6 @@ async def loras_get():
         "ok": True,
         "loras": public_list(),
         "download": dict(_lora_dl_status),
-        "adult_content_enabled": _adult_content_enabled(),
-    }
-
-
-class StudioSettingsBody(BaseModel):
-    adult_content_enabled: Optional[bool] = None
-
-
-@app.get("/api/studio/settings")
-async def studio_settings_get():
-    cfg = _load_studio_settings()
-    return {
-        "ok": True,
-        "adult_content_enabled": bool(cfg.get("adult_content_enabled")),
-    }
-
-
-@app.post("/api/studio/settings")
-async def studio_settings_set(body: StudioSettingsBody):
-    patch: dict[str, Any] = {}
-    if body.adult_content_enabled is not None:
-        patch["adult_content_enabled"] = bool(body.adult_content_enabled)
-    cfg = _save_studio_settings(patch)
-    slog.info("studio settings saved", adult_content_enabled=cfg.get("adult_content_enabled"))
-    return {
-        "ok": True,
-        "adult_content_enabled": bool(cfg.get("adult_content_enabled")),
     }
 
 
@@ -5301,8 +5213,6 @@ async def loras_download(body: LoraDownloadBody):
     spec = find_spec(lora_id=body.id or "")
     if not spec or not spec.get("file") or not spec.get("url"):
         raise HTTPException(400, "bilinmeyen LoRA")
-    if is_adult_lora(spec=spec) and not _adult_content_enabled():
-        raise HTTPException(403, "Yetişkin LoRA — önce Ayarlar → +18 bölümünü açın")
     if spec_ready(spec):
         return {"ok": True, "ready": True, "id": spec["id"], "file": spec["file"]}
     if _lora_dl_status.get("busy"):
@@ -6314,11 +6224,6 @@ async def director_commit(body: DirectorCommitBody):
     scheduler = (body.scheduler or "simple").strip() or "simple"
     steps, sampler, scheduler = _with_lora_preset(body, steps, sampler, scheduler)
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=brief.get("purpose"),
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
 
     applied = {
         "prompt": prompts[0] if prompts else "",

@@ -524,24 +524,6 @@
       "purpose.documentary": "belgesel",
       "purpose.intro": "intro",
       "purpose.outro": "outro",
-      "purpose.adult": "+18",
-      "settings.adultSummary": "+18 · yetişkin içerik",
-      "settings.adultIntro":
-        "Kapalıyken yetişkin üretim türü ve ErosMax LoRA görünmez. Yalnızca yasal, rızaya dayalı yetişkin içerik için. Reşit olmayan veya izinsiz içerik üretilemez.",
-      "settings.adultConfirm": "18 yaşından büyüğüm ve yasal yetişkin içerik üreteceğim",
-      "settings.adultEnable": "+18 modunu aç",
-      "settings.adultDisable": "+18 modunu kapat",
-      "settings.adultOnHint": "+18 açık — Üretim türünde “+18” seçeneği ve ErosMax LoRA kullanılabilir.",
-      "settings.adultOn": "+18 modu açık",
-      "settings.adultNeedConfirm": "Önce onay kutusunu işaretle",
-      "settings.adultNeedEnable": "Önce Ayarlar → +18 modunu aç",
-      "settings.adultSaveFail": "+18 ayarı kaydedilemedi",
-      "settings.adultEnabledToast": "+18 modu açıldı",
-      "settings.adultDisabledToast": "+18 modu kapatıldı",
-      "toast.adultPreset": "+18 ön ayar: Yeni video · ErosMax · 4 step",
-      "dir.purposeAdult": " · yetişkin tür — ErosMax LoRA ve Yeni video modu uygulandı.",
-      "project.adultHint": "+18 tür — ErosMax LoRA · Yeni video (T2V) · yalnızca yasal yetişkin içerik",
-      "purpose.adultTitle": "ErosMax · Yeni video · Ayarlarda +18 gerekir",
       "style.realistic": "gerçekçi",
       "style.anime": "anime",
       "style.disney": "disney",
@@ -1455,24 +1437,6 @@
       "purpose.documentary": "documentary",
       "purpose.intro": "intro",
       "purpose.outro": "outro",
-      "purpose.adult": "+18",
-      "settings.adultSummary": "+18 · adult content",
-      "settings.adultIntro":
-        "When off, the adult production type and ErosMax LoRA stay hidden. For legal, consensual adult content only. No minors or non-consensual content.",
-      "settings.adultConfirm": "I am 18+ and will produce legal adult content only",
-      "settings.adultEnable": "Enable +18 mode",
-      "settings.adultDisable": "Disable +18 mode",
-      "settings.adultOnHint": "+18 on — adult type and ErosMax LoRA are available.",
-      "settings.adultOn": "+18 mode enabled",
-      "settings.adultNeedConfirm": "Check the confirmation box first",
-      "settings.adultNeedEnable": "Enable +18 mode in Settings first",
-      "settings.adultSaveFail": "Could not save +18 setting",
-      "settings.adultEnabledToast": "+18 mode enabled",
-      "settings.adultDisabledToast": "+18 mode disabled",
-      "toast.adultPreset": "+18 preset: New video · ErosMax · 4 steps",
-      "dir.purposeAdult": " · adult type — ErosMax LoRA and New video mode applied.",
-      "project.adultHint": "+18 type — ErosMax LoRA · New video (T2V) · legal adult content only",
-      "purpose.adultTitle": "ErosMax · New video · requires +18 in Settings",
       "style.realistic": "realistic",
       "style.anime": "anime",
       "style.disney": "disney",
@@ -1913,12 +1877,6 @@
     ["#btn-lora-url", "ayar.loraUrl"],
     ["#lora-shop-title", "ayar.loraShop"],
     ["#settings-lora-title", "settings.loraTitle"],
-    ["#settings-adult-summary", "settings.adultSummary"],
-    ["#settings-adult-intro", "settings.adultIntro"],
-    ["#settings-adult-confirm-label", "settings.adultConfirm"],
-    ["#btn-adult-enable", "settings.adultEnable"],
-    ["#settings-adult-on-hint", "settings.adultOnHint"],
-    ["#btn-adult-disable", "settings.adultDisable"],
     ["#settings-lora-hint", "settings.loraHint"],
     ["#h3-models-summary", "settings.h3Models"],
     ["#h3-models-hint", "settings.h3ModelsHint"],
@@ -2271,10 +2229,6 @@
     document.querySelectorAll("#scene-purpose-chips [data-purpose=music_video], #director-chips [data-purpose=music_video]").forEach((el) => {
       el.title = t("purpose.mvTitle");
     });
-    document.querySelectorAll("#scene-purpose-chips [data-purpose=adult], #director-chips [data-purpose=adult]").forEach((el) => {
-      el.title = t("purpose.adultTitle");
-    });
-    if (typeof window.syncAdultContentUi === "function") window.syncAdultContentUi();
     if (typeof window.syncCinemaStudioMode === "function") window.syncCinemaStudioMode();
   }
 

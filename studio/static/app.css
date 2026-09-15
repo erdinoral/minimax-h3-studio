@@ -796,19 +796,6 @@ body.director-modal-open .director-llm-tab {
   background: rgba(179, 58, 43, 0.2);
   border-color: var(--accent-hot);
 }
-.chip-adult {
-  border-color: rgba(179, 58, 43, 0.45);
-}
-.chip-adult.on,
-.chip-adult[aria-pressed="true"] {
-  background: rgba(179, 58, 43, 0.22);
-  border-color: var(--accent-hot);
-  color: var(--text);
-}
-.adult-settings summary {
-  cursor: pointer;
-  font-weight: 600;
-}
 select, input[type="number"], input[type="text"], input[type="password"], textarea {
   width: 100%;
   background: var(--bg);

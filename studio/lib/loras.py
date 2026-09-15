@@ -43,26 +43,6 @@ CATALOG: list[dict[str, Any]] = [
         "preset": True,
     },
     {
-        "id": "erosmax-4step",
-        "label": "ErosMax Turbo (4 step)",
-        "file": "minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors",
-        "steps": 4,
-        "sampler": "er_sde",
-        "scheduler": "simple",
-        "strength": 0.8,
-        "graphs": ["fl2va"],
-        "hint": "4 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz",
-        "size_hint": "~1.8 GB",
-        "adult": True,
-        "url": (
-            "https://huggingface.co/t8star/"
-            "minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8/resolve/main/"
-            "minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors"
-            "?download=true"
-        ),
-        "preset": True,
-    },
-    {
         "id": "turbo-6step",
         "label": "H3 Turbo 6-step EMA",
         "file": "minimax_h3_turbo_6step_ema_fl2va_pruned.safetensors",
@@ -347,16 +327,6 @@ def apply_trigger(text: str, spec: Optional[dict[str, Any]] = None) -> str:
     return f"{trig}, {body}".strip()
 
 
-def is_adult_lora(*, lora_id: str = "", file: str = "", spec: Optional[dict[str, Any]] = None) -> bool:
-    row = spec if spec is not None else find_spec(lora_id=lora_id, file=file)
-    if not row:
-        return False
-    if row.get("adult"):
-        return True
-    label = f"{row.get('id') or ''} {row.get('file') or ''} {row.get('label') or ''}".lower()
-    return "erosmax" in label
-
-
 def find_spec(lora_id: str = "", file: str = "") -> Optional[dict[str, Any]]:
     lid = (lora_id or "").strip()
     fname = Path(file or "").name
@@ -381,7 +351,6 @@ def public_list() -> list[dict[str, Any]]:
     out = []
     for spec in CATALOG:
         item = {k: spec[k] for k in spec if k not in ("url", "aliases")}
-        item["adult"] = bool(spec.get("adult")) or is_adult_lora(spec=spec)
         item["ready"] = spec_ready(spec)
         item["downloadable"] = bool(spec.get("url"))
         item["size_hint"] = spec.get("size_hint") or ""

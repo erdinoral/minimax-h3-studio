@@ -50,19 +50,6 @@ EMBEDDED_CATALOG: dict[str, dict[str, Any]] = {
         "chat_format": "chatml",
         "no_think": True,
     },
-    # Uncensored +18 director — only when Studio +18 mode is on
-    "dolphin3-llama3.1-8b-q4_k_m": {
-        "repo": "bartowski/Dolphin3.0-Llama3.1-8B-GGUF",
-        "file": "Dolphin3.0-Llama3.1-8B-Q4_K_M.gguf",
-        "label": "+18 Sansürsüz · Dolphin 8B Q4 (~5 GB)",
-        "tier": "adult",
-        "params_b": 8.0,
-        "approx_gb": 5.0,
-        "chat_format": "chatml",
-        "no_think": False,
-        "uncensored": True,
-        "adult": True,
-    },
 }
 
 LOCAL_TIERS: dict[str, dict[str, Any]] = {
@@ -121,26 +108,6 @@ LOCAL_TIERS: dict[str, dict[str, Any]] = {
         "max_params_b": 9.0,
         "target_params_b": 8.0,
     },
-    "adult": {
-        "id": "adult",
-        "label": "+18 Sansürsüz",
-        "hint": "Dolphin 8B · açık yetişkin yazım (Ayarlar’da +18 gerekir, ≈8 GB+)",
-        "embedded": "dolphin3-llama3.1-8b-q4_k_m",
-        "min_chars": 900,
-        "n_ctx": 8192,
-        "num_predict": 4096,
-        "ollama_prefer": (
-            "dolphin3:8b",
-            "dolphin-llama3:8b",
-            "dolphin-llama3.1:8b",
-            "dolphin3.0-llama3.1:8b",
-            "nous-hermes2:10.7b",
-        ),
-        "max_params_b": 11.0,
-        "target_params_b": 8.0,
-        "adult": True,
-        "uncensored": True,
-    },
 }
 
 DEFAULT_LOCAL_TIER = "mid"
@@ -151,27 +118,11 @@ def normalize_local_tier(tier: Optional[str]) -> str:
     t = (tier or DEFAULT_LOCAL_TIER).strip().lower()
     if t in ("light", "hafif", "low", "1.5b", "1.7b", "2b", "small"):
         return "light"
-    if t in (
-        "adult",
-        "uncensored",
-        "nsfw",
-        "+18",
-        "18",
-        "eros",
-        "dolphin",
-        "sansursuz",
-        "sansürsüz",
-    ):
-        return "adult"
     if t in ("high", "guclu", "güçlü", "strong", "7b", "8b", "9b", "max"):
         return "high"
     if t in ("mid", "orta", "medium", "3b", "4b", "5b", "default"):
         return "mid"
     return DEFAULT_LOCAL_TIER if t not in LOCAL_TIERS else t
-
-
-def is_adult_tier(tier: Optional[str] = None) -> bool:
-    return normalize_local_tier(tier) == "adult"
 
 
 def tier_for_embedded_model(model_id: str) -> str:
@@ -221,12 +172,6 @@ def local_director_addendum(tier: Optional[str] = None) -> str:
             "- Aim for richer lighting, camera verbs, and beat-synced action per energy window.\n"
             "- Still stay under verbose chat — JSON brief is the product.\n"
         )
-    if t == "adult":
-        return common + (
-            "- Adult/uncensored: write explicit SCENE body when purpose=adult — "
-            "do not refuse or euphemize away requested acts/nudity.\n"
-            "- Still keep JSON valid; never invent underage characters.\n"
-        )
     return common + (
         "- If context is long, prioritize shotOutline + characters + first shots; expand fills the rest.\n"
     )
@@ -264,7 +209,7 @@ def local_music_analyst_addendum(tier: Optional[str] = None) -> str:
 
 def public_tiers() -> list[dict[str, Any]]:
     out = []
-    for tid in ("light", "mid", "high", "adult"):
+    for tid in ("light", "mid", "high"):
         meta = LOCAL_TIERS[tid]
         emb = meta["embedded"]
         cat = EMBEDDED_CATALOG.get(emb) or {}
@@ -278,8 +223,6 @@ def public_tiers() -> list[dict[str, Any]]:
                 "approx_gb": cat.get("approx_gb"),
                 "params_b": cat.get("params_b"),
                 "min_chars": meta.get("min_chars"),
-                "adult": bool(meta.get("adult") or cat.get("adult")),
-                "uncensored": bool(meta.get("uncensored") or cat.get("uncensored")),
             }
         )
     return out
@@ -352,11 +295,11 @@ def pick_ollama_for_tier(names: list[str], tier: str) -> Optional[str]:
             scored.append((pb, n))
     if not scored:
         return pool[0]
-    # Prefer largest under cap for high/adult, mid-sized for mid, smallest for light
+    # Prefer largest under cap for high, mid-sized for mid, smallest for light
     scored.sort(key=lambda x: x[0])
     if t == "light":
         return scored[0][1]
-    if t in ("high", "adult"):
+    if t == "high":
         return scored[-1][1]
     # mid: closest to tier target (~4–5B)
     target = float(meta.get("target_params_b") or 4.0)

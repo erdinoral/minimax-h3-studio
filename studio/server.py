@@ -1545,11 +1545,9 @@ async def _write_one_shot_from_outline(
             continue
         raw_shot.setdefault("action", outline_row.get("beat") or outline_row.get("title"))
         raw_shot.setdefault("camera", outline_row.get("camera"))
-        # Prefer model link; final force_continue_chain(brief) will hard-cut on cast gaps
-        if index == 0:
+        # Preserve an explicit LLM link. Missing links mean a new, independent shot.
+        if index == 0 or not raw_shot.get("linkToPrev"):
             raw_shot["linkToPrev"] = "standalone"
-        elif not raw_shot.get("linkToPrev"):
-            raw_shot["linkToPrev"] = "continue"
         raw_shot.pop("_placeholder", None)
         raw_shot.pop("_thin_template", None)
         cleaned = _clean_shot(raw_shot, index, dur, brief=brief, total_shots=need)
@@ -3281,8 +3279,8 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
         "You are MiniMax H3 Cinema Studio shot writer. "
         "Read the studio board and write ONLY a shot list. Reply with JSON only:\n"
         '{"shots":[{"text":"cinematic SCENE paragraph","mode":"t2v"|"continue"}]}\n'
-        f"Each shot is one {clip}s clip. First shot mode t2v, later shots continue "
-        f"ONLY with cast continuity; cutaway or character re-entry → t2v. "
+        f"Each shot is one {clip}s clip. Default every shot to mode t2v (a new independent video). "
+        f"Use mode continue ONLY when the next shot begins at the exact final moment of the previous clip; the same character in a new location is t2v. "
         f"Use cinema character names exactly as on the board.\n"
         f"Write exactly {n} shots. "
         "Use character and location names EXACTLY as on the board. "
@@ -3323,14 +3321,14 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
     for i, item in enumerate(raw_shots[:n]):
         if isinstance(item, dict):
             text = str(item.get("text") or item.get("h3Prompt") or item.get("prompt") or "").strip()
-            mode = str(item.get("mode") or ("t2v" if i == 0 else "continue")).lower()
+            mode = str(item.get("mode") or "t2v").lower()
         else:
             text = str(item or "").strip()
-            mode = "t2v" if i == 0 else "continue"
+            mode = "t2v"
         if not text:
             continue
         if mode not in ("continue", "devam", "i2v", "last_frame"):
-            mode = "t2v" if not new_shots else "continue"
+            mode = "t2v"
         else:
             mode = "continue"
         if not new_shots:
@@ -3680,12 +3678,12 @@ def _brief_shot_modes(shots: list[dict]) -> list[str]:
     modes: list[str] = []
     for i, s in enumerate(shots or []):
         if not isinstance(s, dict):
-            modes.append("t2v" if i == 0 else "continue")
+            modes.append("t2v")
             continue
         link = str(s.get("linkToPrev") or "").strip().lower()
         if not link:
-            link = "standalone" if i == 0 else "continue"
-        modes.append("t2v" if i == 0 or link == "standalone" else "continue")
+            link = "standalone"
+        modes.append("continue" if link == "continue" else "t2v")
     return modes
 
 
@@ -3701,8 +3699,8 @@ def _brief_to_cinema_shots(shots: list[dict]) -> list[dict[str, Any]]:
             continue
         link = str(s.get("linkToPrev") or "").strip().lower()
         if not link:
-            link = "standalone" if i == 0 else "continue"
-        mode = "t2v" if i == 0 or link == "standalone" else "continue"
+            link = "standalone"
+        mode = "continue" if link == "continue" else "t2v"
         row: dict[str, Any] = {"text": text, "mode": mode}
         if s.get("id"):
             row["id"] = s.get("id")

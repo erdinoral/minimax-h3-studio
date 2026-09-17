@@ -1511,7 +1511,7 @@ def apply_reentry_modes(
         shot = dict(raw)
         text = str(shot.get("text") or shot.get("h3Prompt") or "")
         curr = character_ids_in_text(text, lib)
-        mode = str(shot.get("mode") or ("t2v" if i == 0 else "continue")).lower()
+        mode = str(shot.get("mode") or "t2v").lower()
         if mode in ("devam", "i2v", "last_frame"):
             mode = "continue"
         if i == 0:
@@ -1539,7 +1539,7 @@ def normalize_produce_shots(
             if isinstance(item, dict):
                 shot = _clean_shot(item, i)
             else:
-                fallback = "t2v" if i == 0 else "continue"
+                fallback = "t2v"
                 if i < len(mode_list):
                     fallback = mode_list[i]
                 elif not all_strings:
@@ -1549,10 +1549,7 @@ def normalize_produce_shots(
                 parsed.append(shot)
         return parsed
     texts = split_shots(script or "")
-    return [
-        _clean_shot({"text": t, "mode": "t2v" if i == 0 else "continue"}, i)
-        for i, t in enumerate(texts)
-    ]
+    return [_clean_shot({"text": t, "mode": "t2v"}, i) for i, t in enumerate(texts)]
 
 
 def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: list[Any]) -> list[dict[str, Any]]:

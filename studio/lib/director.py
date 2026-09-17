@@ -1729,7 +1729,7 @@ def build_rich_h3_prompt(
     dlg_txt = " ".join(dlg) if dlg else "no dialogue"
     dur = shot.get("durationSec") or brief.get("clipDurationSec") or 5
     logline = (brief.get("logline") or "").strip()
-    link = (shot.get("linkToPrev") or ("standalone" if index == 0 else "continue")).strip()
+    link = (shot.get("linkToPrev") or "standalone").strip()
     base = (shot.get("h3Prompt") or "").strip()
 
     silent = _is_silent_brief(brief)
@@ -1846,9 +1846,9 @@ def _clean_shot(
     prompt = (s.get("h3Prompt") or "").strip()
     if not prompt and not action:
         return None
-    link = s.get("linkToPrev") or ("standalone" if i == 0 else "continue")
+    link = s.get("linkToPrev") or "standalone"
     if link not in ("standalone", "continue", "ref"):
-        link = "continue" if i else "standalone"
+        link = "standalone"
     shot = {
         "durationSec": sd,
         "camera": s.get("camera") or "",
@@ -1906,25 +1906,19 @@ def force_continue_chain(
     shots: list[dict[str, Any]],
     brief: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Link shots: continue when cast overlaps previous; else standalone (hard cut).
+    """Keep only explicit temporal continuations; every other shot is a hard cut.
 
-    Prevents cutaway → character re-entry from inheriting the wrong last frame.
+    Character overlap alone is not continuity: the same person can move from a car
+    to a castle between shots.  A director or JSON caller must explicitly mark a
+    shot with ``linkToPrev: "continue"`` when it starts at the previous clip's
+    final moment.
     """
-    chars = list((brief or {}).get("characters") or []) if isinstance(brief, dict) else []
     out: list[dict[str, Any]] = []
-    prev: set[str] = set()
-    for i, s in enumerate(shots):
-        ss = dict(s)
-        text = str(ss.get("h3Prompt") or ss.get("text") or ss.get("action") or "")
-        curr = _character_names_in_text(text, chars) if chars else set()
-        if i == 0:
-            ss["linkToPrev"] = "standalone"
-        elif chars and curr and not (curr & prev):
-            ss["linkToPrev"] = "standalone"
-        else:
-            ss["linkToPrev"] = "continue"
-        out.append(ss)
-        prev = curr
+    for i, raw in enumerate(shots):
+        shot = dict(raw)
+        requested = str(shot.get("linkToPrev") or "").strip().lower()
+        shot["linkToPrev"] = "continue" if i > 0 and requested == "continue" else "standalone"
+        out.append(shot)
     return out
 
 
@@ -2433,7 +2427,7 @@ def single_shot_user_prompt(
 ) -> str:
     """FAZ B — write exactly one GOLD STANDARD h3Prompt."""
     dur = int(brief.get("clipDurationSec") or 5)
-    link = "standalone" if index == 0 else "continue"
+    link = "standalone"
     title = (outline_row or {}).get("title") or f"Shot {index + 1}"
     beat = (outline_row or {}).get("beat") or title
     camera = camera_for_outline_index(index, directives=brief.get("directorDirectives"), row=outline_row)
@@ -2462,15 +2456,9 @@ def single_shot_user_prompt(
             "never rename/translate): "
             + ", ".join(cast_names)
             + ".\n"
-            "If this beat has no cast overlap with the previous shot (cutaway / re-entry), "
-            'set linkToPrev to "standalone".\n'
+            "Default to linkToPrev=standalone. Use continue only when this shot starts at the exact final moment of the previous clip; a recurring character or a new location is not enough.\n"
         )
     prev_snip = ""
-    if prev_shot and isinstance(prev_shot, dict):
-        prev_body = (prev_shot.get("h3Prompt") or "")[:900]
-        prev_snip = (
-            f"PREVIOUS SHOT ending (continue from this moment):\n{prev_body}\n"
-        )
     return (
         f"FAZ B — write ONLY shot {index + 1} of {need} "
         f"({dur} seconds, suggested linkToPrev={link}).\n"
@@ -2489,8 +2477,8 @@ def single_shot_user_prompt(
         '"soundscape":"...","music":"none","linkToPrev":'
         f'"standalone|continue","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
         "}}\n"
-        "Rules: English SCENE screenplay; character cards on shot 1; "
-        "when linkToPrev=continue, start with 'Continue directly from the previous shot.' "
+        "Rules: English SCENE screenplay; character cards on shot 1; default linkToPrev=standalone. "
+        "Use linkToPrev=continue only for the same uninterrupted moment, then start with 'Continue directly from the previous shot.' "
         "+ Same X, same Y, identical clothing; micro-actions only; "
         "no keyword soup; no BGM unless silent music-video lock."
     )

@@ -740,6 +740,9 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
         mode = "t2v"
     sid = str(item.get("id") or "").strip() or str(uuid.uuid4())
     out = {"id": sid, "text": text, "mode": mode, "index": index}
+    section_id = str(item.get("sectionId") or item.get("section_id") or "").strip()
+    if section_id:
+        out["section_id"] = section_id
     if _has_author_fields(structured):
         out["structured"] = structured
     if item.get("take_id"):

@@ -3278,9 +3278,9 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
     sys_msg = (
         "You are MiniMax H3 Cinema Studio shot writer. "
         "Read the studio board and write ONLY a shot list. Reply with JSON only:\n"
-        '{"shots":[{"text":"cinematic SCENE paragraph","mode":"t2v"|"continue"}]}\n'
-        f"Each shot is one {clip}s clip. Default every shot to mode t2v (a new independent video). "
-        f"Use mode continue ONLY when the next shot begins at the exact final moment of the previous clip; the same character in a new location is t2v. "
+        '{"shots":[{"text":"cinematic SCENE paragraph","sectionId":"scene-1","mode":"t2v"|"continue"}]}\n'
+        f"Each shot is one {clip}s clip. Group uninterrupted beats with one sectionId: the first is t2v and later shots are continue. "
+        f"A new location, time, or action starts a new sectionId with t2v; the same character alone never makes it continue. "
         f"Use cinema character names exactly as on the board.\n"
         f"Write exactly {n} shots. "
         "Use character and location names EXACTLY as on the board. "
@@ -3333,9 +3333,27 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
             mode = "continue"
         if not new_shots:
             mode = "t2v"
-        new_shots.append({"id": str(uuid.uuid4())[:8], "text": text, "mode": mode})
+        section_id = str(item.get("sectionId") or item.get("section_id") or "").strip() if isinstance(item, dict) else ""
+        new_shots.append({"id": str(uuid.uuid4())[:8], "text": text, "mode": mode, "section_id": section_id})
     if not new_shots:
         raise HTTPException(502, "Geçerli shot yok")
+    # Normalize the model output into explicit section chains. A new section never
+    # inherits the prior section's last frame, even if the same cast is present.
+    previous_section = ""
+    section_number = 0
+    for i, shot in enumerate(new_shots):
+        requested = str(shot.get("mode") or "").strip().lower() == "continue"
+        section_id = str(shot.get("section_id") or "").strip()
+        if not section_id:
+            if i and requested and previous_section:
+                section_id = previous_section
+            else:
+                section_number += 1
+                section_id = f"scene-{section_number}"
+        same_section = bool(i and section_id == previous_section)
+        shot["section_id"] = section_id
+        shot["mode"] = "continue" if same_section and requested else "t2v"
+        previous_section = section_id
     lib["shots"] = new_shots
     lib["script"] = "\n\n---\n\n".join(s["text"] for s in new_shots)
     lib["duration"] = clip
@@ -3702,6 +3720,8 @@ def _brief_to_cinema_shots(shots: list[dict]) -> list[dict[str, Any]]:
             link = "standalone"
         mode = "continue" if link == "continue" else "t2v"
         row: dict[str, Any] = {"text": text, "mode": mode}
+        if s.get("sectionId"):
+            row["section_id"] = s.get("sectionId")
         if s.get("id"):
             row["id"] = s.get("id")
         out.append(row)

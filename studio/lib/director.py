@@ -1580,7 +1580,7 @@ def build_scene_placeholder_shot(
                 lock,
             ]
         )
-        link = "standalone"
+        link = "standalone" if index == 0 else "continue"
         action = beat
     else:
         body = "\n\n".join(
@@ -1858,6 +1858,7 @@ def _clean_shot(
         "music": s.get("music") or "",
         "h3Prompt": prompt or action,
         "linkToPrev": link,
+        "sectionId": str(s.get("sectionId") or s.get("section_id") or "").strip(),
     }
     if s.get("_placeholder"):
         shot["_placeholder"] = True
@@ -1906,19 +1907,31 @@ def force_continue_chain(
     shots: list[dict[str, Any]],
     brief: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Keep only explicit temporal continuations; every other shot is a hard cut.
+    """Normalize production into section chains.
 
-    Character overlap alone is not continuity: the same person can move from a car
-    to a castle between shots.  A director or JSON caller must explicitly mark a
-    shot with ``linkToPrev: "continue"`` when it starts at the previous clip's
-    final moment.
+    The first shot in every ``sectionId`` is a new T2V video. Only a later shot
+    that explicitly requests ``linkToPrev: "continue"`` in that same section
+    inherits the prior clip's last frame. A location/action change must get a new
+    section ID even when the character remains the same.
     """
     out: list[dict[str, Any]] = []
+    previous_section = ""
+    section_number = 0
     for i, raw in enumerate(shots):
         shot = dict(raw)
         requested = str(shot.get("linkToPrev") or "").strip().lower()
-        shot["linkToPrev"] = "continue" if i > 0 and requested == "continue" else "standalone"
+        section = str(shot.get("sectionId") or shot.get("section_id") or "").strip()
+        if not section:
+            if i and requested == "continue" and previous_section:
+                section = previous_section
+            else:
+                section_number += 1
+                section = f"scene-{section_number}"
+        is_same_section = bool(i and section == previous_section)
+        shot["sectionId"] = section
+        shot["linkToPrev"] = "continue" if is_same_section and requested == "continue" else "standalone"
         out.append(shot)
+        previous_section = section
     return out
 
 
@@ -2456,9 +2469,13 @@ def single_shot_user_prompt(
             "never rename/translate): "
             + ", ".join(cast_names)
             + ".\n"
-            "Default to linkToPrev=standalone. Use continue only when this shot starts at the exact final moment of the previous clip; a recurring character or a new location is not enough.\n"
+            "Assign sectionId such as scene-1. Keep the same sectionId and use linkToPrev=continue only when this shot starts at the exact final moment of the previous clip. A recurring character in a new location/action starts a new sectionId with linkToPrev=standalone.\n"
         )
     prev_snip = ""
+    if prev_shot and isinstance(prev_shot, dict):
+        prev_body = (prev_shot.get("h3Prompt") or "")[:900]
+        prev_section = str(prev_shot.get("sectionId") or "scene-1")
+        prev_snip = f"PREVIOUS SHOT (sectionId={prev_section}):\n{prev_body}\n"
     return (
         f"FAZ B — write ONLY shot {index + 1} of {need} "
         f"({dur} seconds, suggested linkToPrev={link}).\n"
@@ -2475,10 +2492,10 @@ def single_shot_user_prompt(
         '{"shot":{'
         f'"durationSec":{dur},"camera":"...","action":"...","dialogue":[],'
         '"soundscape":"...","music":"none","linkToPrev":'
-        f'"standalone|continue","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
+        f'"standalone|continue","sectionId":"scene-1","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
         "}}\n"
-        "Rules: English SCENE screenplay; character cards on shot 1; default linkToPrev=standalone. "
-        "Use linkToPrev=continue only for the same uninterrupted moment, then start with 'Continue directly from the previous shot.' "
+        "Rules: English SCENE screenplay; use the current sectionId for an uninterrupted sequence. "
+        "A new place, time, or action starts a new sectionId and standalone video. Use linkToPrev=continue only within one section, then start with 'Continue directly from the previous shot.' "
         "+ Same X, same Y, identical clothing; micro-actions only; "
         "no keyword soup; no BGM unless silent music-video lock."
     )

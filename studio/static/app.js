@@ -4579,7 +4579,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const item = document.createElement("article");
       item.className = "dir-shot-item";
       const dur = shot.durationSec || clip;
-      const link = (shot.linkToPrev || (i === 0 ? "standalone" : "continue")).toString();
+      const link = (shot.linkToPrev || "standalone").toString();
       const head = document.createElement("div");
       head.className = "dir-shot-head";
       head.textContent = tf("dir.shotHead", { i: i + 1, dur, sec: tt("sec"), link });
@@ -4751,7 +4751,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     host.innerHTML = shots
       .map((shot, i) => {
-        const link = (shot.linkToPrev || (i === 0 ? "standalone" : "continue")).toString();
+        const link = (shot.linkToPrev || "standalone").toString();
         const prompt = _shotPromptText(shot);
         return (
           '<article class="dir-plan-shot" data-idx="' +
@@ -4804,7 +4804,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         dialogue: [],
         h3Prompt: prompt,
         linkToPrev:
-          el.querySelector("[data-field=link]")?.value || (i === 0 ? "standalone" : "continue"),
+          el.querySelector("[data-field=link]")?.value || "standalone",
       };
     });
   }

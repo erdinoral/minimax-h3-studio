@@ -8311,6 +8311,26 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       .then(() => toast(tt("cinema.filmNew")))
       .catch((err) => toast(String(err.message || err)));
   });
+  $("btn-cinema-film-delete")?.addEventListener("click", async () => {
+    const id = ($("cinema-film-select")?.value || ensureCinema().film_id || "").trim();
+    if (!id) return;
+    if (!confirm("Bu filmi silmek istediğine emin misin?")) return;
+    try {
+      const r = await fetch("/api/cinema/films", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      state.cinema = { ...emptyCinema(), ...data };
+      renderCinema();
+      await fillCinemaFilms();
+      toast("Film silindi");
+    } catch (e) {
+      toast(String(e.message || e));
+    }
+  });
   $("cinema-film-select")?.addEventListener("change", (e) => {
     const id = e.target.value;
     if (!id || id === ensureCinema().film_id) return;

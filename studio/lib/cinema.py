@@ -1896,7 +1896,17 @@ def delete_film(film_id: str) -> dict[str, Any]:
     if path.is_file():
         path.unlink()
     if str(active.get("film_id") or "") == fid:
-        return new_film()
+        others = sorted(FILMS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if others:
+            data = json.loads(others[0].read_text(encoding="utf-8"))
+            data["film_id"] = others[0].stem
+            CINEMA_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            return load()
+        # Do not create a new UUID when the last film is deleted.
+        blank = json.loads(json.dumps(_EMPTY))
+        blank["film_id"] = fid
+        save(blank)
+        return load()
     return active
 
 

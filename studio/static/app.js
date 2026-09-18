@@ -116,6 +116,9 @@
     "intro",
     "outro",
   ];
+  function purposeKeysForUi() {
+    return PURPOSE_KEYS.slice();
+  }
   const STYLE_KEYS = [
     "realistic",
     "anime",

@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema112" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema113" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -527,6 +527,18 @@
       </header>
       <pre id="clip-prompt-text" class="clip-prompt-full"></pre>
       <p class="muted clip-prompt-seed" id="clip-prompt-seed" hidden></p>
+    </div>
+  </div>
+
+  <div class="overlay hidden" id="view-error-logs" aria-hidden="true">
+    <div class="gallery-panel error-logs-panel" role="dialog" aria-modal="true" aria-labelledby="error-logs-title">
+      <header>
+        <h2 id="error-logs-title">Hata logları</h2>
+        <span class="muted gallery-order-hint" id="error-logs-meta"></span>
+        <button type="button" class="btn-secondary" id="btn-copy-error-logs">Tek tıkla kopyala</button>
+        <button type="button" class="menu-btn" id="btn-error-logs-close">Kapat</button>
+      </header>
+      <pre id="error-logs-text" class="error-logs-text"></pre>
     </div>
   </div>
 
@@ -1157,6 +1169,6 @@
 
   <script src="/static/i18n.js?v=cinema112" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema112" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema113" charset="utf-8"></script>
 </body>
 </html>

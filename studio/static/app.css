@@ -1814,6 +1814,7 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   pointer-events: auto;
 }
 #view-clip-prompt,
+#view-error-logs,
 #view-gallery,
 #view-settings,
 #view-support,
@@ -3261,6 +3262,22 @@ button.cinema-fold-toggle:hover {
 }
 .cinema-shot.is-disabled {
   opacity: 0.55;
+}
+.error-logs-panel {
+  width: min(980px, 100%);
+}
+.error-logs-text {
+  margin: 0;
+  padding: 14px;
+  max-height: min(66vh, 680px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #140f0c;
+  color: #f2e6d8;
+  font: 12px/1.45 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .lora-check-list { display: grid; gap: 5px; max-height: 132px; overflow: auto; padding: 6px 0; }
 .lora-check-list label { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; }

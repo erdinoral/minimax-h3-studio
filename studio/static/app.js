@@ -9201,27 +9201,30 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const r = await fetch("/api/logs?which=errors&lines=180");
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      const w = window.open("", "h3-studio-logs", "width=900,height=640");
-      if (!w) {
-        toast(data.file || tt("toast.logPopupBlocked"));
-        return;
-      }
-      const esc = (s) =>
-        String(s || "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;");
-      w.document.write(
-        `<!doctype html><title>H3 Studio Logs</title>
-        <style>body{margin:0;background:#140f0c;color:#f2e6d8;font:12px/1.45 ui-monospace,Consolas,monospace}
-        header{padding:10px 14px;border-bottom:1px solid #3a2e24;color:#c4a574}
-        pre{margin:0;padding:14px;white-space:pre-wrap;word-break:break-word}</style>
-        <header>${esc(tf("logs.header", { file: data.file, lines: String(data.lines) }))}</header>
-        <pre>${esc(data.text) || tt("logs.empty")}</pre>`
-      );
-      w.document.close();
+      $("error-logs-meta").textContent = tf("logs.header", { file: data.file, lines: String(data.lines) });
+      $("error-logs-text").textContent = data.text || tt("logs.empty");
+      $("view-error-logs")?.classList.remove("hidden");
+      $("view-error-logs")?.setAttribute("aria-hidden", "false");
+      $("btn-copy-error-logs")?.focus();
     } catch (e) {
       toast(String(e.message || e));
+    }
+  });
+  const closeErrorLogs = () => {
+    $("view-error-logs")?.classList.add("hidden");
+    $("view-error-logs")?.setAttribute("aria-hidden", "true");
+  };
+  $("btn-error-logs-close")?.addEventListener("click", closeErrorLogs);
+  $("view-error-logs")?.addEventListener("click", (e) => {
+    if (e.target === $("view-error-logs")) closeErrorLogs();
+  });
+  $("btn-copy-error-logs")?.addEventListener("click", () =>
+    void copyText($("error-logs-text")?.textContent, "Hata logları kopyalandı")
+  );
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("view-error-logs")?.classList.contains("hidden")) {
+      closeErrorLogs();
+      e.preventDefault();
     }
   });
 

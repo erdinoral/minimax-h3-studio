@@ -3262,6 +3262,8 @@ button.cinema-fold-toggle:hover {
 .cinema-shot.is-disabled {
   opacity: 0.55;
 }
+.lora-check-list { display: grid; gap: 5px; max-height: 132px; overflow: auto; padding: 6px 0; }
+.lora-check-list label { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; cursor: pointer; }
 .cinema-shot-head {
   display: flex;
   align-items: center;

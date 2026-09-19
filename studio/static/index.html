@@ -317,10 +317,11 @@
         </label>
         <div class="lora-prod-pick" id="lora-prod-pick">
           <label><span id="lora-prod-label">LoRA</span>
-            <select id="lora-select" multiple size="4" title="En fazla 3 LoRA seçebilirsin (Ctrl ile çoklu seç)">
+            <select id="lora-select" class="hidden" multiple>
               <option value="">Yok (varsayılan)</option>
             </select>
           </label>
+          <div class="lora-check-list" id="lora-check-list" aria-label="LoRA seçimi"></div>
           <button type="button" class="btn-secondary" id="btn-lora-apply">Uygula</button>
           <p class="muted mode-hint" id="lora-hint">LoRA dosyası sağ üst Ayarlar’dan iner. Buradan seçip Uygula.</p>
         </div>

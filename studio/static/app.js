@@ -7711,6 +7711,21 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       });
     }
     if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
+    const checks = $("lora-check-list");
+    if (checks) {
+      const selected = new Set([...sel.selectedOptions].map((o) => o.value));
+      checks.innerHTML = catalog
+        .filter((spec) => spec.id && spec.file && spec.ready)
+        .map((spec) => `<label><input type="checkbox" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label>`)
+        .join("");
+      checks.onchange = () => {
+        const ids = [...checks.querySelectorAll("input:checked")].map((box) => box.value).slice(0, 3);
+        [...sel.options].forEach((opt) => { opt.selected = ids.includes(opt.value); });
+        state.loraId = ids[0] || "";
+        state.loraApplied = ids.length > 0;
+        updateLoraHint();
+      };
+    }
     const cine = $("cinema-lora-select");
     if (cine) {
       const cinePrev = cine.value || prev;
@@ -9183,7 +9198,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   $("btn-open-logs")?.addEventListener("click", async () => {
     try {
-      const r = await fetch("/api/logs?which=latest&lines=180");
+      const r = await fetch("/api/logs?which=errors&lines=180");
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       const w = window.open("", "h3-studio-logs", "width=900,height=640");

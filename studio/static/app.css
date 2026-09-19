@@ -1398,6 +1398,8 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   padding-right: 8px;
 }
 .job-list li button { font-size: 0.75rem; padding: 2px 8px; }
+.job-list .btn-job-stop { color: var(--accent-hot); border-color: color-mix(in srgb, var(--accent-hot) 48%, var(--border)); }
+.job-list .job-order { white-space: nowrap; color: var(--text-muted); }
 .job-list .st-done { color: var(--accent-amber); }
 .job-list .st-run { color: var(--accent); }
 .job-list .st-err { color: var(--accent-hot); }

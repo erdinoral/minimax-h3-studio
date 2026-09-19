@@ -6973,10 +6973,36 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           void deleteJob(j.id);
         };
         right.appendChild(rm);
-      } else if (j.batch_index) {
-        right.textContent = `${j.batch_index}/${j.batch_total}`;
-      } else if (activeOrder.has(j.id)) {
-        right.textContent = tf("job.order", { i: String(activeOrder.get(j.id)), total: String(active.length) });
+      } else {
+        // Each live queue row can be stopped independently. This deliberately
+        // differs from the toolbar action, which cancels the whole queue.
+        const stop = document.createElement("button");
+        stop.textContent = tt("job.stop");
+        stop.className = "btn-ghost btn-job-stop";
+        stop.title = tt("job.stopTitle");
+        stop.onclick = async (e) => {
+          e.stopPropagation();
+          stop.disabled = true;
+          try {
+            const r = await fetch(`/api/jobs/${j.id}/cancel`, { method: "POST" });
+            const data = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(errDetail(data));
+            tToast("toast.stopped");
+            await refreshJobs();
+          } catch (err) {
+            toast(String(err.message || err));
+            stop.disabled = false;
+          }
+        };
+        right.appendChild(stop);
+        const order = document.createElement("span");
+        order.className = "job-order";
+        if (j.batch_index) {
+          order.textContent = `${j.batch_index}/${j.batch_total}`;
+        } else if (activeOrder.has(j.id)) {
+          order.textContent = tf("job.order", { i: String(activeOrder.get(j.id)), total: String(active.length) });
+        }
+        if (order.textContent) right.appendChild(order);
       }
       li.appendChild(left);
       li.appendChild(right);

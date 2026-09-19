@@ -2035,6 +2035,43 @@ async def get_job(job_id: str):
     raise HTTPException(404, "job yok")
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """Cancel one queued job, or stop the one job currently rendering."""
+    async with _lock:
+        job = next((j for j in _jobs if j["id"] == job_id), None)
+        if not job:
+            raise HTTPException(404, "job yok")
+        status = job.get("status")
+        if status not in ("queued", "running"):
+            raise HTTPException(400, "yalnızca sıradaki veya üretilen iş durdurulabilir")
+        # A queued job has not reached ComfyUI yet, so it can be cancelled alone.
+        if status == "queued":
+            job["status"] = "cancelled"
+            job["error"] = "iptal"
+            job["progress_label"] = "iptal"
+            _save_jobs()
+            slog.info_job(job, "queued job cancelled")
+            return {"ok": True, "id": job_id, "status": "cancelled"}
+
+    # Studio runs one active render at a time. Interrupting here leaves every
+    # other queued job intact; the queue loop will continue with the next one.
+    try:
+        await comfy.interrupt()
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    async with _lock:
+        job = next((j for j in _jobs if j["id"] == job_id), None)
+        if not job or job.get("status") != "running":
+            raise HTTPException(409, "iş artık üretimde değil")
+        job["status"] = "cancelled"
+        job["error"] = "iptal"
+        job["progress_label"] = "iptal"
+        _save_jobs()
+    slog.info_job(job, "running job cancelled")
+    return {"ok": True, "id": job_id, "status": "cancelled"}
+
+
 async def _free_llm_for_production() -> list[str]:
     """Unload local Ollama models so VRAM is free for Comfy/H3 (cloud LLM = no-op)."""
     global _last_llm_free_at

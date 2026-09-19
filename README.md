@@ -580,6 +580,20 @@ for (const node of Object.values(history[prompt_id].outputs)) {
 
 ---
 
+## Special Thanks
+
+Warm thanks to the community members whose bug reports and feature ideas helped improve MiniMax H3 Studio:
+
+- sikoraentertainment
+- Boloschniposa
+- diamond204a
+- anth7777
+- mangpepe1945-stack
+
+Your feedback on video continuation, file selection, queue control, LoRAs, scene workflow, translations, and rendering reliability directly shaped these updates.
+
+---
+
 ## License
 
 The model is covered by the [MiniMax H3 Community License](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE). Review it before commercial use. ComfyUI is GPL-3.0.

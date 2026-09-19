@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -68,6 +69,33 @@ def enhance_ref_prompt(
             f"{prompt}"
         ).strip()
     return prompt
+
+
+def enhance_video_ref_prompt(text: str, *, n_videos: int) -> str:
+    """Give Ref2VA video inputs their required tags and a transform-first role.
+
+    Ref2VA only associates a connected video with the requested role when the
+    prompt explicitly names it as ``<Video N>``.  A plain "Video 1" sentence
+    is easy for the model to treat as descriptive text, which makes a motion
+    reference overwhelm the requested restyle.
+    """
+    prompt = (text or "").strip()
+    if n_videos <= 0:
+        return prompt
+    tags = ", ".join(f"<Video {i}>" for i in range(1, n_videos + 1))
+    has_tags = any(
+        re.search(rf"<\s*video\s+{i}\s*>", prompt, flags=re.IGNORECASE)
+        for i in range(1, n_videos + 1)
+    )
+    if has_tags:
+        return prompt
+    return (
+        f"{tags} {'is' if n_videos == 1 else 'are'} motion, timing, choreography, "
+        "and camera reference only. Keep their action and framing, but transform "
+        "the subjects, appearance, style, and scene exactly as the prompt and "
+        "<Picture N> references request; do not simply reproduce the source video.\n\n"
+        f"{prompt}"
+    ).strip()
 
 
 class ComfyClient:

@@ -36,6 +36,7 @@ from lib.comfy import (
     detect_multishot_pack,
     detect_vfi_model,
     enhance_ref_prompt,
+    enhance_video_ref_prompt,
     MULTISHOT_MAX_SHOTS,
 )
 from lib import h3_models
@@ -2271,13 +2272,9 @@ async def generate(body: GenerateBody):
             role="general",
         )
         if ref_videos:
-            vids = ", ".join(f"Video {i}" for i in range(1, len(ref_videos) + 1))
-            if "Video 1" not in prompt_txt and "video 1" not in prompt_txt.lower():
-                prompt_txt = (
-                    f"{vids} provide motion / timing / camera reference. "
-                    f"Image refs (if any) lock appearance. Transform / restyle as described.\n\n"
-                    f"{prompt_txt}"
-                ).strip()
+            prompt_txt = enhance_video_ref_prompt(
+                prompt_txt, n_videos=len(ref_videos)
+            )
     # face_continue: enhance at run time (needs last-frame picture count)
     # Silent → lock; otherwise upgrade bare [English] lines to <d>…</d>
     prompt_txt = apply_audio_policy(

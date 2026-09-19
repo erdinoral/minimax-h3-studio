@@ -3272,6 +3272,9 @@ button.cinema-fold-toggle:hover {
   flex-direction: column;
   gap: 6px;
 }
+.cinema-shot.is-disabled {
+  opacity: 0.55;
+}
 .cinema-shot-head {
   display: flex;
   align-items: center;

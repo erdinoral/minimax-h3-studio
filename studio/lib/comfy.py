@@ -889,27 +889,24 @@ def apply_lora(
     strength: float = 0.75,
 ) -> dict[str, Any]:
     """Patch UNET with LoraLoaderModelOnly; rewire guider + scheduler."""
-    name = Path(lora_name or "").name.strip()
-    if not name:
+    names = [Path(part).name.strip() for part in str(lora_name or "").split("|") if Path(part).name.strip()][:3]
+    if not names:
         return g
     try:
         st = float(strength)
     except (TypeError, ValueError):
         st = 0.75
-    g["7"] = {
-        "class_type": "LoraLoaderModelOnly",
-        "inputs": {
-            "model": ["6", 0],
-            "lora_name": name,
-            "strength_model": st,
-        },
-    }
-    for nid, node in g.items():
-        if nid == "7":
-            continue
-        inputs = (node or {}).get("inputs") or {}
-        if inputs.get("model") == ["6", 0]:
-            inputs["model"] = ["7", 0]
+    src = ["6", 0]
+    for i, name in enumerate(names):
+        nid = "7" if i == 0 else f"lora_stack_{i + 1}"
+        g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": src, "lora_name": name, "strength_model": st}}
+        for other_id, node in g.items():
+            if other_id == nid:
+                continue
+            inputs = (node or {}).get("inputs") or {}
+            if inputs.get("model") == src:
+                inputs["model"] = [nid, 0]
+        src = [nid, 0]
     return g
 
 

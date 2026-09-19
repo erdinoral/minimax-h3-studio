@@ -151,7 +151,7 @@
     const raw = String(v || "").trim().toLowerCase();
     const next = raw === "upscale" || (raw === "vfi" && state.vfiModel) ? raw : "";
     state.postPass = next;
-    document.querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip").forEach((b) => {
+    document.querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip, #director-post-pass-chips .chip").forEach((b) => {
       const p = b.dataset.post || "";
       b.classList.toggle("on", p === next);
       b.textContent = p === "upscale" ? tt("ayar.postUpscale") : p === "vfi" ? tt("ayar.postVfi") : tt("ayar.postOff");
@@ -1023,6 +1023,29 @@
       b.classList.toggle("on", b.dataset.aspect === v);
     });
     setQuality(state.quality);
+  }
+
+  function aspectFromClip(job) {
+    const allowed = ["16:9", "9:16", "1:1", "21:9", "4:3"];
+    const saved = String(job?.aspect || "").trim();
+    if (allowed.includes(saved)) return saved;
+
+    const width = Number(job?.width);
+    const height = Number(job?.height);
+    if (!(width > 0 && height > 0)) return "";
+
+    const ratio = width / height;
+    return allowed.reduce((closest, candidate) => {
+      const [w, h] = candidate.split(":").map(Number);
+      return Math.abs(ratio - w / h) < Math.abs(ratio - closest[0] / closest[1])
+        ? [w, h, candidate]
+        : closest;
+    }, [16, 9, "16:9"])[2];
+  }
+
+  function syncContinueAspect(job) {
+    const aspect = aspectFromClip(job);
+    if (aspect) setAspect(aspect);
   }
 
   function setQuality(q) {
@@ -2193,6 +2216,7 @@
 
   function cinemaShotHtml(shot, index) {
     const mode = shot.mode === "continue" ? "continue" : "t2v";
+    const enabled = shot.enabled !== false;
     const calls = cinemaShotCalls(shot.text);
     const jobMeta = cinemaShotJobMeta(shot.id, index);
     const jobCls = jobMeta.cls;
@@ -2217,7 +2241,9 @@
           tt("plan.cont") +
           "</button></div>";
     return (
-      '<article class="cinema-shot" data-id="' +
+      '<article class="cinema-shot' +
+      (enabled ? "" : " is-disabled") +
+      '" data-id="' +
       htmlEsc(shot.id) +
       '"><div class="cinema-shot-head"><span class="idx">' +
       htmlEsc(tf("cinema.sectionLabel", { n: String(index + 1) })) +
@@ -2226,6 +2252,14 @@
       (jobLabel
         ? '<span class="cinema-shot-job' + jobCls + '">' + htmlEsc(jobLabel) + "</span>"
         : "") +
+      '<button type="button" class="btn-ghost cinema-shot-toggle" aria-pressed="' +
+      (enabled ? "true" : "false") +
+      '">' +
+      tt(enabled ? "cinema.sectionDisable" : "cinema.sectionEnable") +
+      "</button>" +
+      '<button type="button" class="btn-ghost cinema-shot-duplicate">' +
+      tt("cinema.sectionDuplicate") +
+      "</button>" +
       '<button type="button" class="btn-ghost cinema-shot-del">' +
       tt("cinema.del") +
       "</button></div>" +
@@ -3566,6 +3600,27 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void saveCinema(true);
   }
 
+  function duplicateCinemaShot(shotId) {
+    const c = ensureCinema();
+    const shots = c.shots || [];
+    const index = shots.findIndex((shot) => String(shot.id) === String(shotId));
+    if (index < 0) return;
+    const source = shots[index];
+    const clone = {
+      ...source,
+      id: typeof crypto?.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `shot-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      structured: source.structured ? { ...source.structured } : undefined,
+      enabled: source.enabled !== false,
+    };
+    cinemaForceLocalShots = true;
+    shots.splice(index + 1, 0, clone);
+    renderCinemaShots();
+    renderCinema();
+    void saveCinema(true);
+  }
+
   async function patchCinemaAsset(kind, id, fields) {
     const aid = String(id || "").trim();
     if (!aid) return false;
@@ -3857,7 +3912,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     try {
       await saveCinema(true);
       const cine = ensureCinema();
-      const shots = (cine.shots || []).filter((s) => (s.text || "").trim());
+      const shots = (cine.shots || []).filter(
+        (s) => (s.text || "").trim() && s.enabled !== false
+      );
       if (!shots.length) {
         toast(tt("filmMode.needShots"));
         return;
@@ -3983,8 +4040,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           id: s.id,
           text: (s.text || "").trim(),
           mode: s.mode === "continue" ? "continue" : "t2v",
+          enabled: s.enabled !== false,
         }))
-        .filter((s) => s.text);
+        .filter((s) => s.text && s.enabled);
       if (!shots.length) {
         toast(tt("cinema.addShotFirst"));
         return;
@@ -7440,6 +7498,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     state.continueFrom = jobId;
     state.selectedJobId = jobId;
+    // A continuation begins from this clip's last frame, so preserve its canvas.
+    // Older gallery entries may lack `aspect`; derive it from their saved dimensions.
+    syncContinueAspect(job);
     const sel = $("continue-source");
     if (sel) sel.value = jobId;
     const lab = $("continue-label");
@@ -7631,11 +7692,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function collectLoraPayload() {
-    const spec = appliedLoraSpec();
+    const picked = [...($("lora-select")?.selectedOptions || [])]
+      .map((opt) => (state.loraCatalog || []).find((spec) => spec.id === opt.value))
+      .filter((spec) => spec && spec.file && spec.ready)
+      .slice(0, 3);
+    const spec = picked[0] || appliedLoraSpec();
     if (!spec || !spec.file) return { lora_id: "", lora_name: "", lora_strength: null };
     return {
       lora_id: spec.id,
-      lora_name: spec.file,
+      lora_name: picked.length ? picked.map((item) => item.file).join("|") : spec.file,
       lora_strength: spec.strength,
     };
   }
@@ -8233,7 +8298,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     btn.addEventListener("click", () => setQuality(btn.dataset.q));
   });
   document
-    .querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip")
+    .querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip, #director-post-pass-chips .chip")
     .forEach((btn) => {
       btn.addEventListener("click", () => setPostPass(btn.dataset.post || ""));
     });
@@ -8782,6 +8847,27 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       openCinemaSceneModal(card.dataset.id);
       return;
     }
+    const duplicate = e.target.closest(".cinema-shot-duplicate");
+    if (duplicate) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = duplicate.closest(".cinema-shot");
+      if (card?.dataset.id) duplicateCinemaShot(card.dataset.id);
+      return;
+    }
+    const toggle = e.target.closest(".cinema-shot-toggle");
+    if (toggle) {
+      e.preventDefault();
+      e.stopPropagation();
+      const card = toggle.closest(".cinema-shot");
+      const shot = card ? cinemaShotById(card.dataset.id) : null;
+      if (!shot) return;
+      shot.enabled = shot.enabled === false;
+      renderCinemaShots();
+      renderCinema();
+      void saveCinema(true);
+      return;
+    }
     const card = e.target.closest(".cinema-shot");
     if (!card) return;
     const shot = cinemaShotById(card.dataset.id);
@@ -9028,6 +9114,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       toast(String(e.message || e));
     }
   };
+
+  $("btn-cancel-queue")?.addEventListener("click", async () => {
+    if (!tConfirm("confirm.cancelQueue")) return;
+    try {
+      const r = await fetch("/api/interrupt?cancel_queued=true", { method: "POST" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      tToast("toast.queueCancelled", { n: String((data.cancelled || []).length) });
+      await refreshJobs();
+    } catch (e) {
+      toast(String(e.message || e));
+    }
+  });
 
   async function deleteJob(jobId) {
     try {

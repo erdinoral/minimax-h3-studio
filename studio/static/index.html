@@ -318,7 +318,7 @@
         </label>
         <div class="lora-prod-pick" id="lora-prod-pick">
           <label><span id="lora-prod-label">LoRA</span>
-            <select id="lora-select">
+            <select id="lora-select" multiple size="4" title="En fazla 3 LoRA seçebilirsin (Ctrl ile çoklu seç)">
               <option value="">Yok (varsayılan)</option>
             </select>
           </label>
@@ -341,6 +341,7 @@
         </div>
         <div class="batch-add-row queue-toolbar">
           <button type="button" class="btn-ghost" id="btn-clear-errors">Hatalıları temizle</button>
+          <button type="button" class="btn-ghost" id="btn-cancel-queue" title="Çalışan işi ve bekleyen kuyruğu iptal et">Kuyruğu iptal et</button>
           <button type="button" class="btn-ghost" id="btn-merge-clips">Klipleri birleştir</button>
           <button type="button" class="btn-ghost" id="btn-clear-finished">Geçmişi temizle</button>
           <button type="button" class="btn-ghost" id="btn-reset-production" title="Kuyruk + klipler + kareler">Sıfırla (temiz başlat)</button>
@@ -406,6 +407,14 @@
         <button type="button" class="chip" data-group="clip" data-clip="6" data-chip="6 sn klipler" aria-pressed="false">6 sn</button>
         <button type="button" class="chip" data-group="clip" data-clip="8" data-chip="8 sn klipler" aria-pressed="false">8 sn</button>
         <button type="button" class="chip" data-group="clip" data-clip="10" data-chip="10 sn klipler" aria-pressed="false">10 sn</button>
+      </div>
+      <div class="director-post-pass">
+        <span class="muted" id="director-post-label">Son geçiş</span>
+        <div class="chips" id="director-post-pass-chips" role="group" aria-label="Son geçiş">
+          <button type="button" class="chip on" data-post="">Kapalı</button>
+          <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
+          <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
+        </div>
       </div>
       <div class="chips director-mode-tabs" id="director-mode-tabs">
         <button type="button" class="chip on" data-dirmode="chat" id="dir-tab-chat">Sohbet</button>

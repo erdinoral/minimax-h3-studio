@@ -739,7 +739,13 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     else:
         mode = "t2v"
     sid = str(item.get("id") or "").strip() or str(uuid.uuid4())
-    out = {"id": sid, "text": text, "mode": mode, "index": index}
+    out = {
+        "id": sid,
+        "text": text,
+        "mode": mode,
+        "enabled": item.get("enabled") is not False,
+        "index": index,
+    }
     if _has_author_fields(structured):
         out["structured"] = structured
     if item.get("take_id"):
@@ -1545,7 +1551,7 @@ def normalize_produce_shots(
                 elif not all_strings:
                     fallback = "t2v"
                 shot = _clean_shot({"text": str(item or ""), "mode": fallback}, i)
-            if shot.get("text"):
+            if shot.get("text") and shot.get("enabled", True):
                 parsed.append(shot)
         return parsed
     texts = split_shots(script or "")

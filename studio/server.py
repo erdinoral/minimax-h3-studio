@@ -552,14 +552,16 @@ def _normalize_post_pass(raw: Any) -> str:
 
 
 def _lora_fields(body: Any) -> dict[str, Any]:
+    raw_name = (getattr(body, "lora_name", None) or "").strip()
+    primary_name = raw_name.split("|", 1)[0]
     spec = find_spec(
         lora_id=getattr(body, "lora_id", None) or "",
-        file=getattr(body, "lora_name", None) or "",
+        file=primary_name,
     )
     if spec and is_still_lora(spec) and not getattr(body, "sheet_job", False):
         return {"lora_id": "", "lora_name": "", "lora_strength": None}
-    name = (getattr(body, "lora_name", None) or "").strip()
-    if spec and spec.get("file"):
+    name = raw_name
+    if spec and spec.get("file") and "|" not in name:
         name = spec["file"]
     elif spec and not spec.get("file"):
         name = ""
@@ -648,19 +650,24 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float]:
     name = (job.get("lora_name") or "").strip()
     if not name:
         return None, 1.0
-    spec = find_spec(lora_id=job.get("lora_id") or "", file=name)
-    graphs = (spec or {}).get("graphs") or ["fl2va", "ref2va"]
     mode = (job.get("mode") or "t2v").lower()
     graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue") else "fl2va"
-    if job.get("sheet_job") and spec and is_still_lora(spec):
-        pass
-    elif graph not in graphs:
-        slog.info("lora skipped", lora=name, mode=mode, graph=graph)
+    usable = []
+    for item in name.split("|")[:3]:
+        spec = find_spec(file=item)
+        graphs = (spec or {}).get("graphs") or ["fl2va", "ref2va"]
+        if job.get("sheet_job") and spec and is_still_lora(spec):
+            usable.append(item)
+        elif graph in graphs:
+            usable.append(item)
+        else:
+            slog.info("lora skipped", lora=item, mode=mode, graph=graph)
+    if not usable:
         return None, 1.0
     st = job.get("lora_strength")
     if st is None:
         st = (spec or {}).get("strength") or 0.8
-    return name, float(st)
+    return "|".join(usable), float(st)
 
 
 def _voice_refs_from_hits(hits: list[dict[str, Any]]) -> list[str]:
@@ -1303,6 +1310,7 @@ class DirectorCommitBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    post_pass: Optional[str] = None
     prompt_rewriter_enabled: bool = False
     sage_attention: Optional[str] = "auto"
 
@@ -2150,6 +2158,7 @@ async def generate(body: GenerateBody):
     ref_images = list(body.ref_images or [])
     ref_videos = list(body.ref_videos or [])
     ref_image_size = (body.ref_image_size or "").strip().lower() or None
+    continue_aspect = None
 
     # Explicit "t2v" / "new" ignores accidental continue state from UI.
     # Keep first/last frames — that is I2VA / FL2VA, not continue.
@@ -2220,6 +2229,27 @@ async def generate(body: GenerateBody):
             st = parent.get("status")
             if st in ("error", "cancelled"):
                 raise HTTPException(400, "Devam kaynağı başarısız — başka video seç")
+            # Continuations must use the source canvas.  Do this server-side too:
+            # a stale browser or an API caller must not turn a portrait chain into
+            # a landscape one.  Legacy records can be recovered from dimensions.
+            saved_aspect = str(parent.get("aspect") or "").strip()
+            if saved_aspect in ASPECT_PRESETS:
+                continue_aspect = saved_aspect
+            else:
+                try:
+                    parent_w = float(parent.get("width") or 0)
+                    parent_h = float(parent.get("height") or 0)
+                    if parent_w > 0 and parent_h > 0:
+                        source_ratio = parent_w / parent_h
+                        continue_aspect = min(
+                            ASPECT_PRESETS,
+                            key=lambda aspect: abs(
+                                source_ratio
+                                - ASPECT_PRESETS[aspect][0] / ASPECT_PRESETS[aspect][1]
+                            ),
+                        )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    pass
             # Inherit face lock from parent chain when client didn't send portraits
             if not ref_images:
                 inh, inh_sz = _lookup_face_lock(continue_from)
@@ -2268,6 +2298,8 @@ async def generate(body: GenerateBody):
         mode = "face_continue"
 
     await _free_llm_for_production()
+    if continue_aspect:
+        body.aspect = continue_aspect
     w, h = resolve_size(body.aspect, body.quality)
     seed = body.seed if body.seed >= 0 else int(time.time() * 1000) % (2**53)
     steps = body.steps if body.steps and body.steps > 0 else 20
@@ -3749,6 +3781,8 @@ def _brief_to_cinema_shots(shots: list[dict]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for i, s in enumerate(shots or []):
         if not isinstance(s, dict):
+            continue
+        if s.get("enabled") is False:
             continue
         text = str(
             s.get("h3Prompt") or s.get("text") or s.get("prompt") or s.get("action") or ""
@@ -6374,6 +6408,7 @@ async def director_commit(body: DirectorCommitBody):
                 sage_attention=_sage_mode(body),
                 link_continue=bool(link),
                 seamless=False,
+                post_pass=_normalize_post_pass(body.post_pass),
             )
             queued = await cinema_produce(cp)
         else:
@@ -6397,6 +6432,7 @@ async def director_commit(body: DirectorCommitBody):
                 lora_strength=lora_bits.get("lora_strength"),
                 sage_attention=_sage_mode(body),
                 lane=commit_lane,
+                post_pass=_normalize_post_pass(body.post_pass),
             )
             queued = await batch(bb)
 

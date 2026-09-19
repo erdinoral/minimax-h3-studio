@@ -2127,7 +2127,10 @@ async def generate(body: GenerateBody):
             raise HTTPException(400, "En fazla 3 referans video")
         if len(ref_images) > 9:
             raise HTTPException(400, "En fazla 9 referans görsel")
-        ref_image_size = ref_image_size or "match"
+        # In V2V a supplied picture is the target look/identity, not a loose
+        # style hint.  Keep its full reference resolution so motion video does
+        # not overpower the requested character replacement.
+        ref_image_size = "max" if ref_images else "match"
     elif mode in ("face", "yüz", "yuz", "identity"):
         mode = "face"
         continue_from = None
@@ -2273,7 +2276,7 @@ async def generate(body: GenerateBody):
         prompt_txt = enhance_ref_prompt(
             prompt_txt,
             n_images=len(ref_images),
-            role="general",
+            role="face" if mode == "v2v" and ref_images else "general",
         )
         if ref_videos:
             prompt_txt = enhance_video_ref_prompt(

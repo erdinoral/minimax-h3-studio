@@ -59,7 +59,6 @@
     loraApplied: false,
     loraCatalog: [],
     loraDownload: {},
-    adultContentEnabled: false,
     multishot: false,
     postPass: "",
     vfiModel: "",
@@ -116,36 +115,15 @@
     "documentary",
     "intro",
     "outro",
-    "adult",
   ];
-  const ADULT_LORA_ID = "erosmax-4step";
-  const ADULT_PURPOSE = "adult";
-
   function purposeKeysForUi() {
-    if (state.adultContentEnabled) return PURPOSE_KEYS;
-    return PURPOSE_KEYS.filter((k) => k !== ADULT_PURPOSE);
+    return PURPOSE_KEYS.slice();
   }
 
-  function isAdultLoraSpec(spec) {
-    if (!spec) return false;
-    if (spec.adult) return true;
-    const blob = `${spec.id || ""} ${spec.file || ""} ${spec.label || ""}`.toLowerCase();
-    return blob.includes("erosmax");
-  }
-
-  function visibleLoraCatalog() {
-    const catalog = state.loraCatalog || [];
-    if (state.adultContentEnabled) return catalog;
-    return catalog.filter((spec) => !isAdultLoraSpec(spec));
-  }
-
-  function isStillLoraSpec(spec) {
-    return !!(spec && (spec.graphs || []).includes("still"));
-  }
-
-  function videoLoraCatalog() {
-    return visibleLoraCatalog().filter((spec) => !isStillLoraSpec(spec));
-  }
+  function isAdultLoraSpec() { return false; }
+  function visibleLoraCatalog() { return state.loraCatalog || []; }
+  function isStillLoraSpec(spec) { return !!(spec && (spec.graphs || []).includes("still")); }
+  function videoLoraCatalog() { return visibleLoraCatalog().filter((spec) => !isStillLoraSpec(spec)); }
 
   function setPostPass(v) {
     const raw = String(v || "").trim().toLowerCase();
@@ -4778,7 +4756,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const item = document.createElement("article");
       item.className = "dir-shot-item";
       const dur = shot.durationSec || clip;
-      const link = (shot.linkToPrev || (i === 0 ? "standalone" : "continue")).toString();
+      const link = (shot.linkToPrev || "standalone").toString();
       const head = document.createElement("div");
       head.className = "dir-shot-head";
       head.textContent = tf("dir.shotHead", { i: i + 1, dur, sec: tt("sec"), link });
@@ -4950,7 +4928,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     host.innerHTML = shots
       .map((shot, i) => {
-        const link = (shot.linkToPrev || (i === 0 ? "standalone" : "continue")).toString();
+        const link = (shot.linkToPrev || "standalone").toString();
         const prompt = _shotPromptText(shot);
         return (
           '<article class="dir-plan-shot" data-idx="' +
@@ -5003,7 +4981,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         dialogue: [],
         h3Prompt: prompt,
         linkToPrev:
-          el.querySelector("[data-field=link]")?.value || (i === 0 ? "standalone" : "continue"),
+          el.querySelector("[data-field=link]")?.value || "standalone",
       };
     });
   }
@@ -5783,8 +5761,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const silent = state.projectSilent || state.projectPurpose === "music_video";
     if (state.projectPurpose === "music_video") {
       el.textContent = tt("project.mvHint");
-    } else if (state.projectPurpose === ADULT_PURPOSE) {
-      el.textContent = tt("project.adultHint");
     } else if (state.projectPurpose) {
       const label = purposeLabel(state.projectPurpose) || state.projectPurpose;
       const style = state.projectStyle
@@ -5844,10 +5820,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!fromScene) setDirectorOpen(true);
     if (g === "purpose") {
       const p = btn.dataset.purpose;
-      if (p === ADULT_PURPOSE && !state.adultContentEnabled) {
-        toast(tt("settings.adultNeedEnable"));
-        return;
-      }
       state.projectPurpose = state.projectPurpose === p ? null : p;
       // Music video = silent visual only; all other purposes keep MiniMax audio
       state.projectSilent = state.projectPurpose === "music_video";
@@ -5861,11 +5833,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       let note = tf("dir.purposeSet", { label });
       if (state.projectPurpose === "music_video") {
         note += tt("dir.purposeMv");
-        if (fromScene) toast(tt("toast.purposeMv"));
-      } else if (state.projectPurpose === ADULT_PURPOSE) {
-        note += tt("dir.purposeAdult");
-        void applyAdultProductionPreset();
-      } else {
+        if (fromScene) toast(tt("toast.purposeMv")); } else {
         const extra =
           state.projectPurpose === "documentary"
             ? tt("dir.extra.documentary")
@@ -7910,10 +7878,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await fetch("/api/loras").then((r) => r.json());
       state.loraCatalog = data.loras || [];
       state.loraDownload = data.download || {};
-      if (typeof data.adult_content_enabled === "boolean") {
-        state.adultContentEnabled = data.adult_content_enabled;
-        syncAdultContentUi();
-      }
       fillLoraSelect();
     } catch {
       /* until Studio restart */
@@ -7961,10 +7925,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   async function applyLora() {
     const spec = currentLoraSpec();
-    if (spec && isAdultLoraSpec(spec) && !state.adultContentEnabled) {
-      toast(tt("settings.adultNeedEnable"));
-      return;
-    }
     state.loraId = spec?.id || "";
     if (spec && isStillLoraSpec(spec)) {
       toast(tt("toast.loraStillOnly"));
@@ -8101,10 +8061,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!id) return;
     let spec = (state.loraCatalog || []).find((x) => x.id === id);
     if (!spec) return;
-    if (isAdultLoraSpec(spec) && !state.adultContentEnabled) {
-      toast(tt("settings.adultNeedEnable"));
-      return;
-    }
     if (isStillLoraSpec(spec)) {
       if (!spec.ready) {
         try {
@@ -8535,6 +8491,26 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void cinemaFilmAction("new")
       .then(() => toast(tt("cinema.filmNew")))
       .catch((err) => toast(String(err.message || err)));
+  });
+  $("btn-cinema-film-delete")?.addEventListener("click", async () => {
+    const id = ($("cinema-film-select")?.value || ensureCinema().film_id || "").trim();
+    if (!id) return;
+    if (!confirm("Bu filmi silmek istediğine emin misin?")) return;
+    try {
+      const r = await fetch("/api/cinema/films", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      state.cinema = { ...emptyCinema(), ...data };
+      renderCinema();
+      await fillCinemaFilms();
+      toast("Film silindi");
+    } catch (e) {
+      toast(String(e.message || e));
+    }
   });
   $("cinema-film-select")?.addEventListener("change", (e) => {
     const id = e.target.value;
@@ -9496,8 +9472,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("btn-h3-models-save")?.addEventListener("click", () => void saveH3Models(false));
   $("btn-h3-models-reset")?.addEventListener("click", () => void saveH3Models(true));
-  $("btn-adult-enable")?.addEventListener("click", () => void setAdultContentEnabled(true));
-  $("btn-adult-disable")?.addEventListener("click", () => void setAdultContentEnabled(false));
   $("btn-settings-close")?.addEventListener("click", () => {
     void saveNotifySettings({ quiet: true });
     $("view-settings")?.classList.add("hidden");

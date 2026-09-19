@@ -46,7 +46,6 @@ from lib.loras import (
     file_ready,
     filename_from_url,
     find_spec,
-    is_adult_lora,
     is_h3_lora_name,
     is_still_lora,
     public_list,
@@ -130,54 +129,9 @@ GALLERY_FILE = DATA / "gallery.json"
 SESSIONS_FILE = DATA / "director_sessions.json"
 LLM_SETTINGS_FILE = DATA / "llm_settings.json"
 NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
-STUDIO_SETTINGS_FILE = DATA / "studio_settings.json"
 PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
-
-
-def _load_studio_settings() -> dict[str, Any]:
-    if not STUDIO_SETTINGS_FILE.is_file():
-        return {"adult_content_enabled": False}
-    try:
-        raw = json.loads(STUDIO_SETTINGS_FILE.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return {"adult_content_enabled": False}
-        return raw
-    except Exception:
-        return {"adult_content_enabled": False}
-
-
-def _save_studio_settings(patch: dict[str, Any]) -> dict[str, Any]:
-    DATA.mkdir(parents=True, exist_ok=True)
-    cur = _load_studio_settings()
-    for key, val in patch.items():
-        if val is None:
-            continue
-        cur[key] = val
-    STUDIO_SETTINGS_FILE.write_text(
-        json.dumps(cur, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return cur
-
-
-def _adult_content_enabled() -> bool:
-    return bool(_load_studio_settings().get("adult_content_enabled"))
-
-
-def _enforce_adult_policy(*, purpose: Optional[str] = None, lora_id: str = "", lora_name: str = "") -> None:
-    """Block adult LoRA / purpose until +18 is enabled in Studio settings."""
-    adult_use = (purpose or "").strip().lower() in ("adult", "18+", "nsfw", "mature")
-    if is_adult_lora(lora_id=lora_id or "", file=lora_name or ""):
-        adult_use = True
-    if not adult_use:
-        return
-    if not _adult_content_enabled():
-        raise HTTPException(
-            403,
-            "Yetişkin içerik kapalı — Ayarlar → +18 bölümünü açın (ErosMax / yetişkin türü)",
-        )
 
 
 def _slug_clip(text: str, *, max_len: int = 36) -> str:
@@ -1599,11 +1553,9 @@ async def _write_one_shot_from_outline(
             continue
         raw_shot.setdefault("action", outline_row.get("beat") or outline_row.get("title"))
         raw_shot.setdefault("camera", outline_row.get("camera"))
-        # Prefer model link; final force_continue_chain(brief) will hard-cut on cast gaps
-        if index == 0:
+        # Preserve an explicit LLM link. Missing links mean a new, independent shot.
+        if index == 0 or not raw_shot.get("linkToPrev"):
             raw_shot["linkToPrev"] = "standalone"
-        elif not raw_shot.get("linkToPrev"):
-            raw_shot["linkToPrev"] = "continue"
         raw_shot.pop("_placeholder", None)
         raw_shot.pop("_thin_template", None)
         cleaned = _clean_shot(raw_shot, index, dur, brief=brief, total_shots=need)
@@ -2133,11 +2085,6 @@ async def generate(body: GenerateBody):
         raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
 
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=body.purpose,
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
 
     if body.prompt_rewriter_enabled:
         if not await llm.healthy():
@@ -2409,11 +2356,6 @@ async def batch(body: BatchBody):
     await _free_llm_for_production()
     purpose = (body.purpose or "").strip() or None
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=purpose,
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
     silent = bool(body.silent_audio) or bool(body.music_id)
     prompts = [p.strip() for p in body.prompts if p.strip()]
     if not prompts:
@@ -3368,9 +3310,9 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
     sys_msg = (
         "You are MiniMax H3 Cinema Studio shot writer. "
         "Read the studio board and write ONLY a shot list. Reply with JSON only:\n"
-        '{"shots":[{"text":"cinematic SCENE paragraph","mode":"t2v"|"continue"}]}\n'
-        f"Each shot is one {clip}s clip. First shot mode t2v, later shots continue "
-        f"ONLY with cast continuity; cutaway or character re-entry → t2v. "
+        '{"shots":[{"text":"cinematic SCENE paragraph","sectionId":"scene-1","mode":"t2v"|"continue"}]}\n'
+        f"Each shot is one {clip}s clip. Group uninterrupted beats with one sectionId: the first is t2v and later shots are continue. "
+        f"A new location, time, or action starts a new sectionId with t2v; the same character alone never makes it continue. "
         f"Use cinema character names exactly as on the board.\n"
         f"Write exactly {n} shots. "
         "Use character and location names EXACTLY as on the board. "
@@ -3411,21 +3353,39 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
     for i, item in enumerate(raw_shots[:n]):
         if isinstance(item, dict):
             text = str(item.get("text") or item.get("h3Prompt") or item.get("prompt") or "").strip()
-            mode = str(item.get("mode") or ("t2v" if i == 0 else "continue")).lower()
+            mode = str(item.get("mode") or "t2v").lower()
         else:
             text = str(item or "").strip()
-            mode = "t2v" if i == 0 else "continue"
+            mode = "t2v"
         if not text:
             continue
         if mode not in ("continue", "devam", "i2v", "last_frame"):
-            mode = "t2v" if not new_shots else "continue"
+            mode = "t2v"
         else:
             mode = "continue"
         if not new_shots:
             mode = "t2v"
-        new_shots.append({"id": str(uuid.uuid4())[:8], "text": text, "mode": mode})
+        section_id = str(item.get("sectionId") or item.get("section_id") or "").strip() if isinstance(item, dict) else ""
+        new_shots.append({"id": str(uuid.uuid4())[:8], "text": text, "mode": mode, "section_id": section_id})
     if not new_shots:
         raise HTTPException(502, "Geçerli shot yok")
+    # Normalize the model output into explicit section chains. A new section never
+    # inherits the prior section's last frame, even if the same cast is present.
+    previous_section = ""
+    section_number = 0
+    for i, shot in enumerate(new_shots):
+        requested = str(shot.get("mode") or "").strip().lower() == "continue"
+        section_id = str(shot.get("section_id") or "").strip()
+        if not section_id:
+            if i and requested and previous_section:
+                section_id = previous_section
+            else:
+                section_number += 1
+                section_id = f"scene-{section_number}"
+        same_section = bool(i and section_id == previous_section)
+        shot["section_id"] = section_id
+        shot["mode"] = "continue" if same_section and requested else "t2v"
+        previous_section = section_id
     lib["shots"] = new_shots
     lib["script"] = "\n\n---\n\n".join(s["text"] for s in new_shots)
     lib["duration"] = clip
@@ -3768,12 +3728,12 @@ def _brief_shot_modes(shots: list[dict]) -> list[str]:
     modes: list[str] = []
     for i, s in enumerate(shots or []):
         if not isinstance(s, dict):
-            modes.append("t2v" if i == 0 else "continue")
+            modes.append("t2v")
             continue
         link = str(s.get("linkToPrev") or "").strip().lower()
         if not link:
-            link = "standalone" if i == 0 else "continue"
-        modes.append("t2v" if i == 0 or link == "standalone" else "continue")
+            link = "standalone"
+        modes.append("continue" if link == "continue" else "t2v")
     return modes
 
 
@@ -3791,9 +3751,11 @@ def _brief_to_cinema_shots(shots: list[dict]) -> list[dict[str, Any]]:
             continue
         link = str(s.get("linkToPrev") or "").strip().lower()
         if not link:
-            link = "standalone" if i == 0 else "continue"
-        mode = "t2v" if i == 0 or link == "standalone" else "continue"
+            link = "standalone"
+        mode = "continue" if link == "continue" else "t2v"
         row: dict[str, Any] = {"text": text, "mode": mode}
+        if s.get("sectionId"):
+            row["section_id"] = s.get("sectionId")
         if s.get("id"):
             row["id"] = s.get("id")
         out.append(row)
@@ -4326,11 +4288,6 @@ async def cinema_produce(body: CinemaProduceBody):
     if setup_purpose and setup_purpose not in ("auto", ""):
         purpose = setup_purpose
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=purpose,
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
     silent = audio.get("mode") == "silent" or bool(body.silent_audio)
     if audio.get("mode") == "film":
         silent = False
@@ -5259,33 +5216,6 @@ async def loras_get():
         "ok": True,
         "loras": public_list(),
         "download": dict(_lora_dl_status),
-        "adult_content_enabled": _adult_content_enabled(),
-    }
-
-
-class StudioSettingsBody(BaseModel):
-    adult_content_enabled: Optional[bool] = None
-
-
-@app.get("/api/studio/settings")
-async def studio_settings_get():
-    cfg = _load_studio_settings()
-    return {
-        "ok": True,
-        "adult_content_enabled": bool(cfg.get("adult_content_enabled")),
-    }
-
-
-@app.post("/api/studio/settings")
-async def studio_settings_set(body: StudioSettingsBody):
-    patch: dict[str, Any] = {}
-    if body.adult_content_enabled is not None:
-        patch["adult_content_enabled"] = bool(body.adult_content_enabled)
-    cfg = _save_studio_settings(patch)
-    slog.info("studio settings saved", adult_content_enabled=cfg.get("adult_content_enabled"))
-    return {
-        "ok": True,
-        "adult_content_enabled": bool(cfg.get("adult_content_enabled")),
     }
 
 
@@ -5335,8 +5265,6 @@ async def loras_download(body: LoraDownloadBody):
     spec = find_spec(lora_id=body.id or "")
     if not spec or not spec.get("file") or not spec.get("url"):
         raise HTTPException(400, "bilinmeyen LoRA")
-    if is_adult_lora(spec=spec) and not _adult_content_enabled():
-        raise HTTPException(403, "Yetişkin LoRA — önce Ayarlar → +18 bölümünü açın")
     if spec_ready(spec):
         return {"ok": True, "ready": True, "id": spec["id"], "file": spec["file"]}
     if _lora_dl_status.get("busy"):
@@ -6348,11 +6276,6 @@ async def director_commit(body: DirectorCommitBody):
     scheduler = (body.scheduler or "simple").strip() or "simple"
     steps, sampler, scheduler = _with_lora_preset(body, steps, sampler, scheduler)
     lora_bits = _lora_fields(body)
-    _enforce_adult_policy(
-        purpose=brief.get("purpose"),
-        lora_id=lora_bits.get("lora_id") or "",
-        lora_name=lora_bits.get("lora_name") or "",
-    )
 
     applied = {
         "prompt": prompts[0] if prompts else "",

@@ -1580,7 +1580,7 @@ def build_scene_placeholder_shot(
                 lock,
             ]
         )
-        link = "standalone"
+        link = "standalone" if index == 0 else "continue"
         action = beat
     else:
         body = "\n\n".join(
@@ -1729,7 +1729,7 @@ def build_rich_h3_prompt(
     dlg_txt = " ".join(dlg) if dlg else "no dialogue"
     dur = shot.get("durationSec") or brief.get("clipDurationSec") or 5
     logline = (brief.get("logline") or "").strip()
-    link = (shot.get("linkToPrev") or ("standalone" if index == 0 else "continue")).strip()
+    link = (shot.get("linkToPrev") or "standalone").strip()
     base = (shot.get("h3Prompt") or "").strip()
 
     silent = _is_silent_brief(brief)
@@ -1846,9 +1846,9 @@ def _clean_shot(
     prompt = (s.get("h3Prompt") or "").strip()
     if not prompt and not action:
         return None
-    link = s.get("linkToPrev") or ("standalone" if i == 0 else "continue")
+    link = s.get("linkToPrev") or "standalone"
     if link not in ("standalone", "continue", "ref"):
-        link = "continue" if i else "standalone"
+        link = "standalone"
     shot = {
         "durationSec": sd,
         "camera": s.get("camera") or "",
@@ -1858,6 +1858,7 @@ def _clean_shot(
         "music": s.get("music") or "",
         "h3Prompt": prompt or action,
         "linkToPrev": link,
+        "sectionId": str(s.get("sectionId") or s.get("section_id") or "").strip(),
     }
     if s.get("_placeholder"):
         shot["_placeholder"] = True
@@ -1906,25 +1907,31 @@ def force_continue_chain(
     shots: list[dict[str, Any]],
     brief: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Link shots: continue when cast overlaps previous; else standalone (hard cut).
+    """Normalize production into section chains.
 
-    Prevents cutaway → character re-entry from inheriting the wrong last frame.
+    The first shot in every ``sectionId`` is a new T2V video. Only a later shot
+    that explicitly requests ``linkToPrev: "continue"`` in that same section
+    inherits the prior clip's last frame. A location/action change must get a new
+    section ID even when the character remains the same.
     """
-    chars = list((brief or {}).get("characters") or []) if isinstance(brief, dict) else []
     out: list[dict[str, Any]] = []
-    prev: set[str] = set()
-    for i, s in enumerate(shots):
-        ss = dict(s)
-        text = str(ss.get("h3Prompt") or ss.get("text") or ss.get("action") or "")
-        curr = _character_names_in_text(text, chars) if chars else set()
-        if i == 0:
-            ss["linkToPrev"] = "standalone"
-        elif chars and curr and not (curr & prev):
-            ss["linkToPrev"] = "standalone"
-        else:
-            ss["linkToPrev"] = "continue"
-        out.append(ss)
-        prev = curr
+    previous_section = ""
+    section_number = 0
+    for i, raw in enumerate(shots):
+        shot = dict(raw)
+        requested = str(shot.get("linkToPrev") or "").strip().lower()
+        section = str(shot.get("sectionId") or shot.get("section_id") or "").strip()
+        if not section:
+            if i and requested == "continue" and previous_section:
+                section = previous_section
+            else:
+                section_number += 1
+                section = f"scene-{section_number}"
+        is_same_section = bool(i and section == previous_section)
+        shot["sectionId"] = section
+        shot["linkToPrev"] = "continue" if is_same_section and requested == "continue" else "standalone"
+        out.append(shot)
+        previous_section = section
     return out
 
 
@@ -2433,7 +2440,7 @@ def single_shot_user_prompt(
 ) -> str:
     """FAZ B — write exactly one GOLD STANDARD h3Prompt."""
     dur = int(brief.get("clipDurationSec") or 5)
-    link = "standalone" if index == 0 else "continue"
+    link = "standalone"
     title = (outline_row or {}).get("title") or f"Shot {index + 1}"
     beat = (outline_row or {}).get("beat") or title
     camera = camera_for_outline_index(index, directives=brief.get("directorDirectives"), row=outline_row)
@@ -2462,15 +2469,13 @@ def single_shot_user_prompt(
             "never rename/translate): "
             + ", ".join(cast_names)
             + ".\n"
-            "If this beat has no cast overlap with the previous shot (cutaway / re-entry), "
-            'set linkToPrev to "standalone".\n'
+            "Assign sectionId such as scene-1. Keep the same sectionId and use linkToPrev=continue only when this shot starts at the exact final moment of the previous clip. A recurring character in a new location/action starts a new sectionId with linkToPrev=standalone.\n"
         )
     prev_snip = ""
     if prev_shot and isinstance(prev_shot, dict):
         prev_body = (prev_shot.get("h3Prompt") or "")[:900]
-        prev_snip = (
-            f"PREVIOUS SHOT ending (continue from this moment):\n{prev_body}\n"
-        )
+        prev_section = str(prev_shot.get("sectionId") or "scene-1")
+        prev_snip = f"PREVIOUS SHOT (sectionId={prev_section}):\n{prev_body}\n"
     return (
         f"FAZ B — write ONLY shot {index + 1} of {need} "
         f"({dur} seconds, suggested linkToPrev={link}).\n"
@@ -2487,10 +2492,10 @@ def single_shot_user_prompt(
         '{"shot":{'
         f'"durationSec":{dur},"camera":"...","action":"...","dialogue":[],'
         '"soundscape":"...","music":"none","linkToPrev":'
-        f'"standalone|continue","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
+        f'"standalone|continue","sectionId":"scene-1","h3Prompt":"FULL multi-paragraph SCENE ≥{MIN_H3_PROMPT_CHARS} chars"'
         "}}\n"
-        "Rules: English SCENE screenplay; character cards on shot 1; "
-        "when linkToPrev=continue, start with 'Continue directly from the previous shot.' "
+        "Rules: English SCENE screenplay; use the current sectionId for an uninterrupted sequence. "
+        "A new place, time, or action starts a new sectionId and standalone video. Use linkToPrev=continue only within one section, then start with 'Continue directly from the previous shot.' "
         "+ Same X, same Y, identical clothing; micro-actions only; "
         "no keyword soup; no BGM unless silent music-video lock."
     )

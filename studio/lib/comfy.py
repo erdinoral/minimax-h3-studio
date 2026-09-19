@@ -667,6 +667,7 @@ def build_ref2va_prompt(
     text: str,
     ref_image_names: Optional[list[str]] = None,
     ref_video_names: Optional[list[str]] = None,
+    ref_audio_names: Optional[list[str]] = None,
     width: int = 1344,
     height: int = 768,
     length: int = 124,
@@ -691,12 +692,15 @@ def build_ref2va_prompt(
     """
     ref_image_names = list(ref_image_names or [])
     ref_video_names = list(ref_video_names or [])
-    if not ref_image_names and not ref_video_names:
+    ref_audio_names = list(ref_audio_names or [])
+    if not ref_image_names and not ref_video_names and not ref_audio_names:
         raise ValueError("Ref2VA için en az 1 referans görsel veya video gerekir")
     if len(ref_image_names) > 9:
         raise ValueError("En fazla 9 referans görsel")
     if len(ref_video_names) > 3:
         raise ValueError("En fazla 3 referans video")
+    if len(ref_audio_names) > 3:
+        raise ValueError("En fazla 3 referans ses")
     size_mode = "max" if str(ref_image_size).lower() == "max" else "match"
     m = {**REF2VA_MODELS, **(models or {})}
     g: dict[str, Any] = {
@@ -804,6 +808,11 @@ def build_ref2va_prompt(
                 split_id,
                 1,
             ]
+
+    for i, aname in enumerate(ref_audio_names):
+        nid = str(400 + i)
+        g[nid] = {"class_type": "LoadAudio", "inputs": {"audio": aname}}
+        g["104"]["inputs"][f"ref_audios.ref_audio_{i}"] = [nid, 0]
 
     if silent_audio:
         g["91"] = {

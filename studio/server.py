@@ -90,7 +90,7 @@ from lib.director import (
     expected_shot_count,
     MIN_H3_PROMPT_CHARS,
 )
-from lib.frames import duration_to_length, extract_last_frame, resize_image, strip_audio
+from lib.frames import duration_to_length, extract_audio_tail, extract_last_frame, resize_image, strip_audio
 from lib.music import (
     build_song_director_seed,
     concat_and_mux,
@@ -550,7 +550,7 @@ def _with_lora_preset(
 def _graph_for_mode(mode: str) -> str:
     return (
         "ref2va"
-        if (mode or "").lower() in ("ref", "face", "v2v", "face_continue")
+        if (mode or "").lower() in ("ref", "face", "v2v", "face_continue", "audio_continue")
         else "fl2va"
     )
 
@@ -606,7 +606,7 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float]:
     if not name:
         return None, 1.0
     mode = (job.get("mode") or "t2v").lower()
-    graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue") else "fl2va"
+    graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue", "audio_continue") else "fl2va"
     usable = []
     for item in name.split("|")[:3]:
         spec = find_spec(file=item)
@@ -1086,6 +1086,7 @@ class GenerateBody(BaseModel):
     # Ref2VA video names (after /api/refs/upload-video)
     ref_videos: Optional[list[str]] = None
     include_video_audio: bool = True
+    audio_continuity: bool = False
     # match = scale to gen area; max = best identity (face default)
     ref_image_size: Optional[str] = None
     # music video: strip generated audio after download
@@ -2244,6 +2245,9 @@ async def generate(body: GenerateBody):
         ref_role = "face"
         ref_image_size = ref_image_size or "max"
         mode = "face_continue"
+    elif mode == "continue" and bool(body.audio_continuity):
+        # Ref2VA accepts an explicit <Audio 1> reference; plain FL2VA continue does not.
+        mode = "audio_continue"
 
     await _free_llm_for_production()
     if continue_aspect:
@@ -2310,6 +2314,7 @@ async def generate(body: GenerateBody):
         "ref_images": ref_images,
         "ref_videos": ref_videos,
         "include_video_audio": bool(body.include_video_audio),
+        "audio_continuity": bool(body.audio_continuity),
         "ref_image_size": ref_image_size,
         "ref_role": ref_role,
         "progress": 0,
@@ -6940,6 +6945,43 @@ async def _run_job(job: dict):
                 filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
                 silent_audio=silent,
                 include_video_audio=bool(job.get("include_video_audio", True)),
+                lora_name=lora_name,
+                lora_strength=lora_strength,
+                sage_attention=_sage_mode(job),
+                post_pass=_normalize_post_pass(job.get("post_pass")),
+            )
+        elif mode == "audio_continue":
+            if not first or not job.get("continue_from"):
+                raise RuntimeError("Sesli devam için önceki klibin son karesi yok")
+            parent = _clip_record(job.get("continue_from"))
+            if not parent:
+                raise RuntimeError("Sesli devam kaynağı bulunamadı")
+            source_video = await _ensure_job_video(parent)
+            tail_path = REF_AUDIOS / f"h3_studio_{parent['id']}_tail.wav"
+            extract_audio_tail(source_video, tail_path, seconds=5.0)
+            audio_name = await comfy.upload_audio(tail_path, tail_path.name)
+            text = (
+                "<Picture 1> is the exact last frame of the previous clip: continue its "
+                "composition, action, character, and camera naturally. <Audio 1> is the "
+                "final audio from that clip: continue its ambience, music rhythm, and speaker "
+                "character naturally, without replaying it verbatim.\n\n"
+                + str(job.get("prompt") or "")
+            )
+            prompt = build_ref2va_prompt(
+                text=text,
+                ref_image_names=[first],
+                ref_audio_names=[audio_name],
+                width=w,
+                height=h,
+                length=length,
+                seed=int(job["seed"]),
+                steps=int(job["steps"]),
+                sampler=job.get("sampler") or "res_multistep",
+                scheduler=job.get("scheduler") or "simple",
+                ref_image_size="match",
+                models=models,
+                filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
+                silent_audio=silent,
                 lora_name=lora_name,
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),

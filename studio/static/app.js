@@ -7554,6 +7554,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
                 ? "ref"
                 : "t2v",
         continue_from_job_id: isContinue ? state.continueFrom : null,
+        audio_continuity: isContinue && !!$("continue-audio-continuity")?.checked,
         purpose: state.projectPurpose || null,
         silent_audio: state.projectSilent || state.projectPurpose === "music_video",
       };

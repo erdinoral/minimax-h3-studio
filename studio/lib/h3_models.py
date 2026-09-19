@@ -126,7 +126,7 @@ def reset() -> dict[str, str]:
 def resolve(graph: str = "fl2va", overrides: Optional[dict[str, Any]] = None) -> dict[str, str]:
     """Return Comfy loader names for this graph (unet/clip/vae/audio_vae)."""
     g = (graph or "fl2va").strip().lower()
-    base = dict(REF2VA_MODELS if g in ("ref2va", "ref", "face", "v2v", "face_continue") else DEFAULT_MODELS)
+    base = dict(REF2VA_MODELS if g in ("ref2va", "ref", "face", "v2v", "face_continue", "audio_continue") else DEFAULT_MODELS)
     saved = load()
     if overrides:
         for k, v in overrides.items():
@@ -140,7 +140,7 @@ def resolve(graph: str = "fl2va", overrides: Optional[dict[str, Any]] = None) ->
     if saved.get("audio_vae"):
         base["audio_vae"] = saved["audio_vae"]
 
-    if g in ("ref2va", "ref", "face", "v2v", "face_continue"):
+    if g in ("ref2va", "ref", "face", "v2v", "face_continue", "audio_continue"):
         if saved.get("unet_ref2va"):
             base["unet"] = saved["unet_ref2va"]
     else:
@@ -151,7 +151,7 @@ def resolve(graph: str = "fl2va", overrides: Optional[dict[str, Any]] = None) ->
 
 def graph_for_mode(mode: Optional[str]) -> str:
     m = (mode or "t2v").strip().lower()
-    if m in ("ref", "face", "v2v", "face_continue"):
+    if m in ("ref", "face", "v2v", "face_continue", "audio_continue"):
         return "ref2va"
     if m == "multishot":
         return "fl2va"

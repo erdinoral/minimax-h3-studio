@@ -99,6 +99,22 @@ def extract_last_frame(video_path: Path, out_path: Path) -> Path:
     raise RuntimeError(f"son kare alınamadı: {last_err or 'ffmpeg çıktı vermedi'}")
 
 
+def extract_audio_tail(video_path: Path, out_path: Path, seconds: float = 5.0) -> Path:
+    """Export the final audio window as PCM WAV for an H3 audio reference."""
+    video_path, out_path = Path(video_path), Path(out_path)
+    if not video_path.exists():
+        raise FileNotFoundError(str(video_path))
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    r = _run([
+        _ffmpeg(), "-hide_banner", "-y", "-sseof", f"-{max(1.0, float(seconds)):.2f}",
+        "-i", str(video_path), "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", str(out_path),
+    ])
+    if r.returncode != 0 or not out_path.exists() or out_path.stat().st_size < 1024:
+        detail = ((r.stderr or r.stdout or "")[-500:]).strip()
+        raise RuntimeError(f"önceki klibin sesi alınamadı: {detail or 'ses kanalı yok'}")
+    return out_path
+
+
 def resize_image(src: Path, out_path: Path, width: int, height: int) -> Path:
     """Force exact WxH (H3 first_frame latent pack requires matching size)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)

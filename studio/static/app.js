@@ -1168,6 +1168,36 @@
     tToast(isFace ? "toast.faceReady" : "toast.refReady", { n: String(target.length) });
   }
 
+  let imageStudioQueuePoll = null;
+
+  async function refreshImageStudioQueue() {
+    try {
+      const r = await fetch("/api/image-studio/status");
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.available) return;
+      const label = tf("imageStudio.queue", {
+        running: String(data.running || 0),
+        queued: String(data.queued || 0),
+      });
+      ["image-studio-ref-status", "first-frame-generate-status"].forEach((id) => {
+        const el = $(id);
+        if (el) el.textContent = label;
+      });
+    } catch (_) {
+      // The generation request below gives the actionable error if unavailable.
+    }
+  }
+
+  function startImageStudioQueuePoll() {
+    void refreshImageStudioQueue();
+    if (!imageStudioQueuePoll) imageStudioQueuePoll = setInterval(() => void refreshImageStudioQueue(), 2500);
+  }
+
+  function stopImageStudioQueuePoll() {
+    if (imageStudioQueuePoll) clearInterval(imageStudioQueuePoll);
+    imageStudioQueuePoll = null;
+  }
+
   async function generateImageStudioReference() {
     const button = $("btn-image-studio-ref");
     const status = $("image-studio-ref-status");
@@ -1182,6 +1212,7 @@
     }
     if (button) button.disabled = true;
     if (status) status.textContent = tt("imageStudio.working");
+    startImageStudioQueuePoll();
     try {
       const r = await fetch("/api/image-studio/reference", {
         method: "POST",
@@ -1200,6 +1231,7 @@
     } catch (e) {
       toast(String(e.message || e));
     } finally {
+      stopImageStudioQueuePoll();
       if (button) button.disabled = false;
       if (status) status.textContent = tt("imageStudio.hint");
     }
@@ -1354,6 +1386,7 @@
       button.textContent = tt("imageStudio.working");
     }
     if (status) status.textContent = tt("imageStudio.working");
+    startImageStudioQueuePoll();
     try {
       const r = await fetch("/api/image-studio/reference", {
         method: "POST",
@@ -1367,6 +1400,7 @@
     } catch (e) {
       toast(String(e.message || e));
     } finally {
+      stopImageStudioQueuePoll();
       if (button) {
         button.disabled = false;
         button.textContent = tt("frame.generateWithStudio");

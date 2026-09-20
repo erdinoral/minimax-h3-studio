@@ -3004,15 +3004,25 @@ async def upload_ref(file: UploadFile = File(...)):
 
 @app.get("/api/image-studio/status")
 async def image_studio_status():
-    """Lightweight availability check for the optional local Image Studio bridge."""
+    """Availability plus a privacy-safe summary of Image Studio's live queue."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0)) as client:
             response = await client.get(f"{IMAGE_STUDIO_URL}/api/status")
             response.raise_for_status()
             data = response.json()
-        return {"available": bool(data.get("ok")), "url": IMAGE_STUDIO_URL}
+            jobs_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs")
+            jobs = jobs_response.json() if jobs_response.is_success else []
+        active = [j for j in jobs if str(j.get("status") or "").lower() == "running"]
+        queued = [j for j in jobs if str(j.get("status") or "").lower() == "queued"]
+        return {
+            "available": bool(data.get("ok")),
+            "url": IMAGE_STUDIO_URL,
+            "running": len(active),
+            "queued": len(queued),
+            "progress_label": str(active[0].get("progress_label") or "") if active else "",
+        }
     except Exception:
-        return {"available": False, "url": IMAGE_STUDIO_URL}
+        return {"available": False, "url": IMAGE_STUDIO_URL, "running": 0, "queued": 0}
 
 
 @app.post("/api/image-studio/reference")

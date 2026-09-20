@@ -127,6 +127,7 @@ ALLOWED_DURATIONS = (4, 5, 6, 8, 10, 15)
 LOGS = ROOT / "logs"
 JOBS_FILE = DATA / "jobs.json"
 GALLERY_FILE = DATA / "gallery.json"
+REFS_META_FILE = DATA / "refs_meta.json"
 SESSIONS_FILE = DATA / "director_sessions.json"
 LLM_SETTINGS_FILE = DATA / "llm_settings.json"
 NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
@@ -717,6 +718,30 @@ def _save_gallery():
     data = json.dumps(_gallery, indent=2, ensure_ascii=False)
     tmp.write_text(data, encoding="utf-8")
     tmp.replace(GALLERY_FILE)
+
+
+def _load_ref_meta() -> dict[str, dict]:
+    try:
+        raw = json.loads(REFS_META_FILE.read_text(encoding="utf-8")) if REFS_META_FILE.exists() else {}
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_ref_meta(meta: dict[str, dict]) -> None:
+    REFS_META_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = REFS_META_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(REFS_META_FILE)
+
+
+def _set_ref_prompt(filename: str, prompt: str, source: str = "") -> None:
+    name = Path(filename).name
+    if not name or not prompt.strip():
+        return
+    meta = _load_ref_meta()
+    meta[name] = {"prompt": prompt.strip(), "source": source, "saved_at": time.time()}
+    _save_ref_meta(meta)
 
 
 def _load_gallery():
@@ -3085,6 +3110,7 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
                     result = await _import_reference_bytes(
                         image_response.content, f"image_studio_{image_job_id[:12]}.png"
                     )
+                    _set_ref_prompt(result.get("filename") or "", prompt, "image-studio")
                     result.update({"source": "image-studio", "image_studio_job_id": image_job_id})
                     return result
                 if status in ("error", "cancelled", "canceled"):
@@ -3184,6 +3210,7 @@ async def get_ref_video(filename: str):
 async def list_refs():
     """Images available to H3, newest first, for the photo gallery."""
     image_exts = {".png", ".jpg", ".jpeg", ".webp"}
+    meta = _load_ref_meta()
     items = []
     for path in REFS.iterdir() if REFS.exists() else []:
         if not path.is_file() or path.suffix.lower() not in image_exts:
@@ -3197,6 +3224,8 @@ async def list_refs():
             "url": f"/api/refs/{path.name}",
             "created_at": stat.st_mtime,
             "bytes": stat.st_size,
+            "prompt": str((meta.get(path.name) or {}).get("prompt") or ""),
+            "source": str((meta.get(path.name) or {}).get("source") or ""),
         })
     items.sort(key=lambda item: float(item["created_at"]), reverse=True)
     return {"items": items, "count": len(items)}
@@ -3212,6 +3241,9 @@ async def delete_ref(filename: str):
             removed = _unlink_retry(path) or removed
     if not removed:
         raise HTTPException(404, "görsel yok")
+    meta = _load_ref_meta()
+    if meta.pop(name, None) is not None:
+        _save_ref_meta(meta)
     slog.info("reference image deleted", filename=name)
     return {"ok": True, "filename": name}
 

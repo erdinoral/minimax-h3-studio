@@ -7297,11 +7297,29 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
           : bytes ? `${Math.max(1, Math.round(bytes / 1024))} KB` : "";
         const format = String(photo.name || "").split(".").pop()?.toUpperCase() || "IMAGE";
-        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" /><div class="meta"><span class="gallery-photo-meta">${format}${size ? " · " + size : ""}${when ? " · " + when : ""}</span></div>`;
+        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><div class="gallery-thumb"><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" />${photo.prompt ? `<button type="button" class="gallery-prompt" title="${tt("gallery.promptTitle")}">P</button>` : ""}<button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button></div><div class="meta"><span class="gallery-photo-meta">${format}${size ? " · " + size : ""}${when ? " · " + when : ""}</span></div>`;
         const image = card.querySelector(".gallery-photo");
         image.onload = () => {
           const meta = card.querySelector(".gallery-photo-meta");
           if (meta) meta.textContent = `${format} · ${image.naturalWidth}×${image.naturalHeight}${size ? " · " + size : ""}${when ? " · " + when : ""}`;
+        };
+        const promptButton = card.querySelector(".gallery-prompt");
+        if (promptButton) promptButton.onclick = (event) => {
+          event.stopPropagation();
+          openPromptView(photo.prompt, `${format}${size ? " · " + size : ""}`, "");
+        };
+        const deleteButton = card.querySelector(".gallery-del");
+        if (deleteButton) deleteButton.onclick = async (event) => {
+          event.stopPropagation();
+          if (!tConfirm("confirm.deleteCard")) return;
+          try {
+            const response = await fetch(`/api/refs/${encodeURIComponent(photo.name)}`, { method: "DELETE" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(errDetail(data));
+            await renderGalleryPhotos();
+          } catch (error) {
+            toast(String(error.message || error));
+          }
         };
         card.onclick = () => openCinemaStill(photo.url, photo.name || tt("gallery.photo"));
         grid.appendChild(card);

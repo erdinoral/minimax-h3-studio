@@ -10043,7 +10043,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   pollSystem();
   refreshJobs();
   void loadDirectorSessions().then(() => refreshDirectorStatus());
-  void loadStudioSettings().then(() => loadLoras());
+  // LoRAs are independent from optional Studio settings. Do not make their
+  // picker wait for that request: a missing/older settings endpoint used to
+  // leave the otherwise healthy local LoRA list permanently blank.
+  void loadStudioSettings();
+  void loadLoras();
+  setTimeout(() => void loadLoras(), 1200);
   syncDirectorDockHeight();
   window.addEventListener("resize", syncDirectorDockHeight);
   setInterval(syncDirectorDockHeight, 2000);

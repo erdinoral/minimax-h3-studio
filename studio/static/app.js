@@ -1128,6 +1128,7 @@
       const card = document.createElement("div");
       card.className = "ref-thumb";
       card.innerHTML = `<span class="ref-ord">&lt;Picture ${i + 1}&gt;</span><img src="${item.url}" alt="ref ${i + 1}" /><button type="button" title="${tt("pick.remove")}">×</button>`;
+      card.querySelector("img").onclick = () => openCinemaStill(item.url, item.name || `Picture ${i + 1}`);
       card.querySelector("button").onclick = async () => {
         if (!(await deleteUploadedMedia(item))) return;
         list.splice(i, 1);
@@ -1266,6 +1267,8 @@
         ? `<video src="${item.url}" muted preload="metadata"></video>`
         : `<img src="${item.url}" alt="${label}" />`;
       card.innerHTML = `<span class="ref-ord">${label}</span>${media}<button type="button" title="${tt("pick.remove")}">×</button>`;
+      const image = card.querySelector("img");
+      if (image) image.onclick = () => openCinemaStill(item.url, item.name || label);
       card.querySelector("button").onclick = async () => {
         if (!(await deleteUploadedMedia(item))) return;
         list.splice(i, 1);

@@ -889,6 +889,7 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   height: 100%;
   object-fit: cover;
   display: block;
+  cursor: zoom-in;
 }
 .ref-thumb .ref-ord {
   position: absolute;

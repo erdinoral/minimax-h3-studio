@@ -1762,6 +1762,26 @@ async def startup():
             j["error"] = None
             j["_reattach"] = True
             slog.info_job(j, "startup reattach", prompt=str(pid)[:8])
+        elif (
+            pid
+            and j.get("status") == "error"
+            and str(j.get("error") or "").startswith("timeout")
+        ):
+            # An old watchdog can time out while Comfy keeps working. If the
+            # result landed meanwhile, queue it once more only to download and
+            # archive that existing output — never render it again.
+            try:
+                hist = await comfy.history(str(pid))
+                entry = hist.get(str(pid)) or {}
+                video_meta = comfy.extract_video_meta(entry.get("outputs") or {})
+                if video_meta:
+                    j["status"] = "queued"
+                    j["progress_label"] = "Comfy çıktısı bulundu — galeriye alınıyor"
+                    j["error"] = None
+                    j["_reattach"] = True
+                    slog.info_job(j, "startup recover completed timeout", prompt=str(pid)[:8])
+            except Exception as e:
+                slog.warn_job(j, "startup timeout recovery skipped", err=e)
         elif j.get("status") in ("queued", "running"):
             j["status"] = "queued"
             j["progress_label"] = "sırada (yeniden)"

@@ -33,6 +33,8 @@
     selectedCharacter: null,
     galleryItems: [],
     galleryKind: "video", // video | photo
+    galleryPhotoSelectMode: false,
+    galleryPhotoPickNames: [],
     mergePickIds: [],
     galleryMergeMode: false,
     cinemaStudioMode: "seamless",
@@ -7267,6 +7269,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       button.classList.toggle("on", button.dataset.galleryKind === state.galleryKind);
     });
     $("btn-gallery-concat")?.classList.toggle("hidden", state.galleryKind !== "video");
+    $("btn-gallery-photo-select")?.classList.toggle("hidden", state.galleryKind !== "photo");
+    $("btn-gallery-photo-delete")?.classList.toggle("hidden", state.galleryKind !== "photo" || !state.galleryPhotoSelectMode);
     $("btn-gallery-merge-cancel")?.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryMergeMode);
     if (state.galleryKind !== "video" && state.galleryMergeMode) exitGalleryMergeMode();
     else void renderGallery();
@@ -7297,7 +7301,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
           : bytes ? `${Math.max(1, Math.round(bytes / 1024))} KB` : "";
         const format = String(photo.name || "").split(".").pop()?.toUpperCase() || "IMAGE";
-        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><div class="gallery-thumb"><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" />${photo.prompt ? `<button type="button" class="gallery-prompt" title="${tt("gallery.promptTitle")}">P</button>` : ""}<button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button></div><div class="meta"><span class="gallery-photo-meta">${format}${size ? " · " + size : ""}${when ? " · " + when : ""}</span></div>`;
+        const picked = state.galleryPhotoPickNames.includes(photo.name);
+        card.classList.toggle("is-merge-picked", state.galleryPhotoSelectMode && picked);
+        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><div class="gallery-thumb"><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" />${state.galleryPhotoSelectMode ? `<button type="button" class="gallery-merge-pick"><span class="gallery-merge-ring${picked ? " is-on" : ""}"></span><span class="gallery-merge-badge${picked ? " is-on" : ""}">${picked ? "✓" : ""}</span></button>` : ""}${photo.prompt ? `<button type="button" class="gallery-prompt" title="${tt("gallery.promptTitle")}">P</button>` : ""}<button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button></div><div class="meta"><span class="gallery-photo-meta">${format}${size ? " · " + size : ""}${when ? " · " + when : ""}</span></div>`;
         const image = card.querySelector(".gallery-photo");
         image.onload = () => {
           const meta = card.querySelector(".gallery-photo-meta");
@@ -7321,12 +7327,44 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             toast(String(error.message || error));
           }
         };
-        card.onclick = () => openCinemaStill(photo.url, photo.name || tt("gallery.photo"));
+        const pickButton = card.querySelector(".gallery-merge-pick");
+        if (pickButton) pickButton.onclick = (event) => { event.stopPropagation(); toggleGalleryPhotoPick(photo.name); };
+        card.onclick = () => state.galleryPhotoSelectMode ? toggleGalleryPhotoPick(photo.name) : openCinemaStill(photo.url, photo.name || tt("gallery.photo"));
         grid.appendChild(card);
       });
     } catch {
       grid.innerHTML = `<p class="muted">${tt("gallery.fail")}</p>`;
     }
+  }
+
+  function toggleGalleryPhotoPick(name) {
+    const index = state.galleryPhotoPickNames.indexOf(name);
+    if (index >= 0) state.galleryPhotoPickNames.splice(index, 1);
+    else state.galleryPhotoPickNames.push(name);
+    syncGalleryPhotoToolbar();
+    void renderGalleryPhotos();
+  }
+
+  function syncGalleryPhotoToolbar() {
+    const select = $("btn-gallery-photo-select");
+    const remove = $("btn-gallery-photo-delete");
+    if (select) select.textContent = state.galleryPhotoSelectMode ? "Seçimi bitir" : "Fotoğraf seç";
+    if (remove) { remove.textContent = `Seçilenleri sil (${state.galleryPhotoPickNames.length})`; remove.disabled = !state.galleryPhotoPickNames.length; }
+  }
+
+  async function deletePickedGalleryPhotos() {
+    const names = [...state.galleryPhotoPickNames];
+    if (!names.length || !confirm(`Seçili ${names.length} fotoğraf silinsin mi?`)) return;
+    try {
+      await Promise.all(names.map(async (name) => {
+        const response = await fetch(`/api/refs/${encodeURIComponent(name)}`, { method: "DELETE" });
+        if (!response.ok) throw new Error(name);
+      }));
+      state.galleryPhotoPickNames = [];
+      state.galleryPhotoSelectMode = false;
+      syncGalleryPhotoToolbar();
+      await renderGalleryPhotos();
+    } catch (error) { toast(String(error.message || error)); }
   }
 
   async function renderGallery() {
@@ -9728,6 +9766,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   document.querySelectorAll("#gallery-kind-switch [data-gallery-kind]").forEach((button) => {
     button.addEventListener("click", () => setGalleryKind(button.dataset.galleryKind));
   });
+  $("btn-gallery-photo-select")?.addEventListener("click", () => {
+    state.galleryPhotoSelectMode = !state.galleryPhotoSelectMode;
+    if (!state.galleryPhotoSelectMode) state.galleryPhotoPickNames = [];
+    syncGalleryPhotoToolbar();
+    void renderGalleryPhotos();
+  });
+  $("btn-gallery-photo-delete")?.addEventListener("click", () => void deletePickedGalleryPhotos());
   $("btn-gallery-close")?.addEventListener("click", () => {
     exitGalleryMergeMode();
     $("view-gallery")?.classList.add("hidden");

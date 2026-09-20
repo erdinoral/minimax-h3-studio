@@ -7287,7 +7287,22 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       photos.forEach((photo, i) => {
         const card = document.createElement("div");
         card.className = "gallery-card gallery-photo-card";
-        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" /><div class="meta">${photo.name || ""}</div>`;
+        const when = photo.created_at
+          ? new Date(Number(photo.created_at) * 1000).toLocaleString(uiLang() === "en" ? "en-US" : "tr-TR", {
+              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
+            })
+          : "";
+        const bytes = Number(photo.bytes || 0);
+        const size = bytes >= 1024 * 1024
+          ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+          : bytes ? `${Math.max(1, Math.round(bytes / 1024))} KB` : "";
+        const format = String(photo.name || "").split(".").pop()?.toUpperCase() || "IMAGE";
+        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" /><div class="meta"><span class="gallery-photo-meta">${format}${size ? " · " + size : ""}${when ? " · " + when : ""}</span></div>`;
+        const image = card.querySelector(".gallery-photo");
+        image.onload = () => {
+          const meta = card.querySelector(".gallery-photo-meta");
+          if (meta) meta.textContent = `${format} · ${image.naturalWidth}×${image.naturalHeight}${size ? " · " + size : ""}${when ? " · " + when : ""}`;
+        };
         card.onclick = () => openCinemaStill(photo.url, photo.name || tt("gallery.photo"));
         grid.appendChild(card);
       });

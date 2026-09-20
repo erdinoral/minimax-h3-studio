@@ -1824,6 +1824,7 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 #view-cinema {
   z-index: 92;
 }
+#view-gallery { background: rgba(9, 7, 6, 0.98); }
 /* Prompt must sit above gallery when opened from a gallery card */
 #view-clip-prompt {
   z-index: 96;

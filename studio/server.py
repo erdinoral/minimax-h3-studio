@@ -2250,8 +2250,8 @@ async def generate(body: GenerateBody):
         continue_from = None
         first_frame = None
         last_frame = None
-        if not ref_videos and not ref_images:
-            raise HTTPException(400, "V2V için en az 1 video veya görsel referans yükle")
+        if not ref_videos:
+            raise HTTPException(400, "Motion Transfer için en az 1 hareket referans videosu yükle")
         if len(ref_videos) > 3:
             raise HTTPException(400, "En fazla 3 referans video")
         if len(ref_images) > 9:

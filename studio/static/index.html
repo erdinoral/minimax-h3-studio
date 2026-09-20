@@ -77,7 +77,7 @@
           <button type="button" class="chip on" data-mode="t2v" id="mode-t2v">Yeni video</button>
           <button type="button" class="chip" data-mode="continue" id="mode-continue">Videoyu devam ettir</button>
           <button type="button" class="chip" data-mode="ref" id="mode-ref">Referans</button>
-          <button type="button" class="chip" data-mode="v2v" id="mode-v2v">V2V / video ref</button>
+          <button type="button" class="chip" data-mode="v2v" id="mode-v2v">Motion Transfer</button>
           <button type="button" class="chip" data-mode="face" id="mode-face">Yüz referansı</button>
         </div>
 
@@ -212,8 +212,8 @@
         </div>
 
         <div id="panel-mode-v2v" class="hidden">
-          <p class="muted mode-hint">Video-to-video (Ref2VA): senin kliğin hareket/kamera referansı; hedef karakter için foto ekle. Studio otomatik olarak <code>&lt;Video 1&gt;</code> = hareket, <code>&lt;Picture 1&gt;</code> = görünüm şeklinde bağlar.</p>
-          <label id="v2v-motion-label">Motion video (1–3)</label>
+          <p class="muted mode-hint">Motion Transfer: referans video hareket/kamera içindir; hedef karakter için foto ekle. Studio otomatik olarak <code>&lt;Video 1&gt;</code> = hareket, <code>&lt;Picture 1&gt;</code> = görünüm şeklinde bağlar.</p>
+          <label id="v2v-motion-label">Hareket referans videosu (1–3)</label>
           <label class="file-pick">
             <input type="file" id="v2v-video-files" class="file-pick-input" accept="video/*" multiple />
             <span class="file-pick-btn" data-i18n="pick.video">Video seç</span>
@@ -1201,7 +1201,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema117" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema118" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
   <script src="/static/app.js?v=cinema119" charset="utf-8"></script>
 </body>

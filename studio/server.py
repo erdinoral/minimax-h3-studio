@@ -863,6 +863,51 @@ def _sweep_orphaned_media() -> dict[str, int]:
     slog.info("orphan media sweep", **removed)
     return removed
 
+
+def _find_comfy_video_for_job(job_id: str) -> Optional[Path]:
+    """Find a retained H3 output even after ComfyUI history was cleared."""
+    prefix = str(job_id or "")[:8]
+    if not prefix:
+        return None
+    matches: list[Path] = []
+    for folder_name in ("H3_Studio", "H3_Studio_Ref"):
+        folder = COMFY_OUTPUT / "video" / folder_name
+        if folder.is_dir():
+            matches.extend(p for p in folder.glob(f"{prefix}*.mp4") if p.is_file())
+    if not matches:
+        return None
+    return max(matches, key=lambda p: p.stat().st_mtime)
+
+
+async def _recover_saved_comfy_video(job: dict, source: Path) -> None:
+    """Adopt an existing Comfy output into the job and permanent gallery."""
+    dest = CLIPS / f"{job['id']}.mp4"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if source.resolve() != dest.resolve():
+        shutil.copy2(source, dest)
+    subfolder = "video/H3_Studio_Ref" if "H3_Studio_Ref" in source.parts else "video/H3_Studio"
+    job["output"] = {
+        "filename": source.name,
+        "subfolder": subfolder,
+        "type": "output",
+        "url": f"/api/clips/{job['id']}/video",
+    }
+    job["local_path"] = str(dest)
+    job["download_name"] = video_download_name(job, item_id=job["id"])
+    job["status"] = "done"
+    job["progress"] = 100
+    job["progress_label"] = "bitti (Comfy çıktısı kurtarıldı)"
+    job["error"] = None
+    job["done_at"] = job.get("done_at") or time.time()
+    job.pop("_reattach", None)
+    try:
+        await _prepare_last_frame(job, upload=True)
+    except Exception as e:
+        job["last_frame_error"] = str(e)[-300:]
+        slog.warn_job(job, "recovered video last frame failed", err=e)
+    _archive_job_to_gallery(job)
+    slog.info_job(job, "saved Comfy output recovered", file=source.name)
+
 def _archive_job_to_gallery(job: dict) -> None:
     """Copy finished clip into permanent gallery. Survives wipe / clear jobs."""
     global _gallery
@@ -1782,6 +1827,16 @@ async def startup():
                     slog.info_job(j, "startup recover completed timeout", prompt=str(pid)[:8])
             except Exception as e:
                 slog.warn_job(j, "startup timeout recovery skipped", err=e)
+            if j.get("status") == "error":
+                # Comfy may clear its history after a restart. Its SaveVideo
+                # file is still named with the Studio job id, so recover it
+                # from disk instead of rendering the same clip again.
+                saved = _find_comfy_video_for_job(str(j.get("id") or ""))
+                if saved:
+                    try:
+                        await _recover_saved_comfy_video(j, saved)
+                    except Exception as e:
+                        slog.warn_job(j, "startup saved video recovery skipped", err=e)
         elif j.get("status") in ("queued", "running"):
             j["status"] = "queued"
             j["progress_label"] = "sırada (yeniden)"

@@ -1183,6 +1183,12 @@ class ImageStudioReferenceBody(BaseModel):
     steps: int = Field(30, ge=1, le=80)
 
 
+class MotionTransferChainBody(GenerateBody):
+    """Short, GPU-safe motion-transfer chain (first clip + continuations)."""
+
+    segments: int = Field(3, ge=2, le=6)
+
+
 class BatchBody(BaseModel):
     prompts: list[str]
     duration: int = 5
@@ -2477,6 +2483,53 @@ async def generate(body: GenerateBody):
         videos=len(ref_videos),
     )
     return job
+
+
+@app.post("/api/motion-transfer/chain")
+async def motion_transfer_chain(body: MotionTransferChainBody):
+    """Queue a GPU-safe Motion Transfer sequence: first motion clip + continues.
+
+    The first job receives the motion video. Its children preserve the target
+    appearance and continue from the previous generated frame, avoiding a
+    single expensive 15-second render.
+    """
+    if body.duration != 5:
+        raise HTTPException(400, "15 sn Motion Transfer zinciri 3 × 5 sn olarak çalışır")
+    if not body.ref_videos:
+        raise HTTPException(400, "Motion Transfer zinciri için hareket referans videosu yükle")
+
+    first_body = body.model_copy(deep=True)
+    first_body.mode = "v2v"
+    first_body.continue_from_job_id = None
+    first = await generate(first_body)
+    created = [first]
+    parent_id = first["id"]
+    for _ in range(int(body.segments) - 1):
+        child_body = body.model_copy(deep=True)
+        child_body.mode = "continue"
+        child_body.continue_from_job_id = parent_id
+        child_body.ref_videos = None
+        # Keep target stills: the existing face-continue path combines them
+        # with the parent last frame once it becomes available.
+        child = await generate(child_body)
+        created.append(child)
+        parent_id = child["id"]
+
+    chain_id = f"motion-{first['id'][:12]}"
+    async with _lock:
+        for index, created_job in enumerate(created, start=1):
+            known = next((j for j in _jobs if j.get("id") == created_job["id"]), None)
+            if known is not None:
+                known.update(
+                    {
+                        "batch_id": chain_id,
+                        "batch_index": index,
+                        "batch_total": len(created),
+                        "motion_transfer_chain": True,
+                    }
+                )
+        _save_jobs()
+    return {**created[0], "jobs": created, "count": len(created), "chain_id": chain_id}
 
 
 @app.post("/api/batch")

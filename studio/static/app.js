@@ -7613,6 +7613,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const isFace = mode === "face";
     const isV2v = mode === "v2v";
     const isI2v = mode === "t2v" && state.newVideoInput === "i2v";
+    const motionChain = isV2v && !!$("motion-chain-15")?.checked;
     if (isContinue) {
       const pick = $("continue-source")?.value || state.continueFrom || "";
       if (pick) {
@@ -7635,8 +7636,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       tToast("toast.faceNeedPortrait");
       return false;
     }
-    if (isV2v && !state.v2vVideos.length && !state.v2vImages.length) {
+    if (isV2v && !state.v2vVideos.length) {
       tToast("toast.v2vNeedMedia");
+      return false;
+    }
+    if (motionChain && state.duration !== 5) {
+      tToast("toast.motionChainFiveSec");
       return false;
     }
     if (isI2v && !state.firstFrameName) {
@@ -7685,6 +7690,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_image_size = state.refImageSize || "match";
         body.include_video_audio = !!$("v2v-include-audio")?.checked;
       }
+      if (motionChain) body.segments = 3;
       if (isI2v) {
         if (state.firstFrameName) body.first_frame_name = state.firstFrameName;
         if (state.lastFrameName) body.last_frame_name = state.lastFrameName;
@@ -7694,7 +7700,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_images = state.faceImages.map((x) => x.name);
         body.ref_image_size = "max";
       }
-      const r = await fetch("/api/generate", {
+      const r = await fetch(motionChain ? "/api/motion-transfer/chain" : "/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -7711,7 +7717,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.pendingContinueChild = isContinue ? data.id : null;
       state.prodLane = "scene";
       setProdLane("scene");
-      const queuedLabel = isContinue
+      const queuedLabel = motionChain
+        ? tt("toast.motionChainQueued")
+        : isContinue
         ? faceLockOn
           ? tt("toast.continueFaceQueued")
           : tt("toast.continueQueued")

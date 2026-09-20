@@ -7135,7 +7135,11 @@ async def _run_job(job: dict):
     )
 
     try:
-        for tick in range(7200):  # up to ~2h for long H3 runs
+        # This includes time waiting inside ComfyUI, not just sampling time.
+        # A Full HD batch can legitimately wait behind earlier H3 renders for
+        # more than two hours, so a 2h wall incorrectly marked live Comfy
+        # prompts as failed. The user can still cancel a genuinely stuck job.
+        for tick in range(43200):  # up to 12h for long / queued H3 runs
             if job["status"] == "cancelled":
                 return
             try:
@@ -7326,7 +7330,7 @@ async def _run_job(job: dict):
                         return
             await asyncio.sleep(1)
         job["status"] = "error"
-        job["error"] = "timeout — Comfy yanıt vermedi"
+        job["error"] = "timeout (12 saat) — Comfy yanıt vermedi"
         job["progress_label"] = "timeout"
         _save_jobs()
         slog.error_job(job, "hard timeout")

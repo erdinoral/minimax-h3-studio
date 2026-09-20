@@ -2695,6 +2695,7 @@ button.cinema-fold-toggle:hover {
   margin: 0 0 7px;
 }
 .frame-generate-btn { width: 100%; }
+.image-studio-quality { margin: 0 0 7px; }
 .frame-generate-status {
   display: block;
   min-height: 1.2em;

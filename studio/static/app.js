@@ -43,6 +43,7 @@
     firstFrameName: null,
     lastFrameName: null,
     refImageSize: "match",
+    imageStudioSteps: 30,
     directorSessionId: null,
     directorReady: false,
     directorBrief: null,
@@ -1224,7 +1225,7 @@
         body: JSON.stringify({
           prompt,
           aspect: state.aspect || "16:9",
-          steps: 30,
+          steps: state.imageStudioSteps,
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -1397,7 +1398,7 @@
       const r = await fetch("/api/image-studio/reference", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, aspect: state.aspect || "16:9", steps: 30 }),
+        body: JSON.stringify({ prompt, aspect: state.aspect || "16:9", steps: state.imageStudioSteps }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
@@ -8590,6 +8591,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     e.target.value = "";
   });
   $("btn-image-studio-ref")?.addEventListener("click", () => void generateImageStudioReference());
+  document.querySelectorAll("[data-image-steps]").forEach((button) => button.addEventListener("click", () => {
+    state.imageStudioSteps = Number(button.dataset.imageSteps) <= 20 ? 20 : 30;
+    document.querySelectorAll("[data-image-steps]").forEach((item) => item.classList.toggle("on", Number(item.dataset.imageSteps) === state.imageStudioSteps));
+  }));
   $("face-files")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     void uploadRefFiles(e.target.files, "face");

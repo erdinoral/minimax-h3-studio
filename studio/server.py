@@ -3063,7 +3063,7 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
     request_body = {
         "prompt": prompt,
         "aspect": body.aspect,
-        "steps": body.steps,
+        "steps": max(20, min(40, int(body.steps or 30))),
         "mode": "txt2img",
         "count": 1,
     }

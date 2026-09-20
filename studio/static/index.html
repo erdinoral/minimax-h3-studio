@@ -141,6 +141,7 @@
               </div>
               <div id="first-frame-generate-pane" class="hidden">
                 <textarea id="first-frame-prompt" class="frame-prompt" rows="2" data-i18n-placeholder="frame.promptPh" placeholder="Başlangıç karesini anlat…"></textarea>
+                <div class="ios-segment image-studio-quality"><button type="button" data-image-steps="20">Taslak · 20 step</button><button type="button" class="on" data-image-steps="30">Yüksek · 30 step</button></div>
                 <button type="button" class="chip frame-generate-btn" id="btn-first-frame-generate" data-i18n="frame.generateWithStudio">Image Studio ile üret</button>
                 <span id="first-frame-generate-status" class="frame-generate-status" aria-live="polite"></span>
               </div>
@@ -176,6 +177,7 @@
         <div id="panel-mode-ref" class="hidden">
           <p class="muted mode-hint">Genel referans (Ref2VA): stil, sahne, obje, kıyafet… Video bu kareden <em>başlamaz</em> — I2V için Yeni video + İlk kare. Prompt’ta <code>&lt;Picture 1&gt;</code>.</p>
           <div class="image-studio-bridge">
+            <div class="ios-segment image-studio-quality"><button type="button" data-image-steps="20">Taslak · 20 step</button><button type="button" class="on" data-image-steps="30">Yüksek · 30 step</button></div>
             <button type="button" class="chip" id="btn-image-studio-ref" data-i18n="imageStudio.generate">Image Studio ile görsel üret</button>
             <span class="muted" id="image-studio-ref-status" data-i18n="imageStudio.hint">Qwen Image · görsel otomatik referanslara eklenir</span>
           </div>
@@ -1195,6 +1197,6 @@
 
   <script src="/static/i18n.js?v=cinema120" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema129" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema130" charset="utf-8"></script>
 </body>
 </html>

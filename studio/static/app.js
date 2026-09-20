@@ -8009,14 +8009,23 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
-  async function loadLoras() {
+  async function loadLoras(retry = true) {
+    const checks = $("lora-check-list");
     try {
-      const data = await fetch("/api/loras").then((r) => r.json());
+      const response = await fetch("/api/loras", { cache: "no-store" });
+      if (!response.ok) throw new Error(`LoRA listesi alınamadı (${response.status})`);
+      const data = await response.json();
+      if (!Array.isArray(data.loras)) throw new Error("LoRA listesi geçersiz yanıt verdi");
       state.loraCatalog = data.loras || [];
       state.loraDownload = data.download || {};
       fillLoraSelect();
-    } catch {
-      /* until Studio restart */
+    } catch (e) {
+      if (checks) {
+        checks.innerHTML = `<span class="muted">${htmlEsc(String(e.message || e))}</span>`;
+      }
+      // A Studio restart / cold Comfy start can race the first request. Retry
+      // once so the picker does not remain blank without feedback.
+      if (retry) setTimeout(() => void loadLoras(false), 1200);
     }
   }
 
@@ -8181,6 +8190,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     updateLoraHint();
   });
+  $("btn-lora-refresh")?.addEventListener("click", () => void loadLoras());
   $("cinema-lora-select")?.addEventListener("change", () => {
     if ($("lora-select") && $("cinema-lora-select")) {
       $("lora-select").value = $("cinema-lora-select").value;

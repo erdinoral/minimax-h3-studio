@@ -7693,7 +7693,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (motionChain) body.segments = 3;
       if (isI2v) {
         if (state.firstFrameName) body.first_frame_name = state.firstFrameName;
-        if (state.lastFrameName) body.last_frame_name = state.lastFrameName;
       }
       // Continue + yüz kilidi → portreleri de gönder (sunucu last frame ile birleştirir)
       if (isContinue && faceLockOn) {
@@ -9107,13 +9106,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     btn.addEventListener("click", () => setFrameSource(btn.dataset.frame, btn.dataset.frameSource));
   });
   $("btn-first-frame-generate")?.addEventListener("click", () => void generateSingleFrame("first"));
-  $("btn-last-frame-generate")?.addEventListener("click", () => void generateSingleFrame("last"));
-  $("last-frame-file")?.addEventListener("change", (e) => {
-    syncFilePickName(e.target);
-    const f = e.target.files && e.target.files[0];
-    void uploadSingleFrame(f, "last");
-    e.target.value = "";
-  });
   $("continue-source")?.addEventListener("change", () => {
     const id = $("continue-source").value;
     if (id) void setContinueMode(id);

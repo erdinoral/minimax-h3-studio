@@ -8753,7 +8753,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const toggle = e.target.closest(".cinema-fold-toggle");
     if (!toggle) return;
     const key = toggle.dataset.fold;
-    if (key !== "characters" && key !== "locations") return;
+    if (key !== "characters" && key !== "creatures" && key !== "locations") return;
     e.preventDefault();
     setCinemaFold(key, cinemaFoldState()[key] === false);
   });

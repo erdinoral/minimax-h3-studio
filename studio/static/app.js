@@ -1336,13 +1336,20 @@
   }
 
   async function generateSingleFrame(which) {
-    const prompt = $(`${which}-frame-prompt`)?.value.trim() || "";
+    // A dedicated frame prompt is optional: re-use the scene prompt so that
+    // pressing the Image Studio button always has an intuitive result.
+    const prompt = ($(`${which}-frame-prompt`)?.value || $("prompt")?.value || "").trim();
     const button = $(`btn-${which}-frame-generate`);
+    const status = $(`${which}-frame-generate-status`);
     if (!prompt) {
       toast(tt("frame.promptPh"));
       return;
     }
-    if (button) button.disabled = true;
+    if (button) {
+      button.disabled = true;
+      button.textContent = tt("imageStudio.working");
+    }
+    if (status) status.textContent = tt("imageStudio.working");
     try {
       const r = await fetch("/api/image-studio/reference", {
         method: "POST",
@@ -1356,7 +1363,11 @@
     } catch (e) {
       toast(String(e.message || e));
     } finally {
-      if (button) button.disabled = false;
+      if (button) {
+        button.disabled = false;
+        button.textContent = tt("frame.generateWithStudio");
+      }
+      if (status) status.textContent = "";
     }
   }
 

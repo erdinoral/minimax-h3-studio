@@ -2686,6 +2686,14 @@ button.cinema-fold-toggle:hover {
   margin: 0 0 7px;
 }
 .frame-generate-btn { width: 100%; }
+.frame-generate-status {
+  display: block;
+  min-height: 1.2em;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
 .cinema-asset {
   margin: 0;
   position: relative;

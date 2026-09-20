@@ -1845,6 +1845,7 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
+.gallery-kind-switch { flex: 0 0 auto; }
 .gallery-order-hint {
   flex: 1;
   text-align: center;
@@ -2055,6 +2056,13 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   background: #000;
   display: block;
 }
+.gallery-card .gallery-photo {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+}
+.gallery-photo-card { cursor: zoom-in; }
 .gallery-card .meta { padding: 8px; font-size: 0.75rem; color: var(--text-muted); }
 .gallery-card .gallery-thumb {
   position: relative;

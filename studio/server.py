@@ -3180,6 +3180,28 @@ async def get_ref_video(filename: str):
     return FileResponse(path, media_type="video/mp4")
 
 
+@app.get("/api/refs")
+async def list_refs():
+    """Images available to H3, newest first, for the photo gallery."""
+    image_exts = {".png", ".jpg", ".jpeg", ".webp"}
+    items = []
+    for path in REFS.iterdir() if REFS.exists() else []:
+        if not path.is_file() or path.suffix.lower() not in image_exts:
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append({
+            "name": path.name,
+            "url": f"/api/refs/{path.name}",
+            "created_at": stat.st_mtime,
+            "bytes": stat.st_size,
+        })
+    items.sort(key=lambda item: float(item["created_at"]), reverse=True)
+    return {"items": items, "count": len(items)}
+
+
 @app.delete("/api/refs/{filename}")
 async def delete_ref(filename: str):
     """Delete an uploaded reference image from Studio and Comfy input."""

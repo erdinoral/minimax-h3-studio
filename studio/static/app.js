@@ -32,6 +32,7 @@
     cinemaSheetRefs: { character: null, location: null, creature: null },
     selectedCharacter: null,
     galleryItems: [],
+    galleryKind: "video", // video | photo
     mergePickIds: [],
     galleryMergeMode: false,
     cinemaStudioMode: "seamless",
@@ -7260,9 +7261,45 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
+  function setGalleryKind(kind) {
+    state.galleryKind = kind === "photo" ? "photo" : "video";
+    document.querySelectorAll("#gallery-kind-switch [data-gallery-kind]").forEach((button) => {
+      button.classList.toggle("on", button.dataset.galleryKind === state.galleryKind);
+    });
+    $("btn-gallery-concat")?.classList.toggle("hidden", state.galleryKind !== "video");
+    $("btn-gallery-merge-cancel")?.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryMergeMode);
+    if (state.galleryKind !== "video" && state.galleryMergeMode) exitGalleryMergeMode();
+    else void renderGallery();
+  }
+
+  async function renderGalleryPhotos() {
+    const grid = $("gallery-grid");
+    if (!grid) return;
+    grid.innerHTML = `<p class="muted">${tt("gallery.loading")}</p>`;
+    try {
+      const data = await fetch("/api/refs").then((r) => r.json());
+      const photos = data.items || [];
+      if (!photos.length) {
+        grid.innerHTML = `<p class="muted">${tt("gallery.photosEmpty")}</p>`;
+        return;
+      }
+      grid.innerHTML = "";
+      photos.forEach((photo, i) => {
+        const card = document.createElement("div");
+        card.className = "gallery-card gallery-photo-card";
+        card.innerHTML = `<div class="gallery-ord">#${photos.length - i}</div><img class="gallery-photo" src="${photo.url}" alt="${photo.name || tt("gallery.photo")}" /><div class="meta">${photo.name || ""}</div>`;
+        card.onclick = () => openCinemaStill(photo.url, photo.name || tt("gallery.photo"));
+        grid.appendChild(card);
+      });
+    } catch {
+      grid.innerHTML = `<p class="muted">${tt("gallery.fail")}</p>`;
+    }
+  }
+
   async function renderGallery() {
     const grid = $("gallery-grid");
     if (!grid) return;
+    if (state.galleryKind === "photo") return renderGalleryPhotos();
     grid.innerHTML = `<p class="muted">${tt("gallery.loading")}</p>`;
     let done = [];
     try {
@@ -9654,6 +9691,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("view-support")?.classList.add("hidden");
     $("view-gallery")?.classList.remove("hidden");
     void renderGallery();
+  });
+  document.querySelectorAll("#gallery-kind-switch [data-gallery-kind]").forEach((button) => {
+    button.addEventListener("click", () => setGalleryKind(button.dataset.galleryKind));
   });
   $("btn-gallery-close")?.addEventListener("click", () => {
     exitGalleryMergeMode();

@@ -779,7 +779,10 @@ def _keep_media_ids() -> set[str]:
     keep = {str(g.get("id") or "") for g in _gallery if g.get("id")}
     for j in _jobs:
         jid = str(j.get("id") or "")
-        if jid and j.get("status") in ("queued", "running"):
+        # A timed-out Studio watcher can still have a completed (or live)
+        # Comfy output. Preserve every job-linked output until the user
+        # explicitly deletes that job; cleanup must never erase recovery data.
+        if jid:
             keep.add(jid)
     keep.discard("")
     return keep

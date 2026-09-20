@@ -2318,11 +2318,11 @@ async def generate(body: GenerateBody):
         mode = "continue"
         last_frame = None
         ref_videos = []
-        # Keep explicit face refs for face-lock continue; else clear generic refs
-        keep_face = bool(ref_images) and (
-            (body.ref_image_size or "").lower() == "max"
-            or len(ref_images) <= 3
-        )
+        # A continue is last-frame I2V.  Never carry a generic/style picture
+        # into it: Ref2VA may otherwise literalize that picture as a poster,
+        # background person, or picture-in-picture.  Only an explicitly tagged
+        # identity reference is allowed to travel with a face-locked chain.
+        keep_face = bool(ref_images) and (body.ref_role or "").strip().lower() == "face"
         if not keep_face:
             ref_images = []
         # No explicit parent → append after chain tip (queued/running/done)

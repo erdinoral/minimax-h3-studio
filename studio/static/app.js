@@ -12,6 +12,7 @@
     quality: "736",
     aspect: "16:9",
     produceMode: "t2v", // t2v | continue | ref | face | v2v | cinema
+    newVideoInput: "t2v", // t2v | i2v (both use the FL2VA graph)
     selectedJobId: null,
     clipPrompt: "",
     clipSeed: "",
@@ -1079,7 +1080,7 @@
     });
     const showSettings = m === "t2v" || m === "ref" || m === "face" || m === "v2v";
     $("panel-mode-new")?.classList.toggle("hidden", !showSettings);
-    $("fl2va-frames")?.classList.toggle("hidden", m !== "t2v");
+    $("fl2va-frames")?.classList.toggle("hidden", m !== "t2v" || state.newVideoInput !== "i2v");
     $("panel-mode-continue")?.classList.toggle("hidden", m !== "continue");
     $("panel-mode-ref")?.classList.toggle("hidden", m !== "ref");
     $("panel-mode-face")?.classList.toggle("hidden", m !== "face");
@@ -1099,6 +1100,18 @@
     }
     if (m === "cinema") void openCinemaStudio();
     if (typeof keepLoraApplied === "function") keepLoraApplied();
+  }
+
+  function setNewVideoInput(mode) {
+    const input = mode === "i2v" ? "i2v" : "t2v";
+    state.newVideoInput = input;
+    document.querySelectorAll("#new-video-input-chips .chip").forEach((btn) => {
+      btn.classList.toggle("on", btn.dataset.newinput === input);
+    });
+    $("fl2va-frames")?.classList.toggle(
+      "hidden",
+      state.produceMode !== "t2v" || input !== "i2v"
+    );
   }
 
   function renderRefThumbs(kind) {
@@ -7570,6 +7583,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const isRef = mode === "ref";
     const isFace = mode === "face";
     const isV2v = mode === "v2v";
+    const isI2v = mode === "t2v" && state.newVideoInput === "i2v";
     if (isContinue) {
       const pick = $("continue-source")?.value || state.continueFrom || "";
       if (pick) {
@@ -7596,6 +7610,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       tToast("toast.v2vNeedMedia");
       return false;
     }
+    if (isI2v && !state.firstFrameName) {
+      toast(tt("scene.firstFrame"));
+      return false;
+    }
 
     const btn = $("btn-generate");
     if (btn) btn.disabled = true;
@@ -7616,7 +7634,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
               ? "v2v"
               : isRef
                 ? "ref"
-                : "t2v",
+                : isI2v
+                  ? "i2v"
+                  : "t2v",
         continue_from_job_id: isContinue ? state.continueFrom : null,
         audio_continuity: isContinue && !!$("continue-audio-continuity")?.checked,
         purpose: state.projectPurpose || null,
@@ -7636,7 +7656,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_image_size = state.refImageSize || "match";
         body.include_video_audio = !!$("v2v-include-audio")?.checked;
       }
-      if (!isContinue && !isRef && !isFace && !isV2v) {
+      if (isI2v) {
         if (state.firstFrameName) body.first_frame_name = state.firstFrameName;
         if (state.lastFrameName) body.last_frame_name = state.lastFrameName;
       }
@@ -8324,6 +8344,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   document.querySelectorAll("#mode-chips .chip").forEach((btn) => {
     btn.addEventListener("click", () => setProduceMode(btn.dataset.mode));
+  });
+  document.querySelectorAll("#new-video-input-chips .chip").forEach((btn) => {
+    btn.addEventListener("click", () => setNewVideoInput(btn.dataset.newinput));
   });
   document
     .querySelectorAll("#dur-chips .chip, #dur-chips-cont .chip, #dur-chips-story .chip")

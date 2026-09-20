@@ -2236,12 +2236,14 @@ async def generate(body: GenerateBody):
     ref_image_size = (body.ref_image_size or "").strip().lower() or None
     continue_aspect = None
 
-    # Explicit "t2v" / "new" ignores accidental continue state from UI.
-    # Keep first/last frames — that is I2VA / FL2VA, not continue.
-    if mode in ("t2v", "new", "yeni"):
+    # Explicit T2V/I2V ignores accidental continue state from the UI. I2V uses
+    # the same FL2VA graph, but requires a starting image by contract.
+    if mode in ("t2v", "new", "yeni", "i2v", "image_to_video"):
         continue_from = None
         ref_images = []
         ref_videos = []
+        if mode in ("i2v", "image_to_video") and not first_frame:
+            raise HTTPException(400, "I2V için başlangıç görseli seç")
         mode = "t2v"
     elif mode in ("v2v", "video", "video_ref", "motion"):
         mode = "v2v"

@@ -110,7 +110,12 @@
         </div>
 
         <div id="panel-mode-new">
-          <p class="muted mode-hint" id="mode-hint-new">Sıfırdan T2V — ilk kare yüklersen I2V (bu kareden başlar). Referans modu I2V değildir.</p>
+          <p class="muted mode-hint" id="mode-hint-new">Sıfırdan T2V üret veya bir görselle I2V başlat.</p>
+          <label id="new-video-input-label">Başlangıç türü</label>
+          <div class="chips" id="new-video-input-chips" role="group" aria-label="Başlangıç türü">
+            <button type="button" class="chip on" data-newinput="t2v" id="new-input-t2v">T2V · metinden video</button>
+            <button type="button" class="chip" data-newinput="i2v" id="new-input-i2v">I2V · görselden video</button>
+          </div>
         <label id="scene-duration-label">Süre</label>
           <div class="chips" id="dur-chips">
             <button type="button" data-dur="4" class="chip">4 sn</button>
@@ -121,7 +126,7 @@
             <button type="button" data-dur="15" class="chip warn">15 sn</button>
           </div>
           <div id="fl2va-frames">
-            <label id="first-frame-label">İlk kare — I2V (opsiyonel)</label>
+            <label id="first-frame-label">Başlangıç görseli</label>
             <label class="file-pick">
               <input type="file" id="first-frame-file" class="file-pick-input" accept="image/*" />
               <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
@@ -1172,8 +1177,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema115" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema116" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema117" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema118" charset="utf-8"></script>
 </body>
 </html>

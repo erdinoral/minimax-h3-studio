@@ -1151,6 +1151,43 @@
     tToast(isFace ? "toast.faceReady" : "toast.refReady", { n: String(target.length) });
   }
 
+  async function generateImageStudioReference() {
+    const button = $("btn-image-studio-ref");
+    const status = $("image-studio-ref-status");
+    const prompt = $("prompt")?.value.trim() || "";
+    if (!prompt) {
+      toast(tt("prompt.ph"));
+      return;
+    }
+    if (state.refImages.length >= 9) {
+      tToast("imageStudio.limit");
+      return;
+    }
+    if (button) button.disabled = true;
+    if (status) status.textContent = tt("imageStudio.working");
+    try {
+      const r = await fetch("/api/image-studio/reference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          aspect: state.aspect || "16:9",
+          steps: 30,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      state.refImages.push({ name: data.name, filename: data.filename, url: data.url || "#" });
+      renderRefThumbs("ref");
+      tToast("imageStudio.imported");
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (button) button.disabled = false;
+      if (status) status.textContent = tt("imageStudio.hint");
+    }
+  }
+
   async function deleteUploadedMedia(item) {
     const filename = item?.filename || item?.name;
     if (!filename) return true;
@@ -8323,6 +8360,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void uploadRefFiles(e.target.files, "ref");
     e.target.value = "";
   });
+  $("btn-image-studio-ref")?.addEventListener("click", () => void generateImageStudioReference());
   $("face-files")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     void uploadRefFiles(e.target.files, "face");

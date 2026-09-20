@@ -2627,6 +2627,21 @@ button.cinema-fold-toggle:hover {
   align-items: center;
   justify-content: center;
 }
+
+.image-studio-bridge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 8px 0 10px;
+  padding: 7px 8px;
+  border: 1px solid #4d3a2a;
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(166, 90, 36, 0.12), rgba(20, 17, 15, 0.2));
+}
+.image-studio-bridge .muted {
+  font-size: 0.72rem;
+}
 .cinema-asset {
   margin: 0;
   position: relative;

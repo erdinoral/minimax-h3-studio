@@ -133,6 +133,10 @@ NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
 PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
+# Image Studio deliberately keeps its own ComfyUI process.  This bridge only
+# exchanges finished stills with it; the two backends must never render at once
+# on the same GPU.
+IMAGE_STUDIO_URL = os.getenv("H3_IMAGE_STUDIO_URL", "http://127.0.0.1:8790").rstrip("/")
 
 
 def _slug_clip(text: str, *, max_len: int = 36) -> str:
@@ -1169,6 +1173,14 @@ class GenerateBody(BaseModel):
         if isinstance(v, list):
             return [str(x) for x in v if x]
         return None
+
+
+class ImageStudioReferenceBody(BaseModel):
+    """A small, intentionally limited surface for the optional local bridge."""
+
+    prompt: str = Field(..., min_length=1, max_length=6000)
+    aspect: str = "16:9"
+    steps: int = Field(30, ge=1, le=80)
 
 
 class BatchBody(BaseModel):
@@ -2899,17 +2911,15 @@ async def clip_video(job_id: str, dl: int = Query(0)):
     raise HTTPException(404, "video yok")
 
 
-@app.post("/api/refs/upload")
-async def upload_ref(file: UploadFile = File(...)):
-    """Upload a reference image to Studio + Comfy input folder."""
+async def _import_reference_bytes(raw: bytes, filename: str = "ref.png") -> dict:
+    """Put a trusted image into H3's reference store and Comfy input folder."""
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı — referans yüklenemez")
-    raw = await file.read()
     if not raw:
         raise HTTPException(400, "boş dosya")
     if len(raw) > 40 * 1024 * 1024:
         raise HTTPException(400, "dosya çok büyük (max 40MB)")
-    orig = Path(file.filename or "ref.png").name
+    orig = Path(filename or "ref.png").name
     ext = orig.rsplit(".", 1)[-1].lower() if "." in orig else "png"
     if ext not in ("png", "jpg", "jpeg", "webp", "bmp"):
         ext = "png"
@@ -2929,6 +2939,96 @@ async def upload_ref(file: UploadFile = File(...)):
         "url": f"/api/refs/{local_name}",
         "bytes": len(raw),
     }
+
+
+@app.post("/api/refs/upload")
+async def upload_ref(file: UploadFile = File(...)):
+    """Upload a reference image to Studio + Comfy input folder."""
+    return await _import_reference_bytes(await file.read(), file.filename or "ref.png")
+
+
+@app.get("/api/image-studio/status")
+async def image_studio_status():
+    """Lightweight availability check for the optional local Image Studio bridge."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0)) as client:
+            response = await client.get(f"{IMAGE_STUDIO_URL}/api/status")
+            response.raise_for_status()
+            data = response.json()
+        return {"available": bool(data.get("ok")), "url": IMAGE_STUDIO_URL}
+    except Exception:
+        return {"available": False, "url": IMAGE_STUDIO_URL}
+
+
+@app.post("/api/image-studio/reference")
+async def create_image_studio_reference(body: ImageStudioReferenceBody):
+    """Generate one Qwen still locally, then add it as an H3 Ref2VA reference.
+
+    Image Studio owns a separate ComfyUI process.  Refuse overlap instead of
+    risking a VRAM crash on a single-GPU installation.
+    """
+    if _running or any(j.get("status") in ("queued", "running") for j in _jobs):
+        raise HTTPException(409, "H3 üretimi/kuyruğu boş olmalı — Image Studio ayrı ComfyUI ve aynı VRAM'i kullanır")
+    prompt = body.prompt.strip()
+    request_body = {
+        "prompt": prompt,
+        "aspect": body.aspect,
+        "steps": body.steps,
+        "mode": "txt2img",
+        "count": 1,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=4.0)) as client:
+            health_response = await client.get(f"{IMAGE_STUDIO_URL}/api/status")
+            health_payload = health_response.json() if health_response.content else {}
+            if health_response.is_error or not health_payload.get("ok"):
+                raise HTTPException(503, "Image Studio veya kendi ComfyUI'si açık değil")
+            image_comfy_url = str(health_payload.get("comfy_url") or "").rstrip("/")
+            response = await client.post(f"{IMAGE_STUDIO_URL}/api/generate", json=request_body)
+            payload = response.json() if response.content else {}
+            if response.is_error:
+                raise HTTPException(response.status_code, str(payload.get("detail") or "Image Studio üretimi başlatılamadı"))
+            image_job_id = str(payload.get("id") or "")
+            if not image_job_id:
+                raise HTTPException(502, "Image Studio geçerli iş kimliği döndürmedi")
+
+            # Image Studio exposes its own job progress, but the bridge returns
+            # only once there is a durable image that H3 can safely import.
+            deadline = time.monotonic() + (45 * 60)
+            while time.monotonic() < deadline:
+                await asyncio.sleep(1.5)
+                status_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs/{image_job_id}")
+                status_payload = status_response.json() if status_response.content else {}
+                if status_response.is_error:
+                    raise HTTPException(502, "Image Studio işi okunamadı")
+                status = str(status_payload.get("status") or "").lower()
+                if status == "done" and status_payload.get("has_image"):
+                    image_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs/{image_job_id}/image")
+                    if image_response.is_error or not image_response.content:
+                        raise HTTPException(502, "Image Studio görseli indirilemedi")
+                    # Qwen stays resident in Image Studio's separate ComfyUI by
+                    # default. Free it before the next H3 render needs the GPU.
+                    if image_comfy_url:
+                        try:
+                            await client.post(
+                                f"{image_comfy_url}/free",
+                                json={"unload_models": True, "free_memory": True},
+                                timeout=10.0,
+                            )
+                        except httpx.HTTPError:
+                            pass
+                    result = await _import_reference_bytes(
+                        image_response.content, f"image_studio_{image_job_id[:12]}.png"
+                    )
+                    result.update({"source": "image-studio", "image_studio_job_id": image_job_id})
+                    return result
+                if status in ("error", "cancelled", "canceled"):
+                    raise HTTPException(502, str(status_payload.get("error") or "Image Studio üretimi durdu"))
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, f"Image Studio ulaşılamıyor ({IMAGE_STUDIO_URL})") from exc
+    raise HTTPException(504, "Image Studio görseli 45 dakika içinde tamamlanmadı")
 
 
 @app.post("/api/refs/upload-video")

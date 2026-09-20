@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema114" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema115" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -164,6 +164,10 @@
 
         <div id="panel-mode-ref" class="hidden">
           <p class="muted mode-hint">Genel referans (Ref2VA): stil, sahne, obje, kıyafet… Video bu kareden <em>başlamaz</em> — I2V için Yeni video + İlk kare. Prompt’ta <code>&lt;Picture 1&gt;</code>.</p>
+          <div class="image-studio-bridge">
+            <button type="button" class="chip" id="btn-image-studio-ref" data-i18n="imageStudio.generate">Image Studio ile görsel üret</button>
+            <span class="muted" id="image-studio-ref-status" data-i18n="imageStudio.hint">Qwen Image · görsel otomatik referanslara eklenir</span>
+          </div>
           <label id="ref-images-label">Referans görseller (1–9)</label>
           <label class="file-pick">
             <input type="file" id="ref-files" class="file-pick-input" accept="image/*" multiple />
@@ -1168,8 +1172,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema114" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema115" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema116" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema117" charset="utf-8"></script>
 </body>
 </html>

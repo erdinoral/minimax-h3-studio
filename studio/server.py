@@ -2705,6 +2705,10 @@ async def retry_job(job_id: str):
         job["prompt_id"] = None
         job["local_path"] = None
         job["first_frame_name"] = None
+        job.pop("comfy_step", None)
+        job.pop("comfy_step_max", None)
+        job.pop("progress_source", None)
+        job.pop("_ws_progress_at", None)
         job["retried_at"] = time.time()
         job["retry_count"] = int(job.get("retry_count") or 0) + 1
         _save_jobs()
@@ -2737,6 +2741,10 @@ async def retry_all_errors():
             job["prompt_id"] = None
             job["local_path"] = None
             job["first_frame_name"] = None
+            job.pop("comfy_step", None)
+            job.pop("comfy_step_max", None)
+            job.pop("progress_source", None)
+            job.pop("_ws_progress_at", None)
             job["retried_at"] = time.time()
             job["retry_count"] = int(job.get("retry_count") or 0) + 1
             queued.append(job["id"])
@@ -7213,11 +7221,12 @@ async def _run_job(job: dict):
     )
 
     try:
-        # This includes time waiting inside ComfyUI, not just sampling time.
-        # A Full HD batch can legitimately wait behind earlier H3 renders for
-        # more than two hours, so a 2h wall incorrectly marked live Comfy
-        # prompts as failed. The user can still cancel a genuinely stuck job.
-        for tick in range(43200):  # up to 12h for long / queued H3 runs
+        # There is deliberately no wall-clock failure here. Full HD work may
+        # wait in ComfyUI for an arbitrary time; only a real Comfy execution
+        # error or a confirmed queue disappearance may mark this job failed.
+        # The per-job Stop control remains the escape hatch for a true hang.
+        tick = 0
+        while True:
             if job["status"] == "cancelled":
                 return
             try:
@@ -7253,11 +7262,11 @@ async def _run_job(job: dict):
                         slog.error_job(job, "no video output", status=status_str)
                         await _notify_job(job, "error")
                         return
-                    cur = int(job.get("progress") or 0)
-                    if cur < 90:
-                        job["progress"] = max(cur, min(90, 20 + tick // 2))
-                        job["progress_label"] = "üretiliyor…"
-                        _save_jobs_throttled(2.0)
+                    # Completion was reported but the SaveVideo node has not
+                    # produced its file yet. Keep the last real sampler %;
+                    # never manufacture a near-complete progress value.
+                    job["progress_label"] = "çıktı hazırlanıyor"
+                    _save_jobs_throttled(2.0)
                     await asyncio.sleep(1)
                     continue
 
@@ -7321,7 +7330,6 @@ async def _run_job(job: dict):
                 return
 
             # Not in history yet — soft progress by elapsed time
-            cur = int(job.get("progress") or 0)
             in_running = False
             in_pending = False
             queue_peek_ok = False
@@ -7341,7 +7349,9 @@ async def _run_job(job: dict):
             if in_running:
                 saw_running = True
                 absent_ticks = 0
-                # Soft estimate only when Comfy WS is quiet — never invent fake 94%
+                # The sampler event is the only source of a real percentage.
+                # When WS is quiet, preserve its last value and only update
+                # descriptive text / elapsed time.
                 if not ws_fresh:
                     step = job.get("comfy_step")
                     step_max = job.get("comfy_step_max")
@@ -7351,19 +7361,13 @@ async def _run_job(job: dict):
                         )
                     else:
                         job["progress_label"] = f"Comfy örnekliyor · {clock}"
-                    # Gentle clock-only bump, hard-cap 85 so real WS can always override
-                    if cur < 85:
-                        creep = min(85, max(cur, 10 + tick // 8))
-                        if creep > cur:
-                            job["progress"] = creep
-                            job["progress_source"] = "soft"
                     _save_jobs_throttled(2.0)
             elif in_pending:
                 absent_ticks = 0
                 if not ws_fresh:
-                    job["progress"] = max(cur, 8)
+                    job["progress"] = 8
                     job["progress_label"] = f"Comfy kuyruğunda · {clock}"
-                    job["progress_source"] = "soft"
+                    job["progress_source"] = "queue"
                     _save_jobs_throttled(2.0)
             else:
                 # Only count confirmed absence (peek OK). Peek failures ≠ dropped.
@@ -7391,28 +7395,12 @@ async def _run_job(job: dict):
                         await _notify_job(job, "error")
                         return
                 else:
-                    creep = min(92, 12 + tick // 4)
-                    if creep > cur:
-                        job["progress"] = creep
-                    job["progress_label"] = f"Comfy’ye iletildi · {clock}"
+                    job["progress"] = 12
+                    job["progress_label"] = f"Comfy’nin işi alması bekleniyor · {clock}"
+                    job["progress_source"] = "queue"
                     _save_jobs_throttled(2.0)
-                    if queue_peek_ok and tick > 240 and absent_ticks >= 240:
-                        job["status"] = "error"
-                        job["error"] = (
-                            "Comfy işi almıyor gibi (4dk) — ComfyUI açık mı / VRAM dolu mu?"
-                        )
-                        job["progress_label"] = "hata"
-                        _save_jobs()
-                        slog.error_job(job, "comfy never took job", clock=clock)
-                        await _notify_job(job, "error")
-                        return
             await asyncio.sleep(1)
-        job["status"] = "error"
-        job["error"] = "timeout (12 saat) — Comfy yanıt vermedi"
-        job["progress_label"] = "timeout"
-        _save_jobs()
-        slog.error_job(job, "hard timeout")
-        await _notify_job(job, "error")
+            tick += 1
     finally:
         # Detach WS quietly — do not cancel()/await (CancelledError killed the queue).
         stop_ws.set()

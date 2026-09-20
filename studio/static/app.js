@@ -7020,13 +7020,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const bt = Number(job.batch_total) || 0;
       const step = job.comfy_step;
       const stepMax = job.comfy_step_max;
+      const progressSource = job.progress_source;
       let clipPct = Math.max(0, Math.min(100, Number(job.progress) || 0));
       // Prefer live Comfy sampler fraction when present
-      if (step != null && stepMax > 0) {
+      if (progressSource !== "queue" && step != null && stepMax > 0) {
         clipPct = Math.max(0, Math.min(100, Math.round((100 * Number(step)) / Number(stepMax))));
       }
       let clipLabel = job.progress_label || tt("prod.comfyProgress");
-      if (step != null && stepMax > 0 && !/örnekleme\s+\d+\/\d+/i.test(clipLabel)) {
+      if (progressSource !== "queue" && step != null && stepMax > 0 && !/örnekleme\s+\d+\/\d+/i.test(clipLabel)) {
         clipLabel = tf("job.sampling", { step: String(step), max: String(stepMax) });
       }
       const bits = [];

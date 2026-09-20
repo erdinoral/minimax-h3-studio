@@ -2642,6 +2642,50 @@ button.cinema-fold-toggle:hover {
 .image-studio-bridge .muted {
   font-size: 0.72rem;
 }
+
+.frame-source-card {
+  margin: 5px 0 7px;
+  padding: 8px;
+  border: 1px solid #4d3a2a;
+  border-radius: 10px;
+  background: #161210;
+}
+.ios-segment {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 8px;
+  border: 1px solid #514238;
+  border-radius: 999px;
+  background: #0d0b0a;
+}
+.ios-segment button {
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 11px;
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.73rem;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.ios-segment button.on {
+  color: #fff4e9;
+  background: linear-gradient(135deg, #d25d29, #a9441e);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, .45);
+}
+.frame-source-card .file-pick { margin: 0; }
+.frame-prompt {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 52px;
+  margin: 0 0 7px;
+}
+.frame-generate-btn { width: 100%; }
 .cinema-asset {
   margin: 0;
   position: relative;

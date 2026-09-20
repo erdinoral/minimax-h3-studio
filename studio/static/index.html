@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema115" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema116" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -127,18 +127,42 @@
           </div>
           <div id="fl2va-frames">
             <label id="first-frame-label">Başlangıç görseli</label>
-            <label class="file-pick">
-              <input type="file" id="first-frame-file" class="file-pick-input" accept="image/*" />
-              <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
-              <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
-            </label>
+            <div class="frame-source-card" id="first-frame-source-card">
+              <div class="ios-segment" id="first-frame-source" role="group" aria-label="Başlangıç görsel kaynağı">
+                <button type="button" class="on" data-frame-source="upload" data-frame="first" data-i18n="frame.upload">Fotoğraf yükle</button>
+                <button type="button" data-frame-source="generate" data-frame="first" data-i18n="frame.generate">Görsel üret</button>
+              </div>
+              <div id="first-frame-upload-pane">
+                <label class="file-pick">
+                  <input type="file" id="first-frame-file" class="file-pick-input" accept="image/*" />
+                  <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
+                  <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
+                </label>
+              </div>
+              <div id="first-frame-generate-pane" class="hidden">
+                <textarea id="first-frame-prompt" class="frame-prompt" rows="2" data-i18n-placeholder="frame.promptPh" placeholder="Başlangıç karesini anlat…"></textarea>
+                <button type="button" class="chip frame-generate-btn" id="btn-first-frame-generate" data-i18n="frame.generateWithStudio">Image Studio ile üret</button>
+              </div>
+            </div>
             <div class="ref-thumbs" id="first-frame-thumb"></div>
             <label id="last-frame-label">Son kare (opsiyonel)</label>
-            <label class="file-pick">
-              <input type="file" id="last-frame-file" class="file-pick-input" accept="image/*" />
-              <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
-              <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
-            </label>
+            <div class="frame-source-card" id="last-frame-source-card">
+              <div class="ios-segment" id="last-frame-source" role="group" aria-label="Son kare görsel kaynağı">
+                <button type="button" class="on" data-frame-source="upload" data-frame="last" data-i18n="frame.upload">Fotoğraf yükle</button>
+                <button type="button" data-frame-source="generate" data-frame="last" data-i18n="frame.generate">Görsel üret</button>
+              </div>
+              <div id="last-frame-upload-pane">
+                <label class="file-pick">
+                  <input type="file" id="last-frame-file" class="file-pick-input" accept="image/*" />
+                  <span class="file-pick-btn" data-i18n="pick.image">Görsel seç</span>
+                  <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
+                </label>
+              </div>
+              <div id="last-frame-generate-pane" class="hidden">
+                <textarea id="last-frame-prompt" class="frame-prompt" rows="2" data-i18n-placeholder="frame.promptPh" placeholder="Son kareyi anlat…"></textarea>
+                <button type="button" class="chip frame-generate-btn" id="btn-last-frame-generate" data-i18n="frame.generateWithStudio">Image Studio ile üret</button>
+              </div>
+            </div>
             <div class="ref-thumbs" id="last-frame-thumb"></div>
           </div>
           <label id="scene-aspect-label">Oran</label>
@@ -1177,8 +1201,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema116" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema117" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema118" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema119" charset="utf-8"></script>
 </body>
 </html>

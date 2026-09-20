@@ -1292,6 +1292,33 @@
     renderNamedThumbs(targetList, gridId, labelFn, (list) => onFilePickListEmpty(gridId, list));
   }
 
+  function setFrameSource(which, source) {
+    const kind = source === "generate" ? "generate" : "upload";
+    document.querySelectorAll(`.ios-segment [data-frame="${which}"]`).forEach((btn) => {
+      btn.classList.toggle("on", btn.dataset.frameSource === kind);
+    });
+    $(`${which}-frame-upload-pane`)?.classList.toggle("hidden", kind !== "upload");
+    $(`${which}-frame-generate-pane`)?.classList.toggle("hidden", kind !== "generate");
+  }
+
+  function applySingleFrame(data, which) {
+    const gridId = which === "first" ? "first-frame-thumb" : "last-frame-thumb";
+    const onFrameListChange = (list) => {
+      if (list.length) return;
+      if (which === "first") state.firstFrameName = null;
+      else state.lastFrameName = null;
+      onFilePickListEmpty(gridId, list);
+    };
+    if (which === "first") state.firstFrameName = data.name;
+    else state.lastFrameName = data.name;
+    renderNamedThumbs(
+      [{ name: data.name, filename: data.filename, url: data.url }],
+      gridId,
+      () => (which === "first" ? "First" : "Last"),
+      onFrameListChange
+    );
+  }
+
   async function uploadSingleFrame(file, which) {
     if (!file) return;
     const fd = new FormData();
@@ -1301,33 +1328,35 @@
       const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      const gridId = which === "first" ? "first-frame-thumb" : "last-frame-thumb";
-      const onFrameListChange = (list) => {
-        if (list.length) return;
-        if (which === "first") state.firstFrameName = null;
-        else state.lastFrameName = null;
-        onFilePickListEmpty(gridId, list);
-      };
-      if (which === "first") {
-        state.firstFrameName = data.name;
-        renderNamedThumbs(
-          [{ name: data.name, filename: data.filename, url: data.url }],
-          gridId,
-          () => "First",
-          onFrameListChange
-        );
-      } else {
-        state.lastFrameName = data.name;
-        renderNamedThumbs(
-          [{ name: data.name, filename: data.filename, url: data.url }],
-          gridId,
-          () => "Last",
-          onFrameListChange
-        );
-      }
+      applySingleFrame(data, which);
       tToast("toast.frameReady", { which });
     } catch (e) {
       toast(String(e.message || e));
+    }
+  }
+
+  async function generateSingleFrame(which) {
+    const prompt = $(`${which}-frame-prompt`)?.value.trim() || "";
+    const button = $(`btn-${which}-frame-generate`);
+    if (!prompt) {
+      toast(tt("frame.promptPh"));
+      return;
+    }
+    if (button) button.disabled = true;
+    try {
+      const r = await fetch("/api/image-studio/reference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, aspect: state.aspect || "16:9", steps: 30 }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      applySingleFrame(data, which);
+      tToast("frame.generated");
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (button) button.disabled = false;
     }
   }
 
@@ -9066,6 +9095,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void uploadSingleFrame(f, "first");
     e.target.value = "";
   });
+  document.querySelectorAll(".ios-segment [data-frame-source]").forEach((btn) => {
+    btn.addEventListener("click", () => setFrameSource(btn.dataset.frame, btn.dataset.frameSource));
+  });
+  $("btn-first-frame-generate")?.addEventListener("click", () => void generateSingleFrame("first"));
+  $("btn-last-frame-generate")?.addEventListener("click", () => void generateSingleFrame("last"));
   $("last-frame-file")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     const f = e.target.files && e.target.files[0];

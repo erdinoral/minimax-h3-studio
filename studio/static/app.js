@@ -117,6 +117,10 @@
     "intro",
     "outro",
   ];
+  // Kept as inert compatibility values while old saved settings are loaded.
+  // The public UI no longer exposes this mode.
+  const ADULT_LORA_ID = "erosmax-4step";
+  const ADULT_PURPOSE = "adult";
   function purposeKeysForUi() {
     return PURPOSE_KEYS.slice();
   }

@@ -2594,6 +2594,7 @@
     const host = $("cinema-pills");
     if (!host) return;
     const c = ensureCinema();
+    syncCinemaMusicWorkflow();
     const keys = ["purpose", "look", "camera", "palette", "lighting", "era", "style"];
     if (host.querySelector(".film-pill.open")) {
       host.querySelectorAll(".film-pill").forEach((pill) => {
@@ -2610,6 +2611,24 @@
     host.innerHTML = keys
       .map((key) => filmPillHtml(key, (c.setup && c.setup[key]) || "auto"))
       .join("");
+  }
+
+  function syncCinemaMusicWorkflow() {
+    const bar = $("director-music");
+    const home = $("director-music-home");
+    const slot = $("cinema-music-slot");
+    const cinemaOpen = !!$("view-cinema") && !$("view-cinema").classList.contains("hidden");
+    const isMusicVideo = (ensureCinema().setup?.purpose || "") === "music_video";
+    if (!bar || !home || !slot) return;
+    if (cinemaOpen && isMusicVideo) {
+      slot.classList.remove("hidden");
+      slot.appendChild(bar);
+      bar.classList.remove("hidden");
+      updateMusicMetaUi();
+      return;
+    }
+    home.appendChild(bar);
+    slot.classList.add("hidden");
   }
 
   function renderCinemaKnobs() {
@@ -3686,6 +3705,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("view-cinema")?.classList.add("hidden");
     document.body.classList.remove("cinema-dock-open");
     state.cinemaDirector = false;
+    syncCinemaMusicWorkflow();
     void saveCinema(true);
   }
 
@@ -6043,9 +6063,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const musicBar = $("director-music");
     if (musicBar) {
       const isMusicVideo = state.projectPurpose === "music_video";
+      const inCinema = musicBar.parentElement?.id === "cinema-music-slot";
       musicBar.classList.toggle("music-mode", isMusicVideo);
-      musicBar.classList.toggle("hidden", !isMusicVideo || state.directorTab !== "chat");
-      if (isMusicVideo) renderMusicLyricTimeline();
+      musicBar.classList.toggle("hidden", !inCinema && (!isMusicVideo || state.directorTab !== "chat"));
+      if (isMusicVideo || inCinema) renderMusicLyricTimeline();
     }
     const badge = $("director-project");
     if (badge) {
@@ -8699,10 +8720,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("director-plan")?.classList.toggle("hidden", m !== "plan");
     $("director-log")?.classList.toggle("hidden", m === "bible");
     $("director-input")?.classList.toggle("hidden", m === "bible");
-    $("director-music")?.classList.toggle(
-      "hidden",
-      m !== "chat" || state.projectPurpose !== "music_video"
-    );
+    const musicBar = $("director-music");
+    if (musicBar && musicBar.parentElement?.id !== "cinema-music-slot") {
+      musicBar.classList.toggle("hidden", m !== "chat" || state.projectPurpose !== "music_video");
+    }
     if (m === "plan") {
       setDirectorOpen(true);
       renderDirectorPlanBoard();
@@ -9375,6 +9396,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         if (Array.isArray(allowed) && setup.look !== "auto" && !allowed.includes(setup.look)) {
           setup.look = "auto";
         }
+        state.projectPurpose = id === "auto" ? null : id;
+        state.projectSilent = id === "music_video";
+        syncProjectChips();
       }
       pill.classList.remove("open");
       renderCinemaPills();

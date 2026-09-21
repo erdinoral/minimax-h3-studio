@@ -439,6 +439,16 @@ body.director-modal-open .zone-scene {
   padding: 6px 0 3px;
   border-top: 1px dashed rgba(212, 160, 23, 0.25);
 }
+.cinema-music-slot {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.cinema-music-slot .director-music {
+  margin: 2px 0 6px;
+  padding: 8px;
+  border: 1px solid rgba(212, 160, 23, 0.45);
+  background: rgba(212, 160, 23, 0.06);
+}
 .music-lyric-timeline-head {
   color: var(--muted);
   font-size: 0.75rem;

@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema120" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema121" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -506,7 +506,7 @@
         <label><span id="bible-forbidden-label">Yasaklar</span> <input type="text" id="bible-forbidden" placeholder="on-screen text, face morph" /></label>
         <button type="button" class="cta" id="btn-bible-generate">Brief üret</button>
       </div>
-      <div class="director-music" id="director-music">
+      <div id="director-music-home"><div class="director-music" id="director-music">
         <label class="file-pick file-pick-inline music-file">
           <input type="file" id="music-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
           <span class="file-pick-btn" id="music-pick-btn">Şarkı seç</span>
@@ -521,7 +521,7 @@
         <button type="button" class="btn-ghost hidden" id="btn-music-mux" disabled title="Bitmiş klipler + şarkı → final">Şarkılı final</button>
         <a class="muted hidden" id="music-final-link" href="#" target="_blank" rel="noopener">Finali aç</a>
         <div class="music-lyric-timeline hidden" id="music-lyric-timeline"></div>
-      </div>
+      </div></div>
       <div id="director-tabs" class="director-tabs"></div>
       <div class="director-chat" id="director-log"></div>
     </div>
@@ -586,6 +586,7 @@
       </header>
       <div class="cinema-setup-bar">
         <div class="film-pills" id="cinema-pills"></div>
+        <div class="cinema-music-slot hidden" id="cinema-music-slot"></div>
         <div class="cinema-knobs">
           <label><span id="cinema-dur-label">Süre</span>
             <select id="cinema-duration">
@@ -1154,6 +1155,6 @@
 
   <script src="/static/i18n.js?v=cinema122" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema144" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema145" charset="utf-8"></script>
 </body>
 </html>

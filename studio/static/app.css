@@ -703,15 +703,53 @@ body.director-modal-open .director-llm-tab {
   flex: 1 1 220px;
   min-width: 0;
 }
-.cinema-seamless-label {
+.cinema-character-rebuild-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
   font-size: 0.85rem;
-  white-space: nowrap;
 }
-.cinema-seamless-label input {
-  margin: 0;
+.cinema-character-rebuild-toggle input {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.cinema-ios-track {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 23px;
+  padding: 2px;
+  border-radius: 999px;
+  background: #4b4540;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  transition: background 160ms ease;
+}
+.cinema-ios-track > span {
+  display: block;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: #f6f4ef;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  transition: transform 160ms ease;
+}
+.cinema-character-rebuild-toggle input:checked + .cinema-ios-track {
+  background: var(--accent);
+}
+.cinema-character-rebuild-toggle input:checked + .cinema-ios-track > span {
+  transform: translateX(17px);
+}
+.cinema-character-rebuild-toggle:focus-within {
+  border-color: var(--accent);
 }
 .lora-prod-pick #btn-lora-apply {
   margin-top: 8px;

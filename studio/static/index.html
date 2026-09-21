@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema124" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema125" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -648,10 +648,6 @@
           <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
           <p class="muted mode-hint" id="cinema-mode-hint">JSON takes[] = sahne. 5 sahneli = 5 take × 8 shot, hikaye devam. Karakter/mekan kartı gerekmez</p>
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
-          <label class="cinema-seamless-label" title="Kapalıysa Üret karakter sheet’ine dokunmaz">
-            <input type="checkbox" id="cinema-force-sheets" />
-            <span id="cinema-force-sheets-label">Karakterleri tekrar üret</span>
-          </label>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
           <button type="button" class="cta" id="btn-cinema-produce">Üret</button>
         </div>
@@ -672,6 +668,11 @@
               </div>
               <div class="cinema-asset-tab-panel" data-asset-kind="character" data-asset-panel="list">
                 <p class="muted mode-hint" id="cinema-char-hint">Bu filmdeki karakterler. Shot metninde adını yazınca yüz kilitlenir. İstersen Kaydet ile kütüphaneye al.</p>
+                <label class="cinema-character-rebuild-toggle" title="Açıkken sonraki Üret işlemi mevcut karakter sheet'lerini de yeniden oluşturur">
+                  <span id="cinema-force-sheets-label">Karakterleri tekrar üret</span>
+                  <input type="checkbox" id="cinema-force-sheets" />
+                  <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+                </label>
                 <div id="cinema-chars" class="cinema-cards"></div>
                 <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-char">Karakter ekle+</button>
               </div>

@@ -57,6 +57,8 @@
     studioWorkspace: "scene", // scene | director
     musicId: null,
     musicMeta: null,
+    musicConcept: "",
+    musicLyrics: "",
     projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
     projectStyle: null, // realistic | anime | disney | game | cgi_3d | comic | illustration | oil_paint | clay | found_footage
     projectSilent: false,
@@ -6039,7 +6041,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       });
     const musicBar = $("director-music");
     if (musicBar) {
-      musicBar.classList.toggle("music-mode", state.projectPurpose === "music_video");
+      const isMusicVideo = state.projectPurpose === "music_video";
+      musicBar.classList.toggle("music-mode", isMusicVideo);
+      musicBar.classList.toggle("hidden", !isMusicVideo || state.directorTab !== "chat");
     }
     const badge = $("director-project");
     if (badge) {
@@ -6511,8 +6515,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body: JSON.stringify({
           music_id: state.musicId,
           session_id: state.directorSessionId,
-          lyrics: ($("music-lyrics") && $("music-lyrics").value) || "",
-          concept: ($("music-concept") && $("music-concept").value) || "",
+          lyrics: state.musicLyrics || "",
+          concept: state.musicConcept || "",
           clip_duration: state.duration || 5,
           visual_style: state.projectStyle || "realistic",
           model: $("director-model").value || null,
@@ -6653,6 +6657,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       projectStyle: state.projectStyle,
       projectSilent: !!state.projectSilent,
       musicId: state.musicId || null,
+      musicConcept: state.musicConcept || "",
+      musicLyrics: state.musicLyrics || "",
       prompt: ($("prompt")?.value || "").trim(),
       queueItems: state.queueItems.map((x) => ({
         id: x.id,
@@ -6691,6 +6697,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.projectSilent = state.projectPurpose === "music_video";
     }
     if (snap.musicId !== undefined) state.musicId = snap.musicId;
+    if (snap.musicConcept !== undefined) state.musicConcept = String(snap.musicConcept || "");
+    if (snap.musicLyrics !== undefined) state.musicLyrics = String(snap.musicLyrics || "");
+    if ($("music-concept")) $("music-concept").value = state.musicConcept;
+    if ($("music-lyrics")) $("music-lyrics").value = state.musicLyrics;
     if (typeof snap.prompt === "string" && $("prompt")) $("prompt").value = snap.prompt;
     if (Array.isArray(snap.queueItems)) {
       state.queueItems = snap.queueItems
@@ -8617,7 +8627,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("director-plan")?.classList.toggle("hidden", m !== "plan");
     $("director-log")?.classList.toggle("hidden", m === "bible");
     $("director-input")?.classList.toggle("hidden", m === "bible");
-    $("director-music")?.classList.toggle("hidden", m !== "chat");
+    $("director-music")?.classList.toggle(
+      "hidden",
+      m !== "chat" || state.projectPurpose !== "music_video"
+    );
     if (m === "plan") {
       setDirectorOpen(true);
       renderDirectorPlanBoard();
@@ -9969,6 +9982,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     syncFilePickName(e.target);
     const f = e.target.files && e.target.files[0];
     if (f) uploadMusicFile(f);
+  });
+  $("music-concept")?.addEventListener("input", (e) => {
+    state.musicConcept = e.target.value || "";
+    persistProductionLocal(collectProductionState());
+  });
+  $("music-lyrics")?.addEventListener("input", (e) => {
+    state.musicLyrics = e.target.value || "";
+    persistProductionLocal(collectProductionState());
   });
   $("btn-music-analyze")?.addEventListener("click", () => analyzeMusic());
   $("btn-music-remove")?.addEventListener("click", () => {

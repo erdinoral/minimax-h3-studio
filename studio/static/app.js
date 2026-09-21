@@ -2617,9 +2617,11 @@
     const bar = $("director-music");
     const home = $("director-music-home");
     const slot = $("cinema-music-slot");
+    const panel = document.querySelector("#view-cinema .cinema-panel");
     const cinemaOpen = !!$("view-cinema") && !$("view-cinema").classList.contains("hidden");
     const isMusicVideo = (ensureCinema().setup?.purpose || "") === "music_video";
     if (!bar || !home || !slot) return;
+    panel?.classList.toggle("is-music-video", cinemaOpen && isMusicVideo);
     if (cinemaOpen && isMusicVideo) {
       slot.classList.remove("hidden");
       slot.appendChild(bar);

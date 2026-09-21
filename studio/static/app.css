@@ -440,14 +440,13 @@ body.director-modal-open .zone-scene {
   border-top: 1px dashed rgba(212, 160, 23, 0.25);
 }
 .cinema-music-slot {
-  grid-column: 1 / -1;
-  width: 100%;
+  min-width: 0;
 }
 .cinema-music-slot .director-music {
-  margin: 2px 0 6px;
-  padding: 8px;
-  border: 1px solid rgba(212, 160, 23, 0.45);
-  background: rgba(212, 160, 23, 0.06);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .music-lyric-timeline-head {
   color: var(--muted);
@@ -2539,6 +2538,12 @@ body.ws-director .zone-player .player-actions .btn-ghost {
   display: none;
 }
 .cinema-panel.is-mode-assets .cinema-col-stack {
+  display: flex;
+}
+.cinema-panel.is-mode-assets.is-music-video .cinema-grid {
+  grid-template-columns: minmax(250px, 0.86fr) minmax(340px, 1.2fr) minmax(270px, 0.9fr);
+}
+.cinema-panel.is-music-video .cinema-music-col {
   display: flex;
 }
 .cinema-studio-mode {

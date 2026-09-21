@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema121" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema122" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -586,7 +586,6 @@
       </header>
       <div class="cinema-setup-bar">
         <div class="film-pills" id="cinema-pills"></div>
-        <div class="cinema-music-slot hidden" id="cinema-music-slot"></div>
         <div class="cinema-knobs">
           <label><span id="cinema-dur-label">Süre</span>
             <select id="cinema-duration">
@@ -804,6 +803,11 @@
             <summary id="cinema-preview-sum">Kuyruğa gidecek prompt</summary>
             <pre id="cinema-preview-text" class="cinema-preview-text"></pre>
           </details>
+        </section>
+        <section class="cinema-col cinema-music-col hidden" id="cinema-music-slot">
+          <div class="cinema-col-head">
+            <h3>Şarkı</h3>
+          </div>
         </section>
       </div>
       <details class="film-workspace-fold" id="film-workspace-fold">
@@ -1155,6 +1159,6 @@
 
   <script src="/static/i18n.js?v=cinema122" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema145" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema146" charset="utf-8"></script>
 </body>
 </html>

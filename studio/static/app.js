@@ -7440,7 +7440,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const select = $("btn-gallery-photo-select");
     const remove = $("btn-gallery-photo-delete");
     if (select) select.textContent = state.galleryPhotoSelectMode ? "Seçimi bitir" : "Fotoğraf seç";
-    if (remove) { remove.textContent = `Seçilenleri sil (${state.galleryPhotoPickNames.length})`; remove.disabled = !state.galleryPhotoPickNames.length; }
+    if (remove) {
+      remove.classList.toggle("hidden", state.galleryKind !== "photo" || !state.galleryPhotoSelectMode);
+      remove.textContent = `Seçilenleri sil (${state.galleryPhotoPickNames.length})`;
+      remove.disabled = !state.galleryPhotoPickNames.length;
+    }
   }
 
   async function deletePickedGalleryPhotos() {
@@ -7632,6 +7636,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const remove = $("btn-gallery-video-delete");
     if (select) select.textContent = state.galleryVideoSelectMode ? "Seçimi bitir" : "Video seç";
     if (remove) {
+      remove.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryVideoSelectMode);
       remove.textContent = `Seçilenleri sil (${state.galleryVideoPickIds.length})`;
       remove.disabled = !state.galleryVideoPickIds.length;
     }

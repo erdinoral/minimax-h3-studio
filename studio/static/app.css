@@ -1865,10 +1865,16 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 }
 .gallery-panel header {
   display: flex;
+  position: sticky;
+  top: 0;
+  z-index: 5;
   justify-content: space-between;
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
+  padding: 10px 0;
+  background: var(--bg-elevated);
+  box-shadow: 0 8px 14px -14px rgba(0, 0, 0, 0.9);
   flex-wrap: wrap;
 }
 .gallery-kind-switch { flex: 0 0 auto; }

@@ -7429,7 +7429,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (index >= 0) state.galleryPhotoPickNames.splice(index, 1);
     else state.galleryPhotoPickNames.push(name);
     syncGalleryPhotoToolbar();
-    void renderGalleryPhotos();
+    const panel = $("gallery-panel");
+    const scrollTop = panel?.scrollTop || 0;
+    void renderGalleryPhotos().then(() => {
+      if (panel) panel.scrollTop = scrollTop;
+    });
   }
 
   function syncGalleryPhotoToolbar() {
@@ -7616,7 +7620,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (index >= 0) picks.splice(index, 1);
     else picks.push(id);
     syncGalleryVideoToolbar();
-    void renderGallery();
+    const panel = $("gallery-panel");
+    const scrollTop = panel?.scrollTop || 0;
+    void renderGallery().then(() => {
+      if (panel) panel.scrollTop = scrollTop;
+    });
   }
 
   function syncGalleryVideoToolbar() {

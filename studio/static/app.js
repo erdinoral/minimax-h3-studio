@@ -2511,11 +2511,13 @@
       // is a seamless package; it is still needed if the section is later
       // produced on its own.
       shot.mode = cinemaSceneEditMode;
+      shot.mode_locked = true;
     } else {
       c.shots.push({
         id: cinemaId(),
         text,
         mode: cinemaSceneEditMode,
+        mode_locked: true,
         structured,
         durationSec,
       });

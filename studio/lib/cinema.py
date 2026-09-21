@@ -746,6 +746,11 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
         "enabled": item.get("enabled") is not False,
         "index": index,
     }
+    # A section imported from JSON (or explicitly set in the editor) has an
+    # intentional new/continue choice.  Do not later replace it with the
+    # heuristic cutaway mode just because character names differ in the text.
+    if item.get("mode_locked") is True:
+        out["mode_locked"] = True
     section_id = str(item.get("sectionId") or item.get("section_id") or "").strip()
     if section_id:
         out["section_id"] = section_id
@@ -1530,7 +1535,7 @@ def apply_reentry_modes(
             mode = "continue"
         if i == 0:
             mode = "t2v"
-        elif curr and not (curr & prev):
+        elif not shot.get("mode_locked") and curr and not (curr & prev):
             mode = "t2v"
         shot["mode"] = mode
         out.append(shot)
@@ -2445,7 +2450,12 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
         parsed = parse_h3_prompt(text)
         if _has_author_fields(parsed):
             structured = parsed
-    payload: dict[str, Any] = {"mode": mode, "text": text, "section_id": item.get("id") or item.get("section_id") or ""}
+    payload: dict[str, Any] = {
+        "mode": mode,
+        "text": text,
+        "section_id": item.get("id") or item.get("section_id") or "",
+        "mode_locked": bool(item.get("type") or item.get("mode")),
+    }
     if item.get("duration") not in (None, ""):
         payload["durationSec"] = item.get("duration")
     if _has_author_fields(structured):

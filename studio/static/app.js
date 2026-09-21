@@ -57,7 +57,7 @@
     studioWorkspace: "scene", // scene | director
     musicId: null,
     musicMeta: null,
-    projectPurpose: null, // short_film (film/trailer) | music_video | ad | intro | outro
+    projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
     projectStyle: null, // realistic | anime | disney | game | cgi_3d | comic | illustration | oil_paint | clay | found_footage
     projectSilent: false,
     progressHideTimer: null,
@@ -118,9 +118,13 @@
     "short_film",
     "music_video",
     "ad",
+    "trailer",
+    "social",
+    "documentary",
     "intro",
     "outro",
   ];
+  const CINEMA_PURPOSE_KEYS = ["short_film", "music_video", "ad", "intro", "outro"];
   // Kept as inert compatibility values while old saved settings are loaded.
   // The public UI no longer exposes this mode.
   const ADULT_LORA_ID = "erosmax-4step";
@@ -129,10 +133,15 @@
     return PURPOSE_KEYS.slice();
   }
 
-  function normalizeDirectorPurpose(value) {
-    const raw = String(value || "").trim();
-    // Existing saved trailer projects stay in the new Film / Trailer category.
-    return raw === "trailer" ? "short_film" : raw;
+  function cinemaPurposeLabel(id) {
+    const labels = {
+      short_film: tt("cinema.production.filmTrailer"),
+      music_video: tt("cinema.production.musicVideo"),
+      ad: tt("cinema.production.ad"),
+      intro: tt("cinema.production.intro"),
+      outro: tt("cinema.production.outro"),
+    };
+    return labels[id] || purposeLabel(id);
   }
 
   function isAdultLoraSpec() { return false; }
@@ -499,6 +508,15 @@
       audio: "silent",
     },
   };
+  const CINEMA_LOOKS_BY_PURPOSE = {
+    auto: null,
+    short_film: ["feature", "anamorphic", "noir", "golden", "sci_fi_hard", "sci_fi_opera", "sci_fi_wasteland", "sci_fi_alien", "micro_expression", "handdrawn_live", "cgi_short"],
+    music_video: ["music_video", "music_video_cool", "retro_80s"],
+    ad: ["commercial", "product_minimal"],
+    intro: ["title_sequence", "noir", "sci_fi_hard", "sci_fi_opera"],
+    outro: ["title_sequence", "noir", "golden"],
+  };
+
   const CINEMA_SETUP_OPTIONS = {
     look: [
       ["auto", "Auto"],
@@ -648,13 +666,18 @@
   function cinemaSetupOptions(key) {
     if (key === "purpose") {
       return [["auto", tt("cinema.auto")]].concat(
-        purposeKeysForUi().map((id) => [id, purposeLabel(id)])
+        CINEMA_PURPOSE_KEYS.map((id) => [id, cinemaPurposeLabel(id)])
       );
     }
     if (key === "style") {
       return [["auto", tt("cinema.auto")]].concat(STYLE_KEYS.map((id) => [id, styleLabel(id)]));
     }
-    const rows = CINEMA_SETUP_OPTIONS[key] || [["auto", "Auto"]];
+    let rows = CINEMA_SETUP_OPTIONS[key] || [["auto", "Auto"]];
+    if (key === "look") {
+      const purpose = (ensureCinema().setup || {}).purpose || "auto";
+      const allowed = CINEMA_LOOKS_BY_PURPOSE[purpose];
+      if (Array.isArray(allowed)) rows = rows.filter(([id]) => id === "auto" || allowed.includes(id));
+    }
     return rows.map(([id, fallback]) => {
       if (id === "auto") return [id, tt("cinema.auto")];
       if (key === "look") return [id, tt("cinema.look." + id) || fallback];
@@ -2568,7 +2591,7 @@
     const host = $("cinema-pills");
     if (!host) return;
     const c = ensureCinema();
-    const keys = ["look", "camera", "palette", "lighting", "era", "purpose", "style"];
+    const keys = ["purpose", "look", "camera", "palette", "lighting", "era", "style"];
     if (host.querySelector(".film-pill.open")) {
       host.querySelectorAll(".film-pill").forEach((pill) => {
         const key = pill.dataset.setup;
@@ -3870,7 +3893,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (c.duration) setDuration(Number(c.duration) || state.duration || 5);
     const purpose = c.setup && c.setup.purpose && c.setup.purpose !== "auto" ? c.setup.purpose : "";
     if (purpose) {
-      state.projectPurpose = normalizeDirectorPurpose(purpose);
+      state.projectPurpose = purpose;
       state.projectSilent = purpose === "music_video" || cinemaAudio().mode === "silent";
     }
     const style = c.setup && c.setup.style && c.setup.style !== "auto" ? c.setup.style : "";
@@ -6660,7 +6683,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.loraApplied = !!(snap.loraId && snap.loraApplied !== false);
       keepLoraApplied();
     }
-    if (snap.projectPurpose !== undefined) state.projectPurpose = normalizeDirectorPurpose(snap.projectPurpose);
+    if (snap.projectPurpose !== undefined) state.projectPurpose = snap.projectPurpose;
     if (snap.projectStyle !== undefined) state.projectStyle = snap.projectStyle;
     if (snap.projectSilent !== undefined) {
       state.projectSilent = !!snap.projectSilent;
@@ -9260,7 +9283,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         void saveCinema(true);
         return;
       }
-      ensureCinema().setup[key] = id;
+      const setup = ensureCinema().setup;
+      setup[key] = id;
+      if (key === "purpose") {
+        const allowed = CINEMA_LOOKS_BY_PURPOSE[id];
+        if (Array.isArray(allowed) && setup.look !== "auto" && !allowed.includes(setup.look)) {
+          setup.look = "auto";
+        }
+      }
       pill.classList.remove("open");
       renderCinemaPills();
       void saveCinema(true);

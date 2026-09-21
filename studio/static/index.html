@@ -407,14 +407,15 @@
       <p class="muted mode-hint" id="llm-prod-hint" data-i18n="ayar.llmHint">API anahtarları sağ üst Ayarlar’da. Üretim (Comfy/H3) bundan etkilenmez.</p>
     </div>
     <div class="director-scroll" id="director-scroll">
-      <div class="chips wrap director-chips" id="director-chips" role="group" aria-label="Proje ayarları">
-        <span class="director-chip-label">Ne üretiyoruz?</span>
-        <button type="button" class="chip" data-group="purpose" data-purpose="short_film" data-chip="film trailer" aria-pressed="false">Film / Trailer</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-chip="müzik videosu" data-silent="1" aria-pressed="false">Müzik Videosu</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="ad" data-chip="reklam" aria-pressed="false">Reklam</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">İntro</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">Outro</button>
-        <span class="director-chip-separator" aria-hidden="true"></span>
+      <div class="chips wrap director-chips" id="director-chips" role="group" aria-label="Proje tarzı">
+        <button type="button" class="chip" data-group="purpose" data-purpose="short_film" data-chip="kısa film" aria-pressed="false">kısa film</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-chip="müzik klibi" data-silent="1" aria-pressed="false" title="Sessiz görüntü; şarkı finalde">müzik klibi</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="ad" data-chip="reklam" aria-pressed="false">reklam</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="trailer" data-chip="trailer" aria-pressed="false">trailer</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="social" data-chip="sosyal" aria-pressed="false">sosyal</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="documentary" data-chip="belgesel" aria-pressed="false">belgesel</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
         <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
         <button type="button" class="chip" data-group="style" data-style="anime" data-chip="anime tarz" aria-pressed="false">anime</button>
         <button type="button" class="chip" data-group="style" data-style="disney" data-chip="disney 3D tarz" aria-pressed="false">disney</button>
@@ -1149,8 +1150,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema121" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema122" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema140" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema141" charset="utf-8"></script>
 </body>
 </html>

@@ -1480,19 +1480,6 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   max-height: none;
   overflow: visible;
 }
-.director-chip-label {
-  align-self: center;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-  margin-right: 2px;
-  white-space: nowrap;
-}
-.director-chip-separator {
-  align-self: stretch;
-  border-left: 1px solid var(--border);
-  margin: 2px 2px;
-}
 .director-mode-tabs { margin: 8px 0; flex-wrap: wrap; }
 .director-bible {
   display: flex;

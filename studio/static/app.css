@@ -1009,6 +1009,32 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   border-color: var(--accent-hot);
   color: #fff;
 }
+.player-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 5;
+  transform: translateY(-50%);
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(18, 16, 14, 0.76);
+  color: #fff;
+  font-size: 2rem;
+  font-weight: 300;
+  line-height: 30px;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.35);
+}
+.player-nav-next { left: 12px; }
+.player-nav-prev { right: 12px; }
+.player-nav:hover:not(:disabled) {
+  background: rgba(232, 165, 75, 0.92);
+  border-color: rgba(255, 255, 255, 0.62);
+  transform: translateY(-50%) scale(1.06);
+}
+.player-nav:disabled { opacity: 0.3; cursor: default; }
 .player-actions {
   display: flex;
   gap: 8px;

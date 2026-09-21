@@ -274,8 +274,10 @@
 
     <section class="zone zone-player panel player">
       <div class="player-stage">
+        <button type="button" class="player-nav player-nav-next hidden" id="btn-player-next" title="Sonraki video" aria-label="Sonraki video">‹</button>
         <button type="button" class="player-close hidden" id="btn-player-close" title="Aktif üretimi kapat">×</button>
         <video id="player" controls playsinline></video>
+        <button type="button" class="player-nav player-nav-prev hidden" id="btn-player-prev" title="Önceki video" aria-label="Önceki video">›</button>
         <div class="player-empty muted" id="player-empty">Henüz video yok</div>
       </div>
       <div class="player-actions">
@@ -1164,6 +1166,6 @@
 
   <script src="/static/i18n.js?v=cinema120" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema133" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema134" charset="utf-8"></script>
 </body>
 </html>

@@ -4697,6 +4697,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     stage?.classList.add("cleared");
     stage?.classList.remove("has-video");
     $("btn-player-close")?.classList.add("hidden");
+    $("btn-player-next")?.classList.add("hidden");
+    $("btn-player-prev")?.classList.add("hidden");
     $("btn-download")?.setAttribute("href", "#");
     state.playerCleared = true;
     state.selectedJobId = null;
@@ -4744,6 +4746,60 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       dl.setAttribute("download", name);
       dl.removeAttribute("aria-disabled");
     }
+    syncPlayerNavigation();
+  }
+
+  function playerVideoItems() {
+    const byId = new Map();
+    const add = (item) => {
+      if (!item?.id || byId.has(item.id)) return;
+      const status = String(item.status || "done").toLowerCase();
+      const url = item.url || item.output?.url || `/api/gallery/${item.id}/video`;
+      if (status !== "done" || !url) return;
+      byId.set(item.id, { ...item, url });
+    };
+    (state.galleryItems || []).forEach(add);
+    (state.jobs || []).forEach(add);
+    return [...byId.values()].sort((a, b) => {
+      const ta = Number(a.done_at || a.created_at || 0);
+      const tb = Number(b.done_at || b.created_at || 0);
+      if (tb !== ta) return tb - ta;
+      return (Number(b.batch_index) || 0) - (Number(a.batch_index) || 0);
+    });
+  }
+
+  function syncPlayerNavigation(items) {
+    const current = state.selectedJobId;
+    const list = items || playerVideoItems();
+    const index = list.findIndex((item) => item.id === current);
+    const hasVideo = index >= 0;
+    const next = $("btn-player-next");
+    const prev = $("btn-player-prev");
+    [next, prev].forEach((button) => button?.classList.toggle("hidden", !hasVideo));
+    // Gallery is newest → oldest: left = next/newer, right = previous/older.
+    if (next) next.disabled = !hasVideo || index <= 0;
+    if (prev) prev.disabled = !hasVideo || index >= list.length - 1;
+  }
+
+  async function navigatePlayerVideo(direction) {
+    let list = playerVideoItems();
+    try {
+      const data = await fetch("/api/gallery").then((r) => r.json());
+      if (Array.isArray(data.items)) {
+        state.galleryItems = data.items;
+        list = playerVideoItems();
+      }
+    } catch {
+      /* In-memory finished jobs are still usable if gallery is unavailable. */
+    }
+    const index = list.findIndex((item) => item.id === state.selectedJobId);
+    if (index < 0) return;
+    const target = direction === "previous" ? list[index + 1] : list[index - 1];
+    if (!target) return;
+    showPlayerVideo(target.url, target.id, target.prompt || "", target.download_name || "");
+    const meta = `${target.duration != null ? target.duration + tt("sec") + " · " : ""}${target.width || "?"}×${target.height || "?"}`;
+    setClipPrompt(target.prompt || "", meta, target.seed);
+    syncPlayerNavigation(list);
   }
 
   function appendDirectorMsg(role, content) {
@@ -9362,6 +9418,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     else clearContinueMode();
   });
   $("btn-player-close")?.addEventListener("click", () => clearPlayer());
+  $("btn-player-next")?.addEventListener("click", () => void navigatePlayerVideo("next"));
+  $("btn-player-prev")?.addEventListener("click", () => void navigatePlayerVideo("previous"));
   $("btn-open-prompt")?.addEventListener("click", () => openPromptView());
   $("btn-clip-prompt-close")?.addEventListener("click", () => closePromptView());
   $("view-clip-prompt")?.addEventListener("click", (e) => {

@@ -2650,14 +2650,19 @@ async def batch(body: BatchBody):
                 existing_refs=list(face_refs) if face_refs else [],
                 lora_id=getattr(body, "lora_id", None) or "",
             )
+            # A scene/location plate is useful for a new shot, but it must
+            # never enter a continuation's identity pool.  Otherwise Ref2VA
+            # can restart every clip from the same location still instead of
+            # the previous video's final frame.
+            character_refs = cinema.bound_character_portraits(text, lib)
             shot_text = bound["prompt"] if bound.get("hits") else text
             if mode in ("continue", "face_continue"):
-                # Prefer locked face stills; also absorb newly bound character portraits
+                # Continue = parent last frame + optional character portraits only.
+                # Never carry location/creature reference plates into this list.
                 shot_refs = list(face_refs) if face_refs else []
-                if body.face_lock and bound.get("has_character"):
-                    extra = [str(x) for x in (bound.get("ref_images") or []) if x]
-                    if extra:
-                        face_refs = list(dict.fromkeys([*face_refs, *extra]))[:9]
+                if body.face_lock and character_refs:
+                    face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
+                    if face_refs:
                         shot_refs = list(face_refs)
                 if face_refs:
                     mode = "face_continue"
@@ -2669,9 +2674,11 @@ async def batch(body: BatchBody):
                     if bound["has_character"] and not bound["has_location"]
                     else "ref"
                 )
-            # Accumulate character/face stills so later continues stay face_continue
-            if body.face_lock and shot_refs:
-                face_refs = list(dict.fromkeys([*face_refs, *shot_refs]))[:9]
+            # Accumulate character portraits only. `shot_refs` may also include
+            # a location plate for an initial Ref2VA shot and must not leak into
+            # later Continue jobs.
+            if body.face_lock and character_refs:
+                face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
             lora_src, graph = _lora_src_for_shot(body, bound, mode)
             shot_steps, shot_sampler, shot_scheduler = _with_lora_preset(
                 lora_src, base_steps, base_sampler, base_scheduler, graph=graph
@@ -7260,10 +7267,39 @@ async def _run_job(job: dict):
             for x in (job.get("ref_images") or [])
             if x and (job.get("ref_role") == "face" or mode in ("face", "face_continue"))
         ]
+        # Repair queued Cinema jobs created by older builds too.  They may have
+        # stored a location plate in `ref_images` as if it were a face reference.
+        # For a continuation, rebuild that list from named character cards only;
+        # the parent clip's final frame remains the actual continuation canvas.
+        if job.get("cinema_batch") and mode == "face_continue":
+            face_refs = cinema.bound_character_portraits(
+                str(job.get("prompt") or ""), cinema.load()
+            )
+            if face_refs:
+                job["ref_images"] = face_refs
+                job["ref_role"] = "face"
+            else:
+                mode = "continue"
+                job["mode"] = "continue"
+                job["ref_images"] = []
+                job["ref_role"] = None
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
         lora_name, lora_strength = _lora_for_graph(job)
         models = job.get("h3_models") or h3_models.resolve(h3_models.graph_for_mode(mode))
+        prompt_text = str(job.get("prompt") or "").strip()
+        if job.get("continue_from") and first and "CONTINUATION LOCK" not in prompt_text:
+            # The input frame is the physical continuation, but this explicit
+            # instruction prevents a detailed new scene prompt from making H3
+            # treat it as a fresh establishing shot.
+            prompt_text = (
+                "CONTINUATION LOCK: Begin on the exact final frame of the previous clip. "
+                "Preserve its composition, camera position, character placement, lighting, "
+                "and ongoing action at the first moment. Continue forward naturally from that "
+                "instant; do not restart the scene, return to a reference still, or introduce "
+                "a new establishing shot.\n\n"
+                + prompt_text
+            )
         if mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
@@ -7294,7 +7330,7 @@ async def _run_job(job: dict):
                 raise RuntimeError("Referans görsel/video eksik")
             size_mode = job.get("ref_image_size") or ("max" if mode == "face" else "match")
             prompt = build_ref2va_prompt(
-                text=job["prompt"],
+                text=prompt_text,
                 ref_image_names=refs,
                 ref_video_names=ref_videos,
                 width=w,
@@ -7329,7 +7365,7 @@ async def _run_job(job: dict):
                 "composition, action, character, and camera naturally. <Audio 1> is the "
                 "final audio from that clip: continue its ambience, music rhythm, and speaker "
                 "character naturally, without replaying it verbatim.\n\n"
-                + str(job.get("prompt") or "")
+                + prompt_text
             )
             prompt = build_ref2va_prompt(
                 text=text,
@@ -7365,7 +7401,7 @@ async def _run_job(job: dict):
                 refs = face_refs[:8] + [first]
                 n_face = len(refs) - 1
             text = enhance_ref_prompt(
-                job["prompt"],
+                prompt_text,
                 n_images=len(refs),
                 role="face_continue",
                 n_face=n_face,
@@ -7394,7 +7430,7 @@ async def _run_job(job: dict):
             job["ref_role"] = "face"
         else:
             prompt = build_t2v_prompt(
-                text=job["prompt"],
+                text=prompt_text,
                 width=w,
                 height=h,
                 length=length,

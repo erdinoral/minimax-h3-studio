@@ -7378,6 +7378,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       photos.forEach((photo, i) => {
         const card = document.createElement("div");
         card.className = "gallery-card gallery-photo-card";
+        card.dataset.photoName = photo.name || "";
         const when = photo.created_at
           ? new Date(Number(photo.created_at) * 1000).toLocaleString(uiLang() === "en" ? "en-US" : "tr-TR", {
               day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
@@ -7428,12 +7429,22 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const index = state.galleryPhotoPickNames.indexOf(name);
     if (index >= 0) state.galleryPhotoPickNames.splice(index, 1);
     else state.galleryPhotoPickNames.push(name);
-    syncGalleryPhotoToolbar();
-    const panel = $("gallery-panel");
-    const scrollTop = panel?.scrollTop || 0;
-    void renderGalleryPhotos().then(() => {
-      if (panel) panel.scrollTop = scrollTop;
+    patchGalleryPhotoSelection();
+  }
+
+  function patchGalleryPhotoSelection() {
+    const picks = state.galleryPhotoPickNames || [];
+    document.querySelectorAll("#gallery-grid .gallery-photo-card").forEach((card) => {
+      const selected = state.galleryPhotoSelectMode && picks.includes(card.dataset.photoName || "");
+      card.classList.toggle("is-merge-picked", selected);
+      card.querySelector(".gallery-merge-ring")?.classList.toggle("is-on", selected);
+      const badge = card.querySelector(".gallery-merge-badge");
+      if (badge) {
+        badge.classList.toggle("is-on", selected);
+        badge.textContent = selected ? "✓" : "";
+      }
     });
+    syncGalleryPhotoToolbar();
   }
 
   function syncGalleryPhotoToolbar() {
@@ -7623,12 +7634,22 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const index = picks.indexOf(id);
     if (index >= 0) picks.splice(index, 1);
     else picks.push(id);
-    syncGalleryVideoToolbar();
-    const panel = $("gallery-panel");
-    const scrollTop = panel?.scrollTop || 0;
-    void renderGallery().then(() => {
-      if (panel) panel.scrollTop = scrollTop;
+    patchGalleryVideoSelection();
+  }
+
+  function patchGalleryVideoSelection() {
+    const picks = state.galleryVideoPickIds || [];
+    document.querySelectorAll("#gallery-grid .gallery-card:not(.gallery-photo-card)").forEach((card) => {
+      const selected = state.galleryVideoSelectMode && picks.includes(card.dataset.id || "");
+      card.classList.toggle("is-merge-picked", selected);
+      card.querySelector(".gallery-merge-ring")?.classList.toggle("is-on", selected);
+      const badge = card.querySelector(".gallery-merge-badge");
+      if (badge) {
+        badge.classList.toggle("is-on", selected);
+        badge.textContent = selected ? "✓" : "";
+      }
     });
+    syncGalleryVideoToolbar();
   }
 
   function syncGalleryVideoToolbar() {

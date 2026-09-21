@@ -17,6 +17,7 @@
     clipPrompt: "",
     clipSeed: "",
     continueFrom: null,
+    continueSourceAuto: true,
     pendingContinueChild: null,
     playerCleared: true,
     jobStatusSnapshot: {},
@@ -1099,9 +1100,8 @@
     $("panel-mode-storyboard")?.classList.toggle("hidden", true);
     refreshModeHints();
     if (m === "continue") {
-      const prefer = state.continueFrom || state.selectedJobId || "";
       void fillContinueSource().then(() => {
-        const src = prefer || $("continue-source")?.value || "";
+        const src = state.continueSourceAuto ? "" : (state.continueFrom || $("continue-source")?.value || "");
         if (src) void setContinueMode(src, { silent: true });
       });
     } else {
@@ -4641,8 +4641,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         state.galleryItems = [];
       }
     }
-    const prev = state.continueFrom || state.selectedJobId || sel.value || "";
-    const tip = chainTipJob();
+    // Keep the automatic row selected. The queue tip is resolved only when
+    // producing, so an overnight chain always targets the real queue tail.
+    const prev = state.continueSourceAuto ? "" : (state.continueFrom || sel.value || "");
     const seen = new Set();
     const pool = [];
     const add = (j, tag) => {
@@ -4662,7 +4663,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const sig = pool.map((x) => x.job.id + ":" + x.tag).join("|");
     if (sig === state._continueSourceSig && sel.options.length === pool.length + 1) {
       if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
-      else if (!prev && tip) sel.value = tip.id;
+      else if (!prev) sel.value = "";
       return;
     }
     state._continueSourceSig = sig;
@@ -4682,7 +4683,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       sel.appendChild(opt);
     });
     if (prev && pool.some((x) => x.job.id === prev)) sel.value = prev;
-    else if (tip) sel.value = tip.id;
+    else sel.value = "";
   }
 
   function clearPlayer(opts) {
@@ -6632,6 +6633,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         text: (x.text || "").trim(),
       })),
       continueFrom: state.continueFrom || null,
+      continueSourceAuto: state.continueSourceAuto !== false,
       refImageSize: state.refImageSize || "match",
     };
   }
@@ -6674,7 +6676,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       renderQueue();
     }
     if (snap.produceMode) setProduceMode(snap.produceMode);
-    if (snap.continueFrom) state.continueFrom = snap.continueFrom;
+    state.continueSourceAuto = snap.continueSourceAuto !== false;
+    if (snap.continueFrom && !state.continueSourceAuto) state.continueFrom = snap.continueFrom;
     if (snap.refImageSize) state.refImageSize = snap.refImageSize;
     syncProjectChips();
     setQuality(state.quality);
@@ -7860,6 +7863,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       { id: jobId, status: "done", url: `/api/gallery/${jobId}/video` };
     state.selectedJobId = jobId;
     state.continueFrom = jobId;
+    state.continueSourceAuto = false;
     $("view-gallery")?.classList.add("hidden");
     $("view-support")?.classList.add("hidden");
     const url =
@@ -7943,7 +7947,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const isI2v = mode === "t2v" && state.newVideoInput === "i2v";
     const motionChain = isV2v && !!$("motion-chain-15")?.checked;
     if (isContinue) {
-      const pick = $("continue-source")?.value || state.continueFrom || "";
+      const pick = $("continue-source")?.value || (state.continueSourceAuto ? "" : state.continueFrom) || "";
       if (pick) {
         await setContinueMode(pick, { silent: true });
       } else {
@@ -9450,8 +9454,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-first-frame-generate")?.addEventListener("click", () => void generateSingleFrame("first"));
   $("continue-source")?.addEventListener("change", () => {
     const id = $("continue-source").value;
-    if (id) void setContinueMode(id);
-    else clearContinueMode();
+    if (id) {
+      state.continueSourceAuto = false;
+      void setContinueMode(id);
+    } else {
+      state.continueSourceAuto = true;
+      clearContinueMode();
+    }
   });
   $("btn-player-close")?.addEventListener("click", () => clearPlayer());
   $("btn-player-delete")?.addEventListener("click", () => {

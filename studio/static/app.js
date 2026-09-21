@@ -57,7 +57,7 @@
     studioWorkspace: "scene", // scene | director
     musicId: null,
     musicMeta: null,
-    projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
+    projectPurpose: null, // short_film (film/trailer) | music_video | ad | intro | outro
     projectStyle: null, // realistic | anime | disney | game | cgi_3d | comic | illustration | oil_paint | clay | found_footage
     projectSilent: false,
     progressHideTimer: null,
@@ -118,9 +118,6 @@
     "short_film",
     "music_video",
     "ad",
-    "trailer",
-    "social",
-    "documentary",
     "intro",
     "outro",
   ];
@@ -130,6 +127,12 @@
   const ADULT_PURPOSE = "adult";
   function purposeKeysForUi() {
     return PURPOSE_KEYS.slice();
+  }
+
+  function normalizeDirectorPurpose(value) {
+    const raw = String(value || "").trim();
+    // Existing saved trailer projects stay in the new Film / Trailer category.
+    return raw === "trailer" ? "short_film" : raw;
   }
 
   function isAdultLoraSpec() { return false; }
@@ -3867,7 +3870,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (c.duration) setDuration(Number(c.duration) || state.duration || 5);
     const purpose = c.setup && c.setup.purpose && c.setup.purpose !== "auto" ? c.setup.purpose : "";
     if (purpose) {
-      state.projectPurpose = purpose;
+      state.projectPurpose = normalizeDirectorPurpose(purpose);
       state.projectSilent = purpose === "music_video" || cinemaAudio().mode === "silent";
     }
     const style = c.setup && c.setup.style && c.setup.style !== "auto" ? c.setup.style : "";
@@ -6657,7 +6660,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.loraApplied = !!(snap.loraId && snap.loraApplied !== false);
       keepLoraApplied();
     }
-    if (snap.projectPurpose !== undefined) state.projectPurpose = snap.projectPurpose;
+    if (snap.projectPurpose !== undefined) state.projectPurpose = normalizeDirectorPurpose(snap.projectPurpose);
     if (snap.projectStyle !== undefined) state.projectStyle = snap.projectStyle;
     if (snap.projectSilent !== undefined) {
       state.projectSilent = !!snap.projectSilent;

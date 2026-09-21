@@ -6722,6 +6722,7 @@ class MusicAnalyzeBody(BaseModel):
     music_id: str
     session_id: Optional[str] = None
     lyrics: Optional[str] = None
+    lyric_timeline: Optional[list[dict[str, Any]]] = None
     concept: Optional[str] = None
     clip_duration: int = 5
     visual_style: str = "realistic"
@@ -6755,6 +6756,7 @@ async def music_status(music_id: Optional[str] = None):
             "filename": meta.get("filename"),
             "durationSec": meta.get("durationSec"),
             "lyrics": meta.get("lyrics") or "",
+            "lyricTimeline": meta.get("lyricTimeline") or [],
             "concept": meta.get("concept") or "",
             "sections": suggested_sections(float(meta.get("durationSec") or 0), clip_sec),
             "final_ready": final.exists(),
@@ -6830,11 +6832,27 @@ async def music_analyze(body: MusicAnalyzeBody):
     clip = body.clip_duration if body.clip_duration in ALLOWED_DURATIONS else 5
     lyrics = (body.lyrics or "").strip()
     concept = (body.concept or "").strip()
+    lyric_timeline: list[dict[str, Any]] = []
+    for row in (body.lyric_timeline or [])[:120]:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()[:800]
+        if not text:
+            continue
+        try:
+            start = max(0.0, float(row.get("start") or 0))
+            end = max(start, float(row.get("end") or start))
+        except (TypeError, ValueError):
+            continue
+        lyric_timeline.append(
+            {"start": round(start, 2), "end": round(end, 2), "text": text}
+        )
     update_meta(
         MUSIC,
         body.music_id,
         lyrics=lyrics,
         concept=concept,
+        lyricTimeline=lyric_timeline,
         clipDurationSec=clip,
     )
     meta = load_meta(MUSIC, body.music_id)
@@ -6875,6 +6893,7 @@ async def music_analyze(body: MusicAnalyzeBody):
         concept=concept,
         visual_style=body.visual_style or "realistic",
         timeline=timeline,
+        lyric_timeline=lyric_timeline,
     )
     sess["messages"].append({"role": "user", "content": seed})
     history = [{"role": "system", "content": (system_prompt() or "") + ui_lang_addendum(ui_lang)}] + sess["messages"][-24:]

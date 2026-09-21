@@ -59,6 +59,7 @@
     musicMeta: null,
     musicConcept: "",
     musicLyrics: "",
+    musicLyricTimeline: [],
     projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
     projectStyle: null, // realistic | anime | disney | game | cgi_3d | comic | illustration | oil_paint | clay | found_footage
     projectSilent: false,
@@ -6044,6 +6045,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const isMusicVideo = state.projectPurpose === "music_video";
       musicBar.classList.toggle("music-mode", isMusicVideo);
       musicBar.classList.toggle("hidden", !isMusicVideo || state.directorTab !== "chat");
+      if (isMusicVideo) renderMusicLyricTimeline();
     }
     const badge = $("director-project");
     if (badge) {
@@ -6404,6 +6406,60 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
+  function lyricLines(text) {
+    return String(text || "")
+      .split(/\r?\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 120);
+  }
+
+  function buildMusicLyricTimeline() {
+    const duration = Number(state.musicMeta?.durationSec || 0);
+    const lines = lyricLines(state.musicLyrics);
+    if (!duration || !lines.length) {
+      toast("Önce şarkıyı ve en az bir söz satırını ekle");
+      return;
+    }
+    const weights = lines.map((line) => Math.max(1, line.split(/\s+/).filter(Boolean).length));
+    const total = weights.reduce((sum, n) => sum + n, 0);
+    let cursor = 0;
+    state.musicLyricTimeline = lines.map((text, index) => {
+      const end = index === lines.length - 1 ? duration : cursor + (duration * weights[index]) / total;
+      const row = { start: Number(cursor.toFixed(2)), end: Number(end.toFixed(2)), text };
+      cursor = end;
+      return row;
+    });
+    renderMusicLyricTimeline();
+    persistProductionLocal(collectProductionState());
+  }
+
+  function renderMusicLyricTimeline() {
+    const host = $("music-lyric-timeline");
+    const make = $("btn-music-timeline");
+    if (!host) return;
+    const enabled = !!state.musicId && lyricLines(state.musicLyrics).length > 0;
+    if (make) make.disabled = !enabled || !!state.directorBusy;
+    const rows = Array.isArray(state.musicLyricTimeline) ? state.musicLyricTimeline : [];
+    host.classList.toggle("hidden", !rows.length);
+    if (!rows.length) {
+      host.innerHTML = "";
+      return;
+    }
+    host.innerHTML =
+      '<div class="music-lyric-timeline-head">Söz zamanlaması — saniyeleri düzelt; sahne planı her satırı ilgili shot’a bağlar.</div>' +
+      rows
+        .map(
+          (row, index) =>
+            '<div class="music-lyric-row" data-index="' + index + '">' +
+            '<input type="number" min="0" step="0.1" data-lyric-field="start" value="' + htmlEsc(row.start) + '" aria-label="Başlangıç saniyesi" />' +
+            '<input type="number" min="0" step="0.1" data-lyric-field="end" value="' + htmlEsc(row.end) + '" aria-label="Bitiş saniyesi" />' +
+            '<textarea data-lyric-field="text" rows="1" aria-label="Söz satırı">' + htmlEsc(row.text) + '</textarea>' +
+            "</div>"
+        )
+        .join("");
+  }
+
   function updateMusicMetaUi() {
     const el = $("music-meta");
     const analyze = $("btn-music-analyze");
@@ -6414,9 +6470,21 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (analyze) analyze.disabled = true;
       if (remove) remove.classList.add("hidden");
       updateMusicMuxUi();
+      renderMusicLyricTimeline();
       return;
     }
     const m = state.musicMeta;
+    if (m.concept && !state.musicConcept) state.musicConcept = String(m.concept);
+    if (m.lyrics && !state.musicLyrics) state.musicLyrics = String(m.lyrics);
+    if ($("music-concept") && document.activeElement !== $("music-concept")) {
+      $("music-concept").value = state.musicConcept;
+    }
+    if ($("music-lyrics") && document.activeElement !== $("music-lyrics")) {
+      $("music-lyrics").value = state.musicLyrics;
+    }
+    if (Array.isArray(m.lyricTimeline) && m.lyricTimeline.length && !state.musicLyricTimeline.length) {
+      state.musicLyricTimeline = m.lyricTimeline;
+    }
     const shots = m.suggestedShots5 || Math.ceil((m.durationSec || 0) / 5);
     const prog =
       m.linked_jobs != null
@@ -6437,6 +6505,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (analyze) analyze.disabled = !!state.directorBusy;
     if (remove) remove.classList.remove("hidden");
     updateMusicMuxUi();
+    renderMusicLyricTimeline();
   }
 
   function updateMusicMuxUi() {
@@ -6517,6 +6586,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           session_id: state.directorSessionId,
           lyrics: state.musicLyrics || "",
           concept: state.musicConcept || "",
+          lyric_timeline: state.musicLyricTimeline || [],
           clip_duration: state.duration || 5,
           visual_style: state.projectStyle || "realistic",
           model: $("director-model").value || null,
@@ -6659,6 +6729,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       musicId: state.musicId || null,
       musicConcept: state.musicConcept || "",
       musicLyrics: state.musicLyrics || "",
+      musicLyricTimeline: state.musicLyricTimeline || [],
       prompt: ($("prompt")?.value || "").trim(),
       queueItems: state.queueItems.map((x) => ({
         id: x.id,
@@ -6699,6 +6770,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (snap.musicId !== undefined) state.musicId = snap.musicId;
     if (snap.musicConcept !== undefined) state.musicConcept = String(snap.musicConcept || "");
     if (snap.musicLyrics !== undefined) state.musicLyrics = String(snap.musicLyrics || "");
+    if (Array.isArray(snap.musicLyricTimeline)) state.musicLyricTimeline = snap.musicLyricTimeline;
     if ($("music-concept")) $("music-concept").value = state.musicConcept;
     if ($("music-lyrics")) $("music-lyrics").value = state.musicLyrics;
     if (typeof snap.prompt === "string" && $("prompt")) $("prompt").value = snap.prompt;
@@ -9989,6 +10061,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("music-lyrics")?.addEventListener("input", (e) => {
     state.musicLyrics = e.target.value || "";
+    state.musicLyricTimeline = [];
+    renderMusicLyricTimeline();
+    persistProductionLocal(collectProductionState());
+  });
+  $("btn-music-timeline")?.addEventListener("click", () => buildMusicLyricTimeline());
+  $("music-lyric-timeline")?.addEventListener("input", (e) => {
+    const field = e.target?.dataset?.lyricField;
+    const row = e.target.closest(".music-lyric-row");
+    const index = Number(row?.dataset?.index);
+    if (!field || !Number.isInteger(index) || !state.musicLyricTimeline[index]) return;
+    state.musicLyricTimeline[index][field] = field === "text" ? e.target.value : Number(e.target.value || 0);
     persistProductionLocal(collectProductionState());
   });
   $("btn-music-analyze")?.addEventListener("click", () => analyzeMusic());

@@ -249,6 +249,7 @@ def build_song_director_seed(
     concept: str = "",
     visual_style: str = "realistic",
     timeline: Optional[list[dict[str, Any]]] = None,
+    lyric_timeline: Optional[list[dict[str, Any]]] = None,
 ) -> str:
     dur = float(meta.get("durationSec") or 0)
     n = max(1, math.ceil(dur / clip_sec))
@@ -270,6 +271,20 @@ def build_song_director_seed(
     else:
         tl_txt = "(enerji ölçümü yok — bölüm tahminine uy)"
     lyr_block = lyr[:6000] if lyr else "(söz yok — enerji eğrisine göre sahne yaz; uydurma lyric overlay yazma)"
+    lyric_rows: list[str] = []
+    for row in (lyric_timeline or [])[:120]:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        try:
+            start = max(0.0, float(row.get("start") or 0))
+            end = max(start, float(row.get("end") or start))
+        except (TypeError, ValueError):
+            continue
+        lyric_rows.append(f"{start:.1f}–{end:.1f}s: {text}")
+    lyric_timing_block = "\n".join(lyric_rows) or "(zamanlı söz satırı yok)"
     return (
         f"Müzik klibi üret. Şarkı: {meta.get('filename')} · süre {dur:.1f}sn · "
         f"klip {clip_sec}sn → tam {n} shot, TEK continue zinciri (shot1 standalone, 2+ continue).\n"
@@ -280,7 +295,8 @@ def build_song_director_seed(
         f"Bölüm tahmini: {sec_txt}\n"
         f"GERÇEK SES EĞRİSİ (her satır = bir shot; enerjiye uy — high=chorus push, low=intro/outro hold):\n"
         f"{tl_txt}\n"
-        f"Sözler / lyric ipucu (sadece görüntü hikâyesi; ağız şarkı söylemesin, lip-sync yok):\n{lyr_block}\n\n"
+        f"Sözler / lyric ipucu (sadece görüntü hikâyesi; ağız şarkı söylemesin, lip-sync yok):\n{lyr_block}\n"
+        f"ZAMANLI SÖZ HARİTASI (önceliklidir; her shot kendi zaman aralığındaki satırı görselleştirir):\n{lyric_timing_block}\n\n"
         "TUTARLILIK (zorunlu):\n"
         "- characters[] içinde 1–2 kişi: age, face, hair, eyes, build, EXACT wardrobe. "
         "Her h3Prompt aynı kartı tekrarlar; kıyafet/saç değişmez.\n"
@@ -288,7 +304,7 @@ def build_song_director_seed(
         "- Shot 2+ h3Prompt 'Continue directly from the previous shot.' + Same [names], identical clothing.\n"
         "- Her shot ≥1100 karakter İngilizce SCENE; energy=high ise daha geniş hareket / ışık; "
         "energy=low ise yakın, yavaş, mikro eylem.\n"
-        "- Söz varsa o zaman aralığındaki duyguyu yansıt; ekranda yazı/lyric overlay yok.\n"
+        "- Zamanlı söz satırı varsa o zaman aralığındaki anlamı/duyguyu yansıt; ekranda yazı/lyric overlay yok.\n"
         "CRITICAL silentAudio=true: no dialogue, no singing, no SFX, no generated music — "
         "SILENT VISUAL ONLY (song muxed later).\n"
         "Bitince ready:true ile TAM JSON brief ver (purpose=music_video, silentAudio=true, characters[], shots[n])."

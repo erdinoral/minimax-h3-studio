@@ -432,6 +432,35 @@ body.director-modal-open .zone-scene {
   border-color: rgba(212, 160, 23, 0.45);
   background: rgba(212, 160, 23, 0.06);
 }
+.music-lyric-timeline {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 0 3px;
+  border-top: 1px dashed rgba(212, 160, 23, 0.25);
+}
+.music-lyric-timeline-head {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.music-lyric-row {
+  display: grid;
+  grid-template-columns: 58px 58px minmax(180px, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+.music-lyric-row input,
+.music-lyric-row textarea {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+  font: inherit;
+  font-size: 0.76rem;
+}
+.music-lyric-row textarea { min-height: 32px; resize: vertical; }
 .director-chips .chip[aria-pressed="true"],
 .director-chips .chip.on {
   background: rgba(212, 160, 23, 0.22);

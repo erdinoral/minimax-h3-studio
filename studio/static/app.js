@@ -9201,21 +9201,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function importCinemaJsonPayload(payload) {
-    const merge = !!$("cinema-json-merge")?.checked;
-    const toLib = !!$("cinema-json-library")?.checked;
-    const redoChars = !!$("cinema-json-redo-chars")?.checked;
-    if ($("cinema-force-sheets")) $("cinema-force-sheets").checked = redoChars;
     const r = await fetch("/api/cinema/import-json", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         payload: payload,
-        mode: merge ? "merge" : "replace",
-        save_to_library: toLib,
-        new_film: !merge,
+        mode: "replace",
+        save_to_library: false,
+        new_film: true,
         generate_sheets: false,
         keep_stills: true,
-        redo_characters: redoChars,
+        redo_characters: false,
       }),
     });
     const data = await r.json().catch(() => ({}));
@@ -9249,24 +9245,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if ($("cinema-json-text")) $("cinema-json-text").value = text;
     };
     reader.readAsText(f, "utf-8");
-  });
-  $("btn-cinema-json-export")?.addEventListener("click", () => {
-    void fetch("/api/cinema/export-json")
-      .then(async (r) => {
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(errDetail(data));
-        const blob = new Blob([JSON.stringify(data, null, 2)], {
-          type: "application/json;charset=utf-8",
-        });
-        const a = document.createElement("a");
-        const title = String(data.title || "film").replace(/[^\w\-]+/g, "_").slice(0, 40) || "film";
-        a.href = URL.createObjectURL(blob);
-        a.download = title + ".h3cinema.json";
-        a.click();
-        URL.revokeObjectURL(a.href);
-        toast(tt("cinema.jsonExported"));
-      })
-      .catch((err) => toast(String(err.message || err)));
   });
   function downloadCinemaJsonTemplate(kind) {
     const qs = kind === "seamless" ? "?kind=seamless" : "";

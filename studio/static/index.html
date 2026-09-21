@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema122" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema123" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -507,19 +507,30 @@
         <button type="button" class="cta" id="btn-bible-generate">Brief üret</button>
       </div>
       <div id="director-music-home"><div class="director-music" id="director-music">
-        <label class="file-pick file-pick-inline music-file">
-          <input type="file" id="music-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
-          <span class="file-pick-btn" id="music-pick-btn">Şarkı seç</span>
-          <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
+        <p class="music-workflow-hint">Şarkıyı yükle, görsel dünyayı yaz, sözleri zamanla. Plan her satırı doğru sahneye bağlar.</p>
+        <div class="music-upload-row">
+          <label class="file-pick file-pick-inline music-file">
+            <input type="file" id="music-file" class="file-pick-input" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg" />
+            <span class="file-pick-btn" id="music-pick-btn">1 · Şarkı seç</span>
+            <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
+          </label>
+          <span class="muted" id="music-meta">yok</span>
+          <button type="button" class="btn-ghost hidden" id="btn-music-remove">Kaldır</button>
+        </div>
+        <label class="music-field"><span>2 · Görsel konsept / ana prompt</span>
+          <textarea id="music-concept" rows="3" placeholder="Örn. neon şehirde yalnız vokalist; geceden gün doğumuna yükselen duygusal performans" autocomplete="off"></textarea>
         </label>
-        <span class="muted" id="music-meta">yok</span>
-        <button type="button" class="btn-ghost hidden" id="btn-music-remove">Şarkıyı kaldır</button>
-        <input type="text" id="music-concept" placeholder="Ana prompt / konsept (örn. dark phonk otopark)" autocomplete="off" />
-        <textarea id="music-lyrics" rows="3" placeholder="Şarkı sözleri — görsel hikâye sözlerle uyumlu planlanır" autocomplete="off"></textarea>
-        <button type="button" class="btn-ghost" id="btn-music-timeline" disabled title="Sözleri şarkı süresine dağıt; sonra zamanları elle düzelt">Söz zamanlarını oluştur</button>
-        <button type="button" class="btn-secondary" id="btn-music-analyze" disabled title="Şarkı süresi + sözler + prompt → sahne planı">Şarkıdan sahne planı</button>
-        <button type="button" class="btn-ghost hidden" id="btn-music-mux" disabled title="Bitmiş klipler + şarkı → final">Şarkılı final</button>
-        <a class="muted hidden" id="music-final-link" href="#" target="_blank" rel="noopener">Finali aç</a>
+        <label class="music-field"><span>3 · Şarkı sözleri</span>
+          <textarea id="music-lyrics" rows="8" placeholder="Her satıra bir söz veya bölüm yaz. Görsel hikâye bu satırlarla uyumlu planlanır." autocomplete="off"></textarea>
+        </label>
+        <div class="music-workflow-actions">
+          <button type="button" class="btn-ghost" id="btn-music-timeline" disabled title="Sözleri şarkı süresine dağıt; sonra zamanları elle düzelt">4 · Söz zamanlarını oluştur</button>
+          <button type="button" class="cta" id="btn-music-analyze" disabled title="Şarkı süresi + sözler + prompt → sahne planı">5 · Sahne planını oluştur</button>
+        </div>
+        <div class="music-finish-actions">
+          <button type="button" class="btn-ghost hidden" id="btn-music-mux" disabled title="Bitmiş klipler + şarkı → final">Şarkılı final</button>
+          <a class="muted hidden" id="music-final-link" href="#" target="_blank" rel="noopener">Finali aç</a>
+        </div>
         <div class="music-lyric-timeline hidden" id="music-lyric-timeline"></div>
       </div></div>
       <div id="director-tabs" class="director-tabs"></div>

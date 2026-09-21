@@ -444,9 +444,60 @@ body.director-modal-open .zone-scene {
 }
 .cinema-music-slot .director-music {
   margin: 0;
-  padding: 0;
+  padding: 0 2px;
   border: 0;
   background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.music-workflow-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.music-upload-row,
+.music-workflow-actions,
+.music-finish-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.music-upload-row #music-meta {
+  flex: 1 1 120px;
+  max-width: none;
+}
+.music-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 0.77rem;
+  font-weight: 650;
+}
+.cinema-music-slot .director-music #music-concept,
+.cinema-music-slot .director-music #music-lyrics {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: auto;
+  padding: 8px;
+  color: var(--text);
+  line-height: 1.4;
+}
+.cinema-music-slot .director-music #music-concept { min-height: 68px; }
+.cinema-music-slot .director-music #music-lyrics { min-height: 170px; }
+.cinema-music-slot .music-workflow-actions .cta,
+.cinema-music-slot .music-workflow-actions .btn-ghost {
+  flex: 1 1 100%;
+  min-height: 36px;
+}
+.cinema-music-slot .music-lyric-timeline {
+  padding-top: 10px;
 }
 .music-lyric-timeline-head {
   color: var(--muted);

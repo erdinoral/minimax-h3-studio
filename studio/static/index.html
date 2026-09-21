@@ -897,56 +897,21 @@
             <h3 id="cinema-scene-dialog-title">Bölüm düzenle</h3>
             <button type="button" class="menu-btn" id="btn-cinema-scene-close">Kapat</button>
           </header>
-          <p class="muted cinema-scene-hint" id="cinema-scene-hint">Yazar alanlarını doldur; Kaydet MiniMax H3 üçlü prompt’a derler.</p>
+          <p class="muted cinema-scene-hint" id="cinema-scene-hint">JSON'daki temel bölüm bilgisini düzenle: karakterler, sahne ve prompt.</p>
           <div class="cinema-scene-fields">
             <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" id="cinema-scene-group-story">Sahne</h4>
-              <label><span id="cinema-scene-lbl-title">Sahne başlığı</span><input id="cinema-scene-title" type="text" data-scene-field="title" autocomplete="off" /></label>
-              <label><span id="cinema-scene-lbl-location">Lokasyon</span><textarea id="cinema-scene-location" rows="2" data-scene-field="location"></textarea></label>
-              <label><span id="cinema-scene-lbl-character">Karakter</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character"></textarea></label>
-              <label><span id="cinema-scene-lbl-action">Olay / aksiyon</span><textarea id="cinema-scene-action" rows="3" data-scene-field="action"></textarea></label>
-            </section>
-            <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" id="cinema-scene-group-dialogue">Diyalog</h4>
               <div class="cinema-scene-row">
-                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-dialogue">Diyalog</span><textarea id="cinema-scene-dialogue" rows="3" data-scene-field="dialogue"></textarea></label>
-                <label class="cinema-scene-lang"><span id="cinema-scene-lbl-dialogue-lang">Diyalog dili</span>
-                  <select id="cinema-scene-dialogue-lang" data-scene-field="dialogue_lang">
-                    <option value="auto">Auto</option>
-                    <option value="Turkish">Turkish</option>
-                    <option value="English">English</option>
-                    <option value="Arabic">Arabic</option>
-                    <option value="French">French</option>
-                    <option value="German">German</option>
-                    <option value="Spanish">Spanish</option>
-                    <option value="Japanese">Japanese</option>
-                    <option value="Chinese">Chinese</option>
-                    <option value="Korean">Korean</option>
-                    <option value="Russian">Russian</option>
-                  </select>
+                <label class="cinema-scene-grow"><span>Bölüm başlığı</span><input id="cinema-scene-title" type="text" data-scene-field="title" autocomplete="off" /></label>
+                <label class="cinema-scene-lang"><span>Video türü</span>
+                  <select id="cinema-scene-type"><option value="t2v">Yeni video</option><option value="continue">Devam videosu</option></select>
                 </label>
+                <label class="cinema-scene-lang"><span>Süre (sn)</span><input id="cinema-scene-duration" type="number" min="1" max="15" step="1" value="5" /></label>
               </div>
-            </section>
-            <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" id="cinema-scene-group-lens">Kamera &amp; stil</h4>
-              <div class="cinema-scene-row">
-                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-camera">Kamera</span><textarea id="cinema-scene-camera" rows="2" data-scene-field="camera"></textarea></label>
-                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-visual">Görsel stil</span><textarea id="cinema-scene-visual" rows="2" data-scene-field="visual_style"></textarea></label>
-              </div>
-              <label><span id="cinema-scene-lbl-important">Önemli / kısıt</span><textarea id="cinema-scene-important" rows="2" data-scene-field="important"></textarea></label>
-            </section>
-            <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" id="cinema-scene-group-audio">Ses</h4>
-              <div class="cinema-scene-row">
-                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-audio">Ses / ambiyans</span><textarea id="cinema-scene-audio" rows="2" data-scene-field="audio"></textarea></label>
-                <label class="cinema-scene-grow"><span id="cinema-scene-lbl-music">Film müziği</span><textarea id="cinema-scene-music" rows="2" data-scene-field="music" placeholder="N/A"></textarea></label>
-              </div>
+              <label><span>Karakter çağırmaları</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character" placeholder="Master Kyros, Seraph Vane"></textarea></label>
+              <label><span>Sahne</span><textarea id="cinema-scene-location" rows="3" data-scene-field="location" placeholder="Bu bölümde ne oluyor?"></textarea></label>
+              <label><span>Prompt</span><textarea id="cinema-scene-action" rows="7" data-scene-field="action" placeholder="Videoda üretilecek görsel ve aksiyon açıklaması"></textarea></label>
             </section>
           </div>
-          <details class="cinema-scene-preview-fold" open>
-            <summary id="cinema-scene-preview-sum">H3 önizleme</summary>
-            <pre id="cinema-scene-preview" class="cinema-scene-preview"></pre>
-          </details>
           <div class="row-btns">
             <button type="button" class="btn-secondary" id="btn-cinema-scene-cancel">İptal</button>
             <button type="button" class="cta" id="btn-cinema-scene-save">Kaydet</button>
@@ -1197,6 +1162,6 @@
 
   <script src="/static/i18n.js?v=cinema120" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema131" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema132" charset="utf-8"></script>
 </body>
 </html>

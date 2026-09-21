@@ -2422,9 +2422,8 @@
   }
 
   function refreshCinemaScenePreview() {
-    const pre = $("cinema-scene-preview");
-    if (!pre) return;
-    pre.textContent = composeH3Prompt(readCinemaSceneForm()) || "—";
+    // Kept as a no-op for older event bindings.  The editor now intentionally
+    // shows the JSON fields directly instead of a second, compiled prompt.
   }
 
   function openCinemaSceneModal(shotId, mode) {
@@ -2442,6 +2441,9 @@
       cinemaSceneEditMode = shot.mode === "continue" ? "continue" : "t2v";
       const structured = cinemaShotStructured(shot);
       if (cinemaHasAuthorFields(structured)) {
+        if (!structured.character) {
+          structured.character = cinemaShotCalls(shot.text || structured.action).join(", ");
+        }
         fillCinemaSceneForm(structured);
         const rawS = cleanCinemaStructured(shot.structured);
         const dumped =
@@ -2456,11 +2458,19 @@
       } else {
         fillCinemaSceneForm(emptyCinemaStructured());
       }
+      const type = $("cinema-scene-type");
+      if (type) type.value = cinemaSceneEditMode;
+      const duration = $("cinema-scene-duration");
+      if (duration) duration.value = String(Math.max(1, Number(shot.durationSec || shot.duration || ensureCinema().duration || 5)));
     } else {
       const draft = ($("cinema-shot-draft")?.value || "").trim();
       const seeded = emptyCinemaStructured();
       if (draft) seeded.action = draft;
       fillCinemaSceneForm(seeded);
+      const type = $("cinema-scene-type");
+      if (type) type.value = cinemaSceneEditMode;
+      const duration = $("cinema-scene-duration");
+      if (duration) duration.value = String(ensureCinema().duration || 5);
     }
     refreshCinemaScenePreview();
     modal.classList.remove("hidden");
@@ -2486,6 +2496,9 @@
       return;
     }
     const c = ensureCinema();
+    const type = $("cinema-scene-type")?.value;
+    cinemaSceneEditMode = type === "continue" ? "continue" : "t2v";
+    const durationSec = Math.max(1, Math.min(15, Number($("cinema-scene-duration")?.value || c.duration || 5)));
     cinemaForceLocalShots = true;
     const text = composed || structured.action || "";
     if (cinemaSceneEditId) {
@@ -2493,15 +2506,18 @@
       if (!shot) return;
       shot.structured = structured;
       shot.text = text;
-      if (cinemaStudioMode() !== "seamless") {
-        shot.mode = cinemaSceneEditMode;
-      }
+      shot.durationSec = durationSec;
+      // Keep the JSON section's declared type even when the overall project
+      // is a seamless package; it is still needed if the section is later
+      // produced on its own.
+      shot.mode = cinemaSceneEditMode;
     } else {
       c.shots.push({
         id: cinemaId(),
         text,
         mode: cinemaSceneEditMode,
         structured,
+        durationSec,
       });
       const draft = $("cinema-shot-draft");
       if (draft) draft.value = "";

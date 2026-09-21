@@ -749,6 +749,11 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     section_id = str(item.get("sectionId") or item.get("section_id") or "").strip()
     if section_id:
         out["section_id"] = section_id
+    if item.get("durationSec") not in (None, ""):
+        try:
+            out["durationSec"] = max(1, min(15, int(item.get("durationSec") or 5)))
+        except Exception:
+            pass
     if _has_author_fields(structured):
         out["structured"] = structured
     if item.get("take_id"):
@@ -2373,13 +2378,29 @@ def _section_from_shot(shot: Any) -> dict[str, Any]:
         mode = "t2v"
     else:
         mode = "continue"
-    row: dict[str, Any] = {"mode": mode}
+    row: dict[str, Any] = {"type": "continue" if mode == "continue" else "new"}
+    section_id = str(shot.get("section_id") or shot.get("sectionId") or "").strip()
+    if section_id:
+        row["id"] = section_id
+    duration = shot.get("durationSec") or shot.get("duration")
+    if duration not in (None, ""):
+        try:
+            row["duration"] = max(1, int(duration))
+        except Exception:
+            pass
     if has_struct:
-        for key in _STRUCTURED_KEYS:
+        if structured.get("title"):
+            row["title"] = structured["title"]
+        if structured.get("location"):
+            row["scene"] = structured["location"]
+        if structured.get("character"):
+            row["characters"] = structured["character"]
+        if structured.get("action"):
+            row["prompt"] = structured["action"]
+        # Preserve optional advanced values when an older project has them.
+        for key in ("dialogue", "dialogue_lang", "camera", "visual_style", "audio", "music", "important"):
             val = structured.get(key) or ""
-            if key == "dialogue_lang" and (not val or val.lower() == "auto"):
-                row[key] = "auto"
-            elif val:
+            if val and not (key == "dialogue_lang" and val.lower() == "auto"):
                 row[key] = val
     else:
         text = str(shot.get("text") or shot.get("h3Prompt") or shot.get("prompt") or "").strip()
@@ -2401,7 +2422,22 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
     if not isinstance(structured_raw, dict):
         structured_raw = {k: item.get(k) for k in _STRUCTURED_KEYS if item.get(k) not in (None, "")}
     structured = _clean_structured(structured_raw)
-    mode = str(item.get("mode") or ("t2v" if index == 0 else "continue")).strip().lower()
+    # Portable section JSON uses simple, readable keys. Map them to the
+    # internal fields without compiling away the supplied prompt or scene.
+    if not structured.get("location") and item.get("scene") not in (None, ""):
+        structured["location"] = str(item.get("scene") or "").strip()
+    characters = item.get("characters") or item.get("character")
+    if not structured.get("character") and characters not in (None, ""):
+        if isinstance(characters, (list, tuple)):
+            characters = ", ".join(str(x).strip() for x in characters if str(x).strip())
+        structured["character"] = str(characters or "").strip()
+    if not structured.get("action") and item.get("prompt") not in (None, ""):
+        structured["action"] = str(item.get("prompt") or "").strip()
+    section_type = str(item.get("type") or "").strip().lower()
+    mode = str(
+        item.get("mode")
+        or ("continue" if section_type in ("continue", "devam") else "t2v" if section_type in ("new", "t2v") else ("t2v" if index == 0 else "continue"))
+    ).strip().lower()
     text = str(
         item.get("text") or item.get("h3Prompt") or item.get("prompt") or item.get("action") or ""
     ).strip()
@@ -2409,7 +2445,9 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
         parsed = parse_h3_prompt(text)
         if _has_author_fields(parsed):
             structured = parsed
-    payload: dict[str, Any] = {"mode": mode, "text": text}
+    payload: dict[str, Any] = {"mode": mode, "text": text, "section_id": item.get("id") or item.get("section_id") or ""}
+    if item.get("duration") not in (None, ""):
+        payload["durationSec"] = item.get("duration")
     if _has_author_fields(structured):
         payload["structured"] = structured
     for key in ("take_index", "take_title", "take_id"):

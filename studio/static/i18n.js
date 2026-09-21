@@ -2008,7 +2008,6 @@
     ["#btn-cinema-add-cont", "cinema.addCont"],
     ["#btn-cinema-add-draft", "cinema.addDraft"],
     ["#cinema-scene-dialog-title", "cinema.sceneTitle"],
-    ["#cinema-scene-hint", "cinema.sceneHint"],
     ["#cinema-scene-group-story", "cinema.sceneGroupStory"],
     ["#cinema-scene-group-dialogue", "cinema.sceneGroupDialogue"],
     ["#cinema-scene-group-lens", "cinema.sceneGroupLens"],

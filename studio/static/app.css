@@ -439,10 +439,10 @@ body.director-modal-open .zone-scene {
   padding: 6px 0 3px;
   border-top: 1px dashed rgba(212, 160, 23, 0.25);
 }
-.cinema-music-slot {
-  min-width: 0;
-}
-.cinema-music-slot .director-music {
+#cinema-music-slot { min-width: 0; }
+#cinema-music-slot .director-music {
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
   padding: 0 2px;
   border: 0;
@@ -450,6 +450,7 @@ body.director-modal-open .zone-scene {
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  flex-wrap: nowrap;
   gap: 12px;
 }
 .music-workflow-hint {
@@ -478,8 +479,8 @@ body.director-modal-open .zone-scene {
   font-size: 0.77rem;
   font-weight: 650;
 }
-.cinema-music-slot .director-music #music-concept,
-.cinema-music-slot .director-music #music-lyrics {
+#cinema-music-slot .director-music #music-concept,
+#cinema-music-slot .director-music #music-lyrics {
   box-sizing: border-box;
   width: 100%;
   max-width: none;
@@ -489,14 +490,26 @@ body.director-modal-open .zone-scene {
   color: var(--text);
   line-height: 1.4;
 }
-.cinema-music-slot .director-music #music-concept { min-height: 68px; }
-.cinema-music-slot .director-music #music-lyrics { min-height: 170px; }
-.cinema-music-slot .music-workflow-actions .cta,
-.cinema-music-slot .music-workflow-actions .btn-ghost {
-  flex: 1 1 100%;
+#cinema-music-slot .director-music #music-concept { min-height: 68px; }
+#cinema-music-slot .music-lyrics-field {
+  flex: 1 1 auto;
+  min-height: 170px;
+}
+#cinema-music-slot .director-music #music-lyrics {
+  flex: 1 1 auto;
+  min-height: 170px;
+  height: 100%;
+}
+#cinema-music-slot .music-workflow-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+#cinema-music-slot .music-workflow-actions .cta,
+#cinema-music-slot .music-workflow-actions .btn-ghost {
+  width: 100%;
   min-height: 36px;
 }
-.cinema-music-slot .music-lyric-timeline {
+#cinema-music-slot .music-lyric-timeline {
   padding-top: 10px;
 }
 .music-lyric-timeline-head {

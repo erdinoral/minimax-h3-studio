@@ -2238,23 +2238,8 @@ def _blank_seamless_template() -> dict[str, Any]:
     }
     return {
         "schema": CINEMA_SEAMLESS_SCHEMA,
-        "studio_mode": "seamless",
-        "seamless": True,
         "title": "",
         "logline": "",
-        "look": "auto",
-        "setup": {
-            "look": "auto",
-            "camera": "auto",
-            "palette": "auto",
-            "lighting": "auto",
-            "era": "auto",
-            "purpose": "short_film",
-            "style": "realistic",
-        },
-        "duration": SEAMLESS_DEFAULT_DURATION,
-        "quality": "736",
-        "steps": 18,
         "characters": [
             {
                 "name": "",
@@ -2292,8 +2277,8 @@ def project_json_template(kind: str = "") -> dict[str, Any]:
                 raw = json.loads(CINEMA_SEAMLESS_TEMPLATE_FILE.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     raw["schema"] = CINEMA_SEAMLESS_SCHEMA
-                    raw["studio_mode"] = "seamless"
-                    raw["seamless"] = True
+                    for key in ("studio_mode", "seamless", "look", "setup", "duration", "quality", "steps"):
+                        raw.pop(key, None)
                     return raw
             except Exception:
                 pass
@@ -2303,6 +2288,8 @@ def project_json_template(kind: str = "") -> dict[str, Any]:
             raw = json.loads(CINEMA_JSON_TEMPLATE_FILE.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 raw["schema"] = CINEMA_JSON_SCHEMA
+                for key in ("studio_mode", "seamless", "look", "setup", "duration", "quality", "steps"):
+                    raw.pop(key, None)
                 return raw
         except Exception:
             pass
@@ -2310,19 +2297,6 @@ def project_json_template(kind: str = "") -> dict[str, Any]:
         "schema": CINEMA_JSON_SCHEMA,
         "title": "",
         "logline": "",
-        "look": "auto",
-        "setup": {
-            "look": "auto",
-            "camera": "auto",
-            "palette": "auto",
-            "lighting": "auto",
-            "era": "auto",
-            "purpose": "short_film",
-            "style": "realistic",
-        },
-        "duration": 5,
-        "quality": "736",
-        "steps": 18,
         "characters": [
             {
                 "name": "",
@@ -2467,31 +2441,18 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
 
 
 def export_project_json() -> dict[str, Any]:
-    """Portable film package: cast + structured sections (LLM-friendly)."""
+    """Portable content package. Production settings always stay in Studio."""
     data = load()
-    look_id = str((_clean_setup(data.get("setup")).get("look") or "")).strip()
-    studio_mode = _clean_studio_mode(data.get("studio_mode"))
-    seamless = studio_mode == "seamless"
     shots = [s for s in (data.get("shots") or []) if isinstance(s, dict)]
-    payload: dict[str, Any] = {
-        "schema": CINEMA_SEAMLESS_SCHEMA if seamless else CINEMA_JSON_SCHEMA,
-        "studio_mode": studio_mode or "assets",
-        "seamless": seamless,
+    return {
+        "schema": CINEMA_JSON_SCHEMA,
         "title": str(data.get("title") or "").strip(),
         "logline": str(data.get("role_script") or "").strip()[:4000],
-        "setup": _clean_setup(data.get("setup")),
-        "duration": int(data.get("duration") or 5),
-        "quality": str(data.get("quality") or "720"),
-        "steps": int(data.get("steps") or 20),
         "characters": [_asset_public(x, "character") for x in (data.get("characters") or [])],
         "locations": [_asset_public(x, "location") for x in (data.get("locations") or [])],
         "creatures": [_asset_public(x, "creature") for x in (data.get("creatures") or [])],
         "sections": [_section_from_shot(s) for s in shots],
-        "look": look_id,
     }
-    if seamless:
-        payload["takes"] = _takes_from_shots(shots)
-    return payload
 
 
 def _coerce_project_payload(raw: Any) -> dict[str, Any]:
@@ -2538,14 +2499,17 @@ def import_project_json(
         for k, v in payload.items()
         if not (isinstance(k, str) and k.startswith("_"))
     }
-    seamless_pkg = is_seamless_package(payload)
     warnings: list[str] = []
     mode_l = (mode or "replace").strip().lower()
     if mode_l not in ("replace", "merge"):
         mode_l = "replace"
 
-    setup_raw = payload.get("setup") if isinstance(payload.get("setup"), dict) else {}
-    look_hint = str(payload.get("look") or setup_raw.get("look") or "").strip()
+    # JSON is a content package. Its legacy settings are deliberately ignored;
+    # the controls currently selected in Studio are the source of production truth.
+    cur = load()
+    selected_mode = _clean_studio_mode(cur.get("studio_mode")) or "assets"
+    look_hint = str((_clean_setup(cur.get("setup")).get("look") or "")).strip()
+    legacy_seamless_pkg = is_seamless_package(payload)
 
     take_blocks = extract_take_blocks(payload)
     sections = (
@@ -2568,7 +2532,7 @@ def import_project_json(
             if isinstance(item, (dict, str))
         ]
         shots = [s for s in shots if s.get("text") or s.get("structured")]
-        if seamless_pkg and shots:
+        if legacy_seamless_pkg and shots:
             _stamp_flat_takes(shots)
             takes = (len(shots) + SEAMLESS_MAX_SHOTS - 1) // SEAMLESS_MAX_SHOTS
             warnings.append(
@@ -2581,7 +2545,6 @@ def import_project_json(
     creatures_in = payload.get("creatures") or payload.get("monsters") or []
 
     # Archive current before replace-into-new-film
-    cur = load()
     if new_film and mode_l == "replace":
         try:
             save(cur)
@@ -2589,6 +2552,9 @@ def import_project_json(
             pass
         data = json.loads(json.dumps(_EMPTY))
         data["film_id"] = uuid.uuid4().hex[:10]
+        # A new film must inherit the UI production choices, not JSON defaults.
+        for key in ("setup", "audio", "duration", "quality", "steps", "seed", "seed_lock", "studio_mode"):
+            data[key] = json.loads(json.dumps(cur.get(key)))
     else:
         data = cur
 
@@ -2601,23 +2567,6 @@ def import_project_json(
         data["title"] = title
     if logline:
         data["role_script"] = logline
-
-    if isinstance(payload.get("setup"), dict):
-        data["setup"] = _clean_setup({**_clean_setup(data.get("setup")), **payload["setup"]})
-    elif look_hint:
-        setup = _clean_setup(data.get("setup"))
-        setup["look"] = look_hint
-        data["setup"] = setup
-
-    for key in ("duration", "quality", "steps"):
-        if payload.get(key) is not None:
-            data[key] = payload.get(key)
-    if seamless_pkg:
-        data["studio_mode"] = "seamless"
-        if payload.get("duration") is None:
-            data["duration"] = SEAMLESS_DEFAULT_DURATION
-    elif _clean_studio_mode(payload.get("studio_mode")):
-        data["studio_mode"] = _clean_studio_mode(payload.get("studio_mode"))
 
     if mode_l == "replace":
         data["characters"] = _merge_named_assets("character", [], chars_in)
@@ -2656,7 +2605,7 @@ def import_project_json(
             cur.get("creatures") or [],
             lib_assets.get("creatures") or [],
         )
-        if not redo_characters and not seamless_pkg:
+        if not redo_characters and selected_mode != "seamless":
             data["characters"], stills_kept["characters"] = _adopt_stills_by_name(
                 data.get("characters") or [],
                 cur.get("characters") or [],
@@ -2679,7 +2628,7 @@ def import_project_json(
                 except Exception:
                     pass
 
-    if seamless_pkg:
+    if selected_mode == "seamless":
         for ch in out.get("characters") or []:
             if character_portrait_files(ch):
                 warnings.append(
@@ -2689,9 +2638,9 @@ def import_project_json(
 
     return {
         "ok": True,
-        "schema": CINEMA_SEAMLESS_SCHEMA if seamless_pkg else CINEMA_JSON_SCHEMA,
-        "studio_mode": "seamless" if seamless_pkg else (_clean_studio_mode(out.get("studio_mode")) or "assets"),
-        "seamless": bool(seamless_pkg),
+        "schema": CINEMA_JSON_SCHEMA,
+        "studio_mode": _clean_studio_mode(out.get("studio_mode")) or "assets",
+        "seamless": (_clean_studio_mode(out.get("studio_mode")) == "seamless"),
         "mode": mode_l,
         "title": out.get("title") or "",
         "film_id": out.get("film_id") or "",

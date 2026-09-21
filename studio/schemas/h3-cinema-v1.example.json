@@ -6,7 +6,6 @@
       "required": "English",
       "why": "MiniMax H3 still + video prompts must be English. Turkish/other languages in visual fields hurt quality.",
       "write_in_english": [
-        "setup.look, camera, palette, lighting, era, style",
         "characters[].notes, voice, trigger (names may stay as proper nouns)",
         "locations[].notes",
         "creatures[].notes",
@@ -19,9 +18,7 @@
       "duration_seconds_per_clip": 5,
       "sections_count": "EQUALS _user.scenes (default 12). Add/remove section objects to match.",
       "total_runtime": "12 clips x 5s = 60s (1 minute). Keep exactly 12 sections unless the user asks otherwise. 3 acts = 36 sections (3 x 12).",
-      "quality_note": "Leave quality/steps as-is. Studio Produce uses the user's Draft/Final preset.",
-      "quality": "736",
-      "steps": 18
+      "production_settings": "Style, preset, duration, quality, steps and LoRA are selected in Studio and are never part of this JSON."
     },
     "mode_field": {
       "t2v": "NEW video — fresh clip (text-to-video / new beat). Use for shot 1 and for hard cuts (new location, time jump, different cast with no overlap).",
@@ -59,16 +56,11 @@
       "locations": "name + ENGLISH notes (architecture, time of day, weather). Notes become the location still prompt.",
       "creatures": "name + ENGLISH notes (anatomy, scale, color). Notes become the creature still prompt. No voice/lora."
     },
-    "setup_guide": {
-      "look_camera_palette_lighting_era": "Global film bible IN ENGLISH; use auto if unsure.",
-      "purpose": "short_film | music_video | …",
-      "style": "realistic | anime | …"
-    },
     "rules": [
       "Human input is ONLY _user.scenes + _user.about. Do not ask more questions.",
       "Write ALL visual fields in English. Dialogue may stay in the spoken language.",
       "Keep schema h3-cinema/v1. sections.length = _user.scenes (default 12).",
-      "Fill author fields in DETAIL. Studio composes the official 3-block H3 prompt.",
+      "Fill author fields in DETAIL. Studio composes the official 3-block H3 prompt; production settings stay in the Studio UI.",
       "Do NOT write integrated_multimodal_description / overall_soundscape / non_diegetic_music keys.",
       "TEXT ONLY — no images/URLs/base64. Studio creates stills from name+notes.",
       "Same character name spelling everywhere.",
@@ -90,26 +82,13 @@
   },
   "_user": {
     "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
-    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, look, cast notes, locations, and every beat from that. Do not ask questions. Do not leave empty action/camera/audio.",
+    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, cast notes, locations, and every beat from that. Do not ask questions. Do not leave empty action/camera/audio.",
     "scenes": 12,
     "about": ""
   },
   "schema": "h3-cinema/v1",
   "title": "",
   "logline": "",
-  "look": "auto",
-  "setup": {
-    "look": "auto",
-    "camera": "auto",
-    "palette": "auto",
-    "lighting": "auto",
-    "era": "auto",
-    "purpose": "short_film",
-    "style": "realistic"
-  },
-  "duration": 5,
-  "quality": "736",
-  "steps": 18,
   "characters": [
     {
       "name": "",

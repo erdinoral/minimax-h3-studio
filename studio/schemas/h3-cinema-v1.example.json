@@ -51,6 +51,48 @@
       "music": "N/A unless the user asked for score. Becomes non_diegetic_music.",
       "important": "Must-lock details (costume, prop, continuity). Keep short."
     },
+    "strict_section_contract": {
+      "why": "Studio does NOT guess character or location calls from prose inside prompt/action. It binds cards only from the exact section keys below.",
+      "required_keys_every_section": [
+        "mode",
+        "title",
+        "location",
+        "character",
+        "action",
+        "camera",
+        "visual_style",
+        "audio",
+        "music",
+        "important"
+      ],
+      "asset_binding": [
+        "location MUST be the exact name of one entry in locations[].name whenever a named place is visible. Example: location: Alex's Attic Apartment.",
+        "character MUST be the exact name of one or more entries in characters[].name whenever a named person is visible. Multiple people: Alex, Maya.",
+        "Do not leave location or character blank when a named place/person appears. Empty character is allowed only for a true no-character establishing shot.",
+        "Repeat the exact same spelling in every section. Do not use pronouns, roles, shortened names, or descriptions as a substitute for the card name."
+      ],
+      "canonical_section_example": {
+        "mode": "continue",
+        "title": "Alex finds the mirror",
+        "location": "Alex's Attic Apartment",
+        "character": "Alex",
+        "action": "Alex steps toward the dusty mirror and slowly raises one gloved hand. His reflection hesitates a fraction behind him while warm attic dust drifts through the window light.",
+        "dialogue": "",
+        "dialogue_lang": "auto",
+        "camera": "Medium close-up at eye level, slow dolly forward toward Alex and the mirror.",
+        "visual_style": "",
+        "audio": "Quiet attic room tone, floorboard creak, a faint glass hum.",
+        "music": "N/A",
+        "important": "Keep Alex's oversized kitchen gloves, towel cape, and swim goggles identical."
+      },
+      "forbidden_alternatives": [
+        "Do NOT use prompt instead of action.",
+        "Do NOT use camera_description instead of camera.",
+        "Do NOT use video_type; use mode with exactly t2v or continue.",
+        "Do NOT use duration_seconds, timecode_start, timecode_end, scene_name, cast, setting, or free-text-only sections.",
+        "Do NOT expect Studio to extract names from a long prompt. Put the names explicitly in character and location."
+      ]
+    },
     "cast_guide": {
       "characters": "name + ENGLISH notes ONLY (appearance, age, wardrobe — this is the still prompt). Optional English voice tag. trigger = same as name. Leave lora_id empty. Do NOT add image/url fields.",
       "locations": "name + ENGLISH notes (architecture, time of day, weather). Notes become the location still prompt.",
@@ -60,7 +102,7 @@
       "Human input is ONLY _user.scenes + _user.about. Do not ask more questions.",
       "Write ALL visual fields in English. Dialogue may stay in the spoken language.",
       "Keep schema h3-cinema/v1. sections.length = _user.scenes (default 12).",
-      "Fill author fields in DETAIL. Studio composes the official 3-block H3 prompt; production settings stay in the Studio UI.",
+      "Fill author fields in DETAIL. Follow strict_section_contract exactly: every relevant section must explicitly bind its character and location. Studio composes the official 3-block H3 prompt; production settings stay in the Studio UI.",
       "Do NOT write integrated_multimodal_description / overall_soundscape / non_diegetic_music keys.",
       "TEXT ONLY — no images/URLs/base64. Studio creates stills from name+notes.",
       "Same character name spelling everywhere.",
@@ -82,7 +124,7 @@
   },
   "_user": {
     "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
-    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, cast notes, locations, and every beat from that. Do not ask questions. Do not leave empty action/camera/audio.",
+    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, cast notes, locations, and every beat from that. Follow _instructions.strict_section_contract exactly. Do not ask questions. Do not leave action/camera/audio blank, and explicitly fill character + location on every relevant section.",
     "scenes": 12,
     "about": ""
   },

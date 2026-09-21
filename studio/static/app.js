@@ -4697,6 +4697,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     stage?.classList.add("cleared");
     stage?.classList.remove("has-video");
     $("btn-player-close")?.classList.add("hidden");
+    $("btn-player-delete")?.classList.add("hidden");
     $("btn-player-next")?.classList.add("hidden");
     $("btn-player-prev")?.classList.add("hidden");
     $("btn-download")?.setAttribute("href", "#");
@@ -4727,6 +4728,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     stage?.classList.remove("cleared");
     stage?.classList.add("has-video");
     $("btn-player-close")?.classList.remove("hidden");
+    $("btn-player-delete")?.classList.remove("hidden");
     const playUrl = url.split("?")[0];
     player.src = playUrl + (playUrl.includes("?") ? "&" : "?") + "t=" + Date.now();
     const job =
@@ -9452,6 +9454,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     else clearContinueMode();
   });
   $("btn-player-close")?.addEventListener("click", () => clearPlayer());
+  $("btn-player-delete")?.addEventListener("click", () => {
+    if (state.selectedJobId) void deleteGalleryItem(state.selectedJobId);
+  });
   $("btn-player-next")?.addEventListener("click", () => void navigatePlayerVideo("next"));
   $("btn-player-prev")?.addEventListener("click", () => void navigatePlayerVideo("previous"));
   $("btn-open-prompt")?.addEventListener("click", () => openPromptView());

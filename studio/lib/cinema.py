@@ -1535,7 +1535,7 @@ def apply_reentry_modes(
             mode = "continue"
         if i == 0:
             mode = "t2v"
-        elif not shot.get("mode_locked") and curr and not (curr & prev):
+        elif not (shot.get("mode_locked") or shot.get("section_id")) and curr and not (curr & prev):
             mode = "t2v"
         shot["mode"] = mode
         out.append(shot)

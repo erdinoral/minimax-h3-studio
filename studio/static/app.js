@@ -33,6 +33,8 @@
     selectedCharacter: null,
     galleryItems: [],
     galleryKind: "video", // video | photo
+    galleryVideoSelectMode: false,
+    galleryVideoPickIds: [],
     galleryPhotoSelectMode: false,
     galleryPhotoPickNames: [],
     mergePickIds: [],
@@ -4590,6 +4592,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       void submitClipMerge();
       return;
     }
+    if (state.galleryVideoSelectMode) {
+      state.galleryVideoSelectMode = false;
+      state.galleryVideoPickIds = [];
+    }
     void enterGalleryMergeMode({});
   }
 
@@ -7288,11 +7294,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       button.classList.toggle("on", button.dataset.galleryKind === state.galleryKind);
     });
     $("btn-gallery-concat")?.classList.toggle("hidden", state.galleryKind !== "video");
+    $("btn-gallery-video-select")?.classList.toggle("hidden", state.galleryKind !== "video");
+    $("btn-gallery-video-delete")?.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryVideoSelectMode);
     $("btn-gallery-photo-select")?.classList.toggle("hidden", state.galleryKind !== "photo");
     $("btn-gallery-photo-delete")?.classList.toggle("hidden", state.galleryKind !== "photo" || !state.galleryPhotoSelectMode);
     $("btn-gallery-merge-cancel")?.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryMergeMode);
     if (state.galleryKind !== "video" && state.galleryMergeMode) exitGalleryMergeMode();
-    else void renderGallery();
+    if (state.galleryKind !== "video" && state.galleryVideoSelectMode) {
+      state.galleryVideoSelectMode = false;
+      state.galleryVideoPickIds = [];
+    }
+    void renderGallery();
   }
 
   async function renderGalleryPhotos() {
@@ -7415,12 +7427,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     grid.innerHTML = "";
     const mergeOn = !!state.galleryMergeMode;
     const picked = state.mergePickIds || [];
+    const videoSelectOn = !!state.galleryVideoSelectMode;
+    const videoPicked = state.galleryVideoPickIds || [];
     done.forEach((j, i) => {
       const card = document.createElement("div");
       card.className = "gallery-card";
       card.dataset.id = j.id;
       const pickOrder = picked.indexOf(j.id);
-      if (pickOrder >= 0) card.classList.add("is-merge-picked");
+      const videoPick = videoPicked.includes(j.id);
+      if (pickOrder >= 0 || (videoSelectOn && videoPick)) card.classList.add("is-merge-picked");
       const url = j.url || `/api/gallery/${j.id}/video`;
       const ord =
         j.batch_index && j.batch_total
@@ -7456,9 +7471,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         <button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button>
         <div class="gallery-thumb">
           <video src="${url}" muted preload="metadata"></video>
-          <button type="button" class="gallery-merge-pick${mergeOn ? "" : " hidden"}" aria-label="${tt("merge.pick")}">
-            <span class="gallery-merge-ring${pickOrder >= 0 ? " is-on" : ""}"></span>
-            <span class="gallery-merge-badge${pickOrder >= 0 ? " is-on" : ""}">${pickOrder >= 0 ? pickOrder + 1 : ""}</span>
+          <button type="button" class="gallery-merge-pick${mergeOn || videoSelectOn ? "" : " hidden"}" aria-label="${tt("merge.pick")}">
+            <span class="gallery-merge-ring${pickOrder >= 0 || videoPick ? " is-on" : ""}"></span>
+            <span class="gallery-merge-badge${pickOrder >= 0 || videoPick ? " is-on" : ""}">${pickOrder >= 0 ? pickOrder + 1 : videoPick ? "✓" : ""}</span>
           </button>
           ${j.prompt ? `<button type="button" class="gallery-prompt" title="${tt("gallery.promptTitle")}">P</button>` : ""}
           <button type="button" class="gallery-cont" title="${tt("gallery.contTitle")}">${tt("gallery.contBtn")}</button>
@@ -7467,11 +7482,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         <div class="meta">${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
       const pickBtn = card.querySelector(".gallery-merge-pick");
       if (pickBtn) {
-        pickBtn.classList.toggle("hidden", !mergeOn);
+        pickBtn.classList.toggle("hidden", !mergeOn && !videoSelectOn);
         pickBtn.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
-          toggleGalleryMergePick(j.id);
+          if (videoSelectOn) toggleGalleryVideoPick(j.id);
+          else toggleGalleryMergePick(j.id);
         };
       }
       const delBtn = card.querySelector(".gallery-del");
@@ -7511,6 +7527,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         };
       }
       card.onclick = () => {
+        if (state.galleryVideoSelectMode) {
+          toggleGalleryVideoPick(j.id);
+          return;
+        }
         if (state.galleryMergeMode) {
           toggleGalleryMergePick(j.id);
           return;
@@ -7531,6 +7551,43 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
     syncMergeToolbar();
     syncGalleryMergeHeader();
+    syncGalleryVideoToolbar();
+  }
+
+  function toggleGalleryVideoPick(id) {
+    const picks = state.galleryVideoPickIds;
+    const index = picks.indexOf(id);
+    if (index >= 0) picks.splice(index, 1);
+    else picks.push(id);
+    syncGalleryVideoToolbar();
+    void renderGallery();
+  }
+
+  function syncGalleryVideoToolbar() {
+    const select = $("btn-gallery-video-select");
+    const remove = $("btn-gallery-video-delete");
+    if (select) select.textContent = state.galleryVideoSelectMode ? "Seçimi bitir" : "Video seç";
+    if (remove) {
+      remove.textContent = `Seçilenleri sil (${state.galleryVideoPickIds.length})`;
+      remove.disabled = !state.galleryVideoPickIds.length;
+    }
+  }
+
+  async function deletePickedGalleryVideos() {
+    const ids = [...state.galleryVideoPickIds];
+    if (!ids.length || !confirm(`Seçili ${ids.length} video silinsin mi?`)) return;
+    try {
+      if (ids.includes(state.selectedJobId)) clearPlayer();
+      await Promise.all(ids.map(async (id) => {
+        const response = await fetch(`/api/gallery/${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (!response.ok) throw new Error(id);
+      }));
+      state.galleryVideoPickIds = [];
+      state.galleryVideoSelectMode = false;
+      syncGalleryVideoToolbar();
+      await renderGallery();
+      tToast("toast.galleryDeleted");
+    } catch (error) { toast(String(error.message || error)); }
   }
 
   async function deleteGalleryItem(itemId) {
@@ -9796,6 +9853,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void renderGalleryPhotos();
   });
   $("btn-gallery-photo-delete")?.addEventListener("click", () => void deletePickedGalleryPhotos());
+  $("btn-gallery-video-select")?.addEventListener("click", () => {
+    if (!state.galleryVideoSelectMode && state.galleryMergeMode) exitGalleryMergeMode();
+    state.galleryVideoSelectMode = !state.galleryVideoSelectMode;
+    if (!state.galleryVideoSelectMode) state.galleryVideoPickIds = [];
+    syncGalleryVideoToolbar();
+    void renderGallery();
+  });
+  $("btn-gallery-video-delete")?.addEventListener("click", () => void deletePickedGalleryVideos());
   $("btn-gallery-close")?.addEventListener("click", () => {
     exitGalleryMergeMode();
     $("view-gallery")?.classList.add("hidden");

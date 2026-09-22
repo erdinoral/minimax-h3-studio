@@ -2620,6 +2620,7 @@ async def batch(body: BatchBody):
     created = []
     parent: Optional[str] = tip["id"] if tip else None
     start_from_tip = bool(parent)
+    lib = cinema.load()
     async with _lock:
         for i, text in enumerate(prompts):
             seed = body.seed if body.seed >= 0 else (int(time.time() * 1000) + i) % (2**53)

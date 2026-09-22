@@ -8302,13 +8302,23 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         .filter((spec) => spec.id && spec.file && spec.ready)
         .map((spec) => `<label><input type="checkbox" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label>`)
         .join("");
-      checks.onchange = () => {
-        const ids = [...checks.querySelectorAll("input:checked")].map((box) => box.value).slice(0, 3);
+      const syncLoraChecks = () => {
+        const boxes = [...checks.querySelectorAll('input[type="checkbox"]')];
+        const ids = boxes.filter((box) => box.checked).map((box) => box.value);
+        boxes.forEach((box) => { box.disabled = !box.checked && ids.length >= 3; });
         [...sel.options].forEach((opt) => { opt.selected = ids.includes(opt.value); });
         state.loraId = ids[0] || "";
         state.loraApplied = ids.length > 0;
         updateLoraHint();
       };
+      checks.onchange = (event) => {
+        const box = event.target;
+        if (box.matches('input[type="checkbox"]') && box.checked && checks.querySelectorAll('input:checked').length > 3) {
+          box.checked = false;
+        }
+        syncLoraChecks();
+      };
+      syncLoraChecks();
     }
     const cine = $("cinema-lora-select");
     if (cine) {

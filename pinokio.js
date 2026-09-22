@@ -1,7 +1,7 @@
 module.exports = {
-  version: "8.0",
+  version: "8.1",
   title: "MiniMax H3 Studio",
-  description: "1-click MiniMax H3 video in ComfyUI plus H3 Studio: Director, Plan, cinema studio, TR/EN. NVIDIA GPU.",
+  description: "1-click MiniMax H3 video in ComfyUI plus H3 Studio: local T2V/I2V, references, continuation, Gallery, Director/Cinema and TR/EN. NVIDIA GPU.",
   icon: "icon.png",
   menu: async (kernel, info) => {
     let installed = info.exists("app/env")

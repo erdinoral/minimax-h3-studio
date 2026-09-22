@@ -67,6 +67,14 @@ Start opens **ComfyUI** (backend) and **H3 Studio** (simple front end). Top bar 
 
 Studio never replaces Comfy. If Studio fails, use **Open ComfyUI** as before.
 
+### Latest Studio update
+
+- **Scene workspace:** T2V, I2V, reference-video, continuation, selectable multi-LoRA, queue controls and final-frame continuation that follows the actual previous render.
+- **Image Studio workflow:** generate a start/reference image from a prompt or add a local image, then use it in video creation. Image and video results live together in Gallery.
+- **Gallery:** separate Video / Photo view, larger previews, prompt details, individual and bulk deletion, plus player previous/next navigation.
+- **Director / Cinema:** production types for Film/Trailer, Music Video, Commercial, Intro and Outro; simplified content-first JSON import; character, location and scene bindings; continuous shot chains.
+- **Music video planning:** upload a song, add a visual concept and lyrics, create editable lyric timing notes, then prepare a visual clip plan. This assists visual planning; it is not automatic beat-sync or lip-sync.
+
 ### Support
 
 Bugs and ideas: Studio top bar **Destek / Support**, or [GitHub Issues](https://github.com/erdinoral/minimax-h3-studio/issues). Use **Bug** for breakage and **Idea** for improvements.

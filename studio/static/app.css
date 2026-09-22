@@ -3540,6 +3540,32 @@ input:focus-visible, textarea:focus-visible {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* Native select popups follow the app's dark palette instead of Windows white. */
+select {
+  color-scheme: dark;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  min-height: 38px;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath d='M4 6l4 4 4-4' fill='none' stroke='%23e7b466' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"), linear-gradient(180deg, rgba(8, 7, 6, 0.82), rgba(18, 14, 12, 0.98));
+  background-repeat: no-repeat, no-repeat;
+  background-position: right 11px center, center;
+  background-size: 16px, auto;
+}
+select option,
+select optgroup {
+  color: #f5f0e8;
+  background: #19130f;
+}
+select option:checked {
+  color: #fff8ed;
+  background: #b9522f;
+}
+select option:disabled {
+  color: #887d72;
+}
 .cinema-film-stills-warn {
   flex: 1 1 100%;
   color: #e8b86d;

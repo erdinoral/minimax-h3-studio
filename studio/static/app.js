@@ -9908,7 +9908,52 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
   $("btn-llm-save")?.addEventListener("click", () => saveLlmSettings());
   $("btn-llm-provider-save")?.addEventListener("click", () => saveLlmProviderOnly());
-  $("btn-director-llm-tab")?.addEventListener("click", () => {
+  const directorTab = $("btn-director-llm-tab");
+  if (directorTab) {
+    const positionKey = "h3-director-tab-top";
+    const clampTabTop = (top) => {
+      const topbar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--topbar-h")) || 48;
+      return Math.min(Math.max(top, topbar + 8), Math.max(topbar + 8, window.innerHeight - directorTab.offsetHeight - 8));
+    };
+    try {
+      const saved = localStorage.getItem(positionKey);
+      if (saved !== null && Number.isFinite(Number(saved))) directorTab.style.top = `${clampTabTop(Number(saved))}px`;
+    } catch (_) { /* Storage may be unavailable in a private window. */ }
+    let drag = null;
+    let suppressClickUntil = 0;
+    directorTab.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      drag = { pointerId: event.pointerId, y: event.clientY, top: directorTab.getBoundingClientRect().top, moved: false };
+      directorTab.setPointerCapture(event.pointerId);
+    });
+    directorTab.addEventListener("pointermove", (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      const delta = event.clientY - drag.y;
+      if (Math.abs(delta) > 4) drag.moved = true;
+      if (drag.moved) directorTab.style.top = `${clampTabTop(drag.top + delta)}px`;
+    });
+    const finishTabDrag = (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      if (drag.moved) {
+        suppressClickUntil = Date.now() + 350;
+        try { localStorage.setItem(positionKey, String(clampTabTop(parseFloat(directorTab.style.top)))); } catch (_) { /* Keep the position for this session. */ }
+      }
+      drag = null;
+      if (directorTab.hasPointerCapture(event.pointerId)) directorTab.releasePointerCapture(event.pointerId);
+    };
+    directorTab.addEventListener("pointerup", finishTabDrag);
+    directorTab.addEventListener("pointercancel", finishTabDrag);
+    directorTab.addEventListener("click", (event) => {
+      if (Date.now() >= suppressClickUntil) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      suppressClickUntil = 0;
+    }, true);
+    window.addEventListener("resize", () => {
+      if (directorTab.style.top) directorTab.style.top = `${clampTabTop(parseFloat(directorTab.style.top))}px`;
+    });
+  }
+  directorTab?.addEventListener("click", () => {
     setDirectorModal(!$("director-dock")?.classList.contains("modal-open"));
   });
 

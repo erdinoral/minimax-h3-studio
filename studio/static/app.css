@@ -330,32 +330,36 @@ body.director-modal-open .zone-scene {
   overflow: hidden;
 }
 .director {
-  display: none;
+  display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
   background: rgba(28, 22, 18, 0.98);
   overflow: hidden;
   box-sizing: border-box;
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(680px, 94vw);
+  height: 100dvh;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(102%);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s linear 280ms;
 }
 .director.modal-open {
-  display: flex;
-  position: fixed !important;
-    z-index: 100 !important;
-  left: max(16px, 8vw) !important;
-  right: max(16px, 8vw) !important;
-  top: max(16px, 8vh) !important;
-  bottom: 16px !important;
-  width: auto;
-  height: auto !important;
-  max-height: none;
-  flex: none;
-  border-radius: 10px !important;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0s;
+  border-radius: 16px 0 0 16px;
   border: 1px solid var(--border);
+  border-right: 0;
   background: rgba(28, 22, 18, 0.98);
   color: var(--text);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-  pointer-events: auto;
+  box-shadow: -20px 0 60px rgba(0, 0, 0, 0.55);
 }
 .director.modal-open .director-scroll {
   flex: 1 1 auto;
@@ -694,6 +698,8 @@ body.director-modal-open .zone-scene {
   border-right: 0;
   background: #b25330;
   color: #fff;
+  touch-action: none;
+  user-select: none;
 }
 body:has(.overlay:not(.hidden)) .director-llm-tab,
 body.director-modal-open .director-llm-tab {
@@ -2832,6 +2838,30 @@ button.cinema-fold-toggle:hover {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* The Director handle stays visible without competing with the video preview. */
+#btn-director-llm-tab {
+  border-color: #9b512f;
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  background: linear-gradient(180deg, #b25330, #8e3e25);
+  color: #fff;
+  animation: director-tab-heartbeat 9s ease-in-out infinite;
+}
+#btn-director-llm-tab:hover {
+  background: linear-gradient(180deg, #c26238, #9b4729);
+}
+@keyframes director-tab-heartbeat {
+  0%, 4%, 8%, 100% { box-shadow: 0 0 0 0 rgba(224, 111, 48, 0), 0 8px 20px rgba(0, 0, 0, 0.2); }
+  2%, 6% { box-shadow: 0 0 0 5px rgba(224, 111, 48, 0.22), 0 0 18px rgba(224, 111, 48, 0.35); }
+}
+@media (max-width: 600px) {
+  .director, .director.modal-open { width: 100vw; border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #btn-director-llm-tab { animation: none; }
+  .director, .director.modal-open { transition: none; }
 }
 
 /* iOS-inspired control system: keeps the warm cinema palette, softens the UI. */

@@ -5,14 +5,20 @@ window.createFilmWorkspace = function (api) {
   let chapter = '', filmId = '', active = '', importData = null;
   const history = [];
   let host;
-  const groups = [['characters', 'Karakterler'], ['creatures', 'Yaratıklar'], ['locations', 'Mekânlar']];
+  const groups = [['characters', 'characters'], ['creatures', 'creatures'], ['vehicles', 'vehicles'], ['locations', 'locations']];
+  const w = key => window.t(`film.ws.${key}`);
+  const wn = (key, n) => w(key).replace('{n}', String(n));
+  const chapterDisplay = name => {
+    const match = /^Bölüm (\d+)$/.exec(name) || /^Sahne (\d+)$/.exec(name);
+    return match && window.h3Lang?.() === 'en' ? wn('chapterDefault', match[1]) : name;
+  };
   const clone = x => JSON.parse(JSON.stringify(x));
   const assets = () => groups.flatMap(([key]) => (api.get()[key] || []).map(a => ({...a, kind:key.slice(0,-1)})));
   const snapshot = a => { const snap=clone(a); const parent=assets().find(x=>x.id===a.identity_id && x.id!==a.id); if(parent)snap.identity_reference=clone(parent); return snap; };
   const shot = () => api.get().shots.find(s => s.id === active);
   const chapterOf = s => s.chapter || 'Bölüm 1';
   const busy = s => (api.jobs() || []).some(j => j.shot_id === s.id && (!j.film_id || j.film_id === api.get().film_id) && ['queued','running','processing','uploading'].includes(j.status));
-  const reviewLabel = s => s.review === 'approved' ? 'Onaylandı' : busy(s) ? 'Üretimde' : s.review === 'review' || s.review === 'producing' ? 'İncelenecek' : 'Taslak';
+  const reviewLabel = s => s.review === 'approved' ? w('approved') : busy(s) ? w('producing') : s.review === 'review' || s.review === 'producing' ? w('review') : w('draft');
   function checkpoint() { history.push(clone(api.get().shots)); if (history.length > 30) history.shift(); }
   async function save() { await api.save(); render(); }
   /** Native window.prompt mangles Turkish on some Windows/WebView builds — use UTF-8 HTML dialog. */
@@ -20,7 +26,7 @@ window.createFilmWorkspace = function (api) {
     return new Promise(resolve => {
       const dialog = document.createElement('dialog');
       dialog.className = 'film-import-dialog';
-      dialog.innerHTML = `<h2>${esc(title)}</h2><label>${esc(title)}<input id="film-ask-text" value="${esc(value || '')}"></label><button data-ask="cancel" type="button">Vazgeç</button><button data-ask="ok" type="button">Tamam</button>`;
+      dialog.innerHTML = `<h2>${esc(title)}</h2><label>${esc(title)}<input id="film-ask-text" value="${esc(value || '')}"></label><button data-ask="cancel" type="button">${esc(window.t('cinema.sceneCancel'))}</button><button data-ask="ok" type="button">${esc(w('ok'))}</button>`;
       let done = false;
       const finish = (result) => {
         if (done) return;
@@ -70,19 +76,30 @@ window.createFilmWorkspace = function (api) {
     // Preserve the playing video and focused edits during background refreshes.
     if (host.contains(document.activeElement) && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
     const video=host.querySelector('video'); const time=video?.currentTime||0, playing=video && !video.paused;
-    host.innerHTML=`<div class="film-toolbar"><strong>Film çalışma alanı</strong><span id="film-save-state" role="status">${esc(api.saveStatus())}</span><button data-film="undo" ${history.length?'':'disabled'}>Geri al</button><label class="film-import">MD proje aç<input type="file" accept=".md,.txt" data-film="import" hidden></label><button data-film="library">Varlık kütüphanesi</button><button data-film="save-lib">Bu filmdekileri kütüphaneye aktar</button><button data-film="queue">Üretim kuyruğu</button></div>
-      <div class="film-layout"><nav aria-label="Film bölümleri">${films.length?`<h3>Filmler</h3>${films.map(f=>`<button data-film-id="${esc(f.id)}" class="${f.id===film.film_id?'selected':''}">${esc(f.title||f.id)}<small>${esc(f.meta||'')}</small></button>`).join('')}`:''}<h3>Bölümler</h3>${chapters.map(c=>`<button data-chapter="${esc(c)}" class="${c===chapter?'selected':''}">${esc(c)}<small>${film.shots.filter(x=>chapterOf(x)===c).length} çekim</small></button>`).join('')}<button data-film="chapter">+ Bölüm ekle</button>${scenes.length?`<h3>Sahneler</h3><button data-scene="">Tüm sahneler</button>${scenes.map(name=>`<button data-scene="${esc(name)}" class="${sceneFilter===name?'selected':''}">${esc(name)}</button>`).join('')}`:''}<p>Toplam ${film.shots.length} çekim</p></nav>
-      <section class="film-stage"><div class="film-stage-head"><h3>${esc(chapter)}</h3><button data-film="produce-chapter">Bölümü üret</button></div>
-      ${!url && s?.first_frame_name ? `<img class="film-start-frame" src="/api/refs/${encodeURIComponent(s.first_frame_name)}" alt="Onaylı başlangıç karesi">` : url ? `<video controls preload="metadata" src="${esc(url)}"></video>` : `<div class="film-preview-placeholder">${s ? 'Bu çekimin sonucu burada görünecek. Önce sağdan referanslarını seç.' : 'Bir çekim ekleyerek başla.'}</div>`}
-      <div class="film-shot-strip">${visible.map((x,i)=>`<button data-shot="${esc(x.id)}" class="${x.id===active?'selected':''}"><b>Çekim ${i+1}</b><span>${esc(x.text?.slice(0,58)||'Yeni çekim')}</span><small>${reviewLabel(x)}</small></button>`).join('')}</div><button data-film="add">+ Çekim ekle</button>${s?'<button data-film="up">Sola taşı</button><button data-film="down">Sağa taşı</button><button data-film="duplicate">Çoğalt</button><button data-film="delete">Çekimi kaldır</button>':''}
-      ${s ? `<div class="film-takes"><label>Alternatif çekim <select data-film="take"><option value="">Son tamamlanan</option>${jobs.filter(j=>j.status==='done').map((j,i)=>`<option value="${esc(j.id)}" ${s.selected_job===j.id?'selected':''}>Çekim ${i+1} · ${esc(j.id.slice(0,8))}</option>`).join('')}</select></label><button data-film="approve" ${selected?'':'disabled'}>Bu sonucu onayla</button><button data-film="produce-shot">Alternatif üret</button></div>`:''}</section>
-      <aside class="film-inspector">${s ? `<h3>Çekimin referansları</h3><label class="film-import">Onaylı başlangıç karesi yükle<input type="file" accept="image/png,image/jpeg,image/webp" data-film="frame" hidden></label>${s.first_frame_name?`<small>${esc(s.first_frame_name)}</small><button data-film="clear-frame">Kareyi kaldır</button>`:""}<label>Sahne adı<input data-film="scene" value="${esc(s.scene)}" placeholder="Örn. Avluda karşılaşma"></label><label>Aksiyon<textarea data-film="text" rows="4">${esc(s.text)}</textarea></label><label>Çekim bağlantısı<select data-film="mode"><option value="t2v" ${s.mode!=='continue'?'selected':''}>Yeni çekim</option><option value="continue" ${s.mode==='continue'?'selected':''}>Önceki çekimden devam</option></select></label>
-      ${!Array.isArray(s.bindings)?'<p class="film-warning">Eski isim eşleştirmesi kullanılıyor. Açık seçime geçerek bu çekimin referanslarını sabitle.</p><button data-film="explicit">Referansları kendim seçeyim</button>':''}
-      ${groups.map(([key,label])=>`<fieldset><legend>${label}</legend>${(film[key]||[]).map(a=>{
+    host.innerHTML = `<div class="film-toolbar">
+      <strong>${esc(w('title'))}</strong><span id="film-save-state" role="status">${esc(api.saveStatus())}</span>
+      <button data-film="undo" ${history.length?'':'disabled'}>${esc(w('undo'))}</button>
+      <label class="film-import">${esc(w('import'))}<input type="file" accept=".md,.txt" data-film="import" hidden></label>
+      <button data-film="library">${esc(w('library'))}</button><button data-film="save-lib">${esc(w('saveLibrary'))}</button>
+      <button data-film="queue">${esc(w('queue'))}</button></div>
+      <div class="film-layout"><nav aria-label="${esc(w('chapters'))}">
+      ${films.length ? `<h3>${esc(w('films'))}</h3>${films.map(f=>`<button data-film-id="${esc(f.id)}" class="${f.id===film.film_id?'selected':''}">${esc(f.title||f.id)}<small>${esc(f.meta||'')}</small></button>`).join('')}` : ''}
+      <h3>${esc(w('chapters'))}</h3>${chapters.map(c=>`<button data-chapter="${esc(c)}" class="${c===chapter?'selected':''}">${esc(chapterDisplay(c))}<small>${esc(wn('shotCount', film.shots.filter(x=>chapterOf(x)===c).length))}</small></button>`).join('')}
+      <button data-film="chapter">${esc(w('addChapter'))}</button>
+      ${scenes.length ? `<h3>${esc(w('scenes'))}</h3><button data-scene="">${esc(w('allScenes'))}</button>${scenes.map(name=>`<button data-scene="${esc(name)}" class="${sceneFilter===name?'selected':''}">${esc(name)}</button>`).join('')}` : ''}
+      <p>${esc(wn('totalShots', film.shots.length))}</p></nav>
+      <section class="film-stage"><div class="film-stage-head"><h3>${esc(chapterDisplay(chapter))}</h3><button data-film="produce-chapter">${esc(w('produceChapter'))}</button></div>
+      ${!url && s?.first_frame_name ? `<img class="film-start-frame" src="/api/refs/${encodeURIComponent(s.first_frame_name)}" alt="${esc(w('startFrameAlt'))}">` : url ? `<video controls preload="metadata" src="${esc(url)}"></video>` : `<div class="film-preview-placeholder">${esc(w(s ? 'previewHint' : 'addHint'))}</div>`}
+      <div class="film-shot-strip">${visible.map((x,i)=>`<button data-shot="${esc(x.id)}" class="${x.id===active?'selected':''}"><b>${esc(wn('shot', i+1))}</b><span>${esc(x.text?.slice(0,58)||w('newShot'))}</span><small>${esc(reviewLabel(x))}</small></button>`).join('')}</div>
+      <button data-film="add">${esc(w('addShot'))}</button>${s ? `<button data-film="up">${esc(w('moveLeft'))}</button><button data-film="down">${esc(w('moveRight'))}</button><button data-film="duplicate">${esc(w('duplicate'))}</button><button data-film="delete">${esc(w('removeShot'))}</button>` : ''}
+      ${s ? `<div class="film-takes"><label>${esc(w('alternateTake'))} <select data-film="take"><option value="">${esc(w('latestFinished'))}</option>${jobs.filter(j=>j.status==='done').map((j,i)=>`<option value="${esc(j.id)}" ${s.selected_job===j.id?'selected':''}>${esc(wn('shot', i+1))} · ${esc(j.id.slice(0,8))}</option>`).join('')}</select></label><button data-film="approve" ${selected?'':'disabled'}>${esc(w('approve'))}</button><button data-film="produce-shot">${esc(w('produceAlternate'))}</button></div>` : ''}</section>
+      <aside class="film-inspector">${s ? `<h3>${esc(w('references'))}</h3><label class="film-import">${esc(w('uploadFrame'))}<input type="file" accept="image/png,image/jpeg,image/webp" data-film="frame" hidden></label>${s.first_frame_name ? `<small>${esc(s.first_frame_name)}</small><button data-film="clear-frame">${esc(w('removeFrame'))}</button>` : ''}<label>${esc(w('sceneName'))}<input data-film="scene" value="${esc(s.scene)}" placeholder="${esc(w('scenePlaceholder'))}"></label><label>${esc(w('action'))}<textarea data-film="text" rows="4">${esc(s.text)}</textarea></label><label>${esc(w('link'))}<select data-film="mode"><option value="t2v" ${s.mode!=='continue'?'selected':''}>${esc(w('newTake'))}</option><option value="continue" ${s.mode==='continue'?'selected':''}>${esc(w('continueTake'))}</option></select></label>
+      ${!Array.isArray(s.bindings) ? `<p class="film-warning">${esc(w('legacyBindings'))}</p><button data-film="explicit">${esc(w('pickReferences'))}</button>` : ''}
+      ${groups.map(([key,label])=>`<fieldset><legend>${esc(w(label))}</legend>${(film[key]||[]).map(a=>{
         const b=s.bindings?.find(b=>b.asset_id===a.id), snap=b?.snapshot||a, ims=snap.images||[];
-        return `<div class="film-asset"><label><input type="checkbox" data-asset="${esc(a.id)}" ${b?'checked':''} ${!Array.isArray(s.bindings)?'disabled':''}>${esc(a.name)}${a.appearance&&a.appearance!=='Ana görünüm'?` · ${esc(a.appearance)}`:''}</label>${b?`<div class="film-ref-images">${snap.identity_reference?.images?.[0]?`<label><img src="${esc(snap.identity_reference.images[0].url||'/api/refs/'+encodeURIComponent(snap.identity_reference.images[0].file))}" alt="Ana yüz referansı"><small>Ana yüz</small></label>`:""}${ims.map(im=>`<label><img src="${esc(im.url||'/api/refs/'+encodeURIComponent(im.file))}" alt="${esc(im.name||a.name)}"><input type="checkbox" data-ref="${esc(im.file)}" data-owner="${esc(a.id)}" ${!b.files||b.files.includes(im.file)?'checked':''}></label>`).join('')}</div>${!ims.length?'<p class="film-warning">Referans görseli eksik. Kütüphaneden yükle.</p>':''}<small>${b.snapshot?'Referans sürümü sabit':'Görsel seçildiğinde sabitlenecek'}</small><button data-refresh="${esc(a.id)}">Güncel referansları al</button>`:''}</div>`;
-      }).join('')||'<p>Henüz kart yok. <button type="button" data-film="library">Varlık kütüphanesi</button> → Filme ekle.</p>'}</fieldset>`).join('')}
-      <p class="film-warning">Kartlar kütüphanede durur. Filme ekledikten sonra burada seçersin; yalnız seçili referanslar üretime gider.</p>`:'<p>Bir çekim seç.</p>'}</aside></div>`;
+        return `<div class="film-asset"><label><input type="checkbox" data-asset="${esc(a.id)}" ${b?'checked':''} ${!Array.isArray(s.bindings)?'disabled':''}>${esc(a.name)}${a.appearance&&a.appearance!=='Ana görünüm'?` · ${esc(a.appearance)}`:''}</label>${b?`<div class="film-ref-images">${snap.identity_reference?.images?.[0]?`<label><img src="${esc(snap.identity_reference.images[0].url||'/api/refs/'+encodeURIComponent(snap.identity_reference.images[0].file))}" alt="${esc(w('mainFace'))}"><small>${esc(w('mainFace'))}</small></label>`:''}${ims.map(im=>`<label><img src="${esc(im.url||'/api/refs/'+encodeURIComponent(im.file))}" alt="${esc(im.name||a.name)}"><input type="checkbox" data-ref="${esc(im.file)}" data-owner="${esc(a.id)}" ${!b.files||b.files.includes(im.file)?'checked':''}></label>`).join('')}</div>${!ims.length?`<p class="film-warning">${esc(w('missingReference'))}</p>`:''}<small>${esc(w(b.snapshot?'referenceLocked':'referencePending'))}</small><button data-refresh="${esc(a.id)}">${esc(w('refreshReferences'))}</button>`:''}</div>`;
+      }).join('') || `<p>${esc(w('noCards'))} <button type="button" data-film="library">${esc(w('library'))}</button> ${esc(w('addToFilm'))}</p>`}</fieldset>`).join('')}
+      <p class="film-warning">${esc(w('cardsHint'))}</p>` : `<p>${esc(w('pickShot'))}</p>`}</aside></div>`;
     const next=host.querySelector('video'); if(next && video?.getAttribute('src')===next.getAttribute('src')) {next.addEventListener('loadedmetadata',()=>{next.currentTime=time;if(playing) void next.play().catch(()=>{});},{once:true});}
     api.filter(chapter,active);
   }
@@ -91,11 +108,11 @@ window.createFilmWorkspace = function (api) {
     if(action==='import') {
       const file=el.files?.[0]; if(!file)return;
       try {
-        if(file.size>1000000)throw Error('Dosya en fazla 1 MB olabilir.');
+        if(file.size>1000000)throw Error(w('fileTooLarge'));
         const r=await fetch('/api/cinema/outline-preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:await file.text()})});
-        const data=await r.json();if(!r.ok)throw Error(data.detail||'Dosya okunamadı');importData=data;
+        const data=await r.json();if(!r.ok)throw Error(data.detail||w('fileReadError'));importData=data;
         const dialog=document.createElement('dialog');dialog.className='film-import-dialog';
-        dialog.innerHTML=`<h2>Film taslağını kontrol et</h2><p>${esc(data.title)}</p><p>${data.shots.length} çekim · ${new Set(data.shots.map(chapterOf)).size} bölüm · ${groups.map(([k,l])=>`${data[k].length} ${l.toLowerCase()}`).join(' · ')}</p><p>Yeni bir film kaydı oluşturulacak. Görseller henüz yüklenmedi; üretim başlamayacak.</p><label>Film adı<input id="film-import-title" value="${esc(data.title)}"></label><label>Çekim önizlemesi<textarea readonly rows="9">${esc(data.shots.map((s,i)=>`${i+1}. ${s.chapter}\n${s.text}`).join('\n\n'))}</textarea></label>${data.warnings.map(w=>`<p>${esc(w)}</p>`).join('')}<button data-import="cancel">Vazgeç</button><button data-import="apply">Yeni film olarak aç</button>`;
+        dialog.innerHTML=`<h2>${esc(w('previewImport'))}</h2><p>${esc(data.title)}</p><p>${esc(wn('shotCount',data.shots.length))} · ${esc(wn('chapterCount',new Set(data.shots.map(chapterOf)).size))} · ${groups.map(([k,l])=>`${data[k].length} ${esc(w(l).toLowerCase())}`).join(' · ')}</p><p>${esc(w('importHint'))}</p><label>${esc(w('filmName'))}<input id="film-import-title" value="${esc(data.title)}"></label><label>${esc(w('shotPreview'))}<textarea readonly rows="9">${esc(data.shots.map((s,i)=>`${i+1}. ${chapterDisplay(s.chapter)}\n${s.text}`).join('\n\n'))}</textarea></label>${data.warnings.map(w=>`<p>${esc(w)}</p>`).join('')}<button data-import="cancel">${esc(window.t('cinema.sceneCancel'))}</button><button data-import="apply">${esc(w('openAsNew'))}</button>`;
         document.body.append(dialog);dialog.showModal();dialog.addEventListener('close',()=>dialog.remove());
         dialog.addEventListener('click',async ev=>{if(ev.target.dataset.import==='cancel')dialog.close();if(ev.target.dataset.import==='apply'){ev.target.disabled=true;try{importData.title=dialog.querySelector('input').value;await api.importFilm(importData);dialog.close();render();}catch(err){api.toast(err.message);ev.target.disabled=false;}}});
       }catch(err){api.toast(err.message);}return;
@@ -106,7 +123,7 @@ window.createFilmWorkspace = function (api) {
       const file=el.files?.[0];if(!file)return;
       const data=new FormData();data.append('file',file);
       const r=await fetch('/api/refs/upload',{method:'POST',body:data}),body=await r.json();
-      if(!r.ok)throw Error(body.detail||'Görsel yüklenemedi');
+      if(!r.ok)throw Error(body.detail||w('uploadError'));
       s.first_frame_name=body.name;invalidate(s);await save();return;
     }
     if(['scene','text','mode'].includes(action)){s[action]=el.value;invalidate(s);}
@@ -148,7 +165,7 @@ window.createFilmWorkspace = function (api) {
       await api.produce(selected);render();return;
     }
     if(action==='chapter'){
-      const name=await askText('Yeni bölüm adı', `Bölüm ${new Set(api.get().shots.map(chapterOf)).size+1}`);
+      const name=await askText(w('chapterName'), wn('chapterDefault',new Set(api.get().shots.map(chapterOf)).size+1));
       if(!name?.trim())return;
       chapter=name.trim();
     }
@@ -169,5 +186,6 @@ window.createFilmWorkspace = function (api) {
   }
   document.addEventListener('change',e=>{if(e.target.closest('#film-workspace'))void change(e).catch(err=>api.toast(err.message));});
   document.addEventListener('click',e=>{if(e.target.closest('#film-workspace'))void click(e).catch(err=>api.toast(err.message));});
+  document.addEventListener('h3-lang', () => render());
   return {render, currentChapter:()=>chapter, active:()=>active};
 };

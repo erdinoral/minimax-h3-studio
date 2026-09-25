@@ -157,6 +157,7 @@ _EMPTY: dict[str, Any] = {
     "script": "",
     "role_script": "",
     "shots": [],
+    "chapters": [],
     "setup": dict(_DEFAULT_SETUP),
     "audio": dict(_DEFAULT_AUDIO),
     "duration": 5,
@@ -164,9 +165,11 @@ _EMPTY: dict[str, Any] = {
     "steps": 20,
     "seed": -1,
     "seed_lock": False,
+    "image_provider": "minimax",
     "characters": [],
     "locations": [],
     "creatures": [],
+    "vehicles": [],
     "studio_mode": "",
     "film_plan": None,
     "pending_produce": None,
@@ -178,7 +181,7 @@ def _now() -> float:
     return time.time()
 
 def _empty_library() -> dict[str, Any]:
-    return {"characters": [], "locations": [], "creatures": [], "updated_at": 0}
+    return {"characters": [], "locations": [], "creatures": [], "vehicles": [], "updated_at": 0}
 
 
 # --- restored from stash: asset library + sheet prompts ---
@@ -190,6 +193,11 @@ def asset_kind_key(kind: str) -> tuple[str, str]:
         return "location", "locations"
     if k in ("creature", "creatures", "monster", "beast", "canavar", "yaratik", "yaratık"):
         return "creature", "creatures"
+    if k in (
+        "vehicle", "vehicles", "craft", "ship", "spaceship", "car", "mecha",
+        "araç", "arac", "gemi", "uzaygemisi", "uzay gemisi",
+    ):
+        return "vehicle", "vehicles"
     return "character", "characters"
 
 
@@ -212,6 +220,9 @@ def load_library() -> dict[str, Any]:
     out["creatures"] = [
         _clean_asset(x, "creature") for x in (raw.get("creatures") or []) if isinstance(x, dict)
     ]
+    out["vehicles"] = [
+        _clean_asset(x, "vehicle") for x in (raw.get("vehicles") or []) if isinstance(x, dict)
+    ]
     out["updated_at"] = raw.get("updated_at") or 0
     return out
 
@@ -228,6 +239,9 @@ def save_library(data: dict[str, Any]) -> dict[str, Any]:
         "creatures": [
             _clean_asset(x, "creature") for x in (data.get("creatures") or []) if isinstance(x, dict)
         ],
+        "vehicles": [
+            _clean_asset(x, "vehicle") for x in (data.get("vehicles") or []) if isinstance(x, dict)
+        ],
         "updated_at": _now(),
     }
     LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -239,12 +253,15 @@ def save_library(data: dict[str, Any]) -> dict[str, Any]:
 def list_library(kind: Optional[str] = None) -> dict[str, Any]:
     lib = load_library()
     k, _ = asset_kind_key(kind) if kind else ("", "")
+    empty = {"characters": [], "locations": [], "creatures": [], "vehicles": []}
     if k == "character":
-        return {"characters": lib["characters"], "locations": [], "creatures": []}
+        return {**empty, "characters": lib["characters"]}
     if k == "location":
-        return {"characters": [], "locations": lib["locations"], "creatures": []}
+        return {**empty, "locations": lib["locations"]}
     if k == "creature":
-        return {"characters": [], "locations": [], "creatures": lib.get("creatures") or []}
+        return {**empty, "creatures": lib.get("creatures") or []}
+    if k == "vehicle":
+        return {**empty, "vehicles": lib.get("vehicles") or []}
     return lib
 
 
@@ -329,17 +346,260 @@ def pull_library_to_film(kind: str, library_id: str) -> dict[str, Any]:
 
 _CREATURE_HINT = re.compile(
     r"\b(dragon|wyvern|drake|beast|creature|kaiju|monster|griffin|phoenix|"
-    r"serpent|ashwing|ejder|yaratik|yaratık|canavar)\b",
+    r"serpent|ashwing|ghost|spirit|specter|phantom|zombie|undead|shadow|"
+    r"ejder|yaratik|yaratık|canavar|hayalet|ruh|zombi|gölge)\b",
     re.I,
 )
 
 
 def _sheet_is_creature(name: str, notes: str = "") -> bool:
-    """True when name/notes clearly describe a non-human creature (not a person)."""
+    """True when name/notes describe an entity better suited to the entity sheet."""
     return bool(_CREATURE_HINT.search(f"{name or ''} {notes or ''}"))
 
 
 SHEET_PANEL_LABELS = ("portrait", "front", "back")
+
+
+def _sheet_style_line(style_line: str, *, fallback: str) -> str:
+    return (style_line or "").strip() or fallback
+
+
+def build_creature_sheet_prompt(
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_ref: bool = False,
+) -> str:
+    """Still/Qwen prompt for a unique named entity — not a stock monster."""
+    who = (name or "entity").strip() or "entity"
+    look = (notes or "").strip()
+    style = _sheet_style_line(
+        style_line,
+        fallback="cinematic creature design reference, clear silhouette, readable materials",
+    )
+    if look:
+        authority = (
+            f"AUTHORITY APPEARANCE for '{who}' (follow exactly, do not replace with a generic monster): {look}."
+        )
+    else:
+        authority = (
+            f"AUTHORITY: invent ONE unique entity design that visually matches the name '{who}' only. "
+            "Derive silhouette, limbs, materials, colors, and scale from that name. "
+            "Do NOT default to a stock dragon, kaiju, dinosaur, or generic fang-monster."
+        )
+    identity = ""
+    if has_ref:
+        identity = (
+            "IDENTITY LOCK: <Picture 1> is the exact entity reference. "
+            "Keep silhouette, materials, colors, and proportions consistent across panels. "
+        )
+    return (
+        f"Unique ENTITY identity sheet for '{who}'. "
+        f"{authority} "
+        f"{identity}"
+        "This must look like THIS named entity alone — different from any other creature sheet. "
+        "Do not copy a previous monster design. Do not add traits absent from the authority text "
+        "(no extra wings, horns, scales, legs, or faces unless the authority text requires them). "
+        "A single wide photographic frame divided into three equal vertical panels on a seamless "
+        "medium-grey studio backdrop, soft even light, no text, no logos, no watermark. "
+        f"Left: readable close detail of '{who}'. "
+        f"Center: front or three-quarter view of '{who}'. "
+        f"Right: alternate angle of the same '{who}'. "
+        "All three panels show the identical unique entity. "
+        f"Visual craft: {style}. Clean production reference, not a story scene, no unrelated figures."
+    )
+
+
+def build_vehicle_sheet_prompt(
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_ref: bool = False,
+) -> str:
+    """Still/Qwen prompt for a unique named vehicle / craft — not a stock spaceship."""
+    who = (name or "vehicle").strip() or "vehicle"
+    look = (notes or "").strip()
+    style = _sheet_style_line(
+        style_line,
+        fallback="cinematic vehicle design reference, clear silhouette, readable materials",
+    )
+    if look:
+        authority = (
+            f"AUTHORITY APPEARANCE for craft '{who}' (follow exactly, do not replace with a "
+            f"generic stock spaceship or car): {look}."
+        )
+    else:
+        authority = (
+            f"AUTHORITY: invent ONE unique craft design that visually matches the name '{who}' only. "
+            "Derive silhouette, hull, materials, colors, and scale from that name. "
+            "Do NOT default to a generic Star Wars / Star Trek stock ship or a plain sedan."
+        )
+    identity = ""
+    if has_ref:
+        identity = (
+            "IDENTITY LOCK: <Picture 1> is the exact craft reference. "
+            "Keep silhouette, markings, materials, colors, and proportions consistent across panels. "
+        )
+    return (
+        f"Unique VEHICLE / CRAFT identity sheet for '{who}'. "
+        f"{authority} "
+        f"{identity}"
+        "This must look like THIS named craft alone — different from any other vehicle sheet. "
+        "Do not copy a previous ship design. Do not add thrusters, wings, or markings absent from "
+        "the authority text. "
+        "A single wide photographic frame divided into three equal vertical panels on a seamless "
+        "medium-grey studio backdrop, soft even light, no text, no logos, no watermark, no people. "
+        f"Left: readable close detail / marking of '{who}'. "
+        f"Center: three-quarter hero view of '{who}'. "
+        f"Right: alternate angle of the same '{who}'. "
+        "All three panels show the identical unique craft. "
+        f"Visual craft: {style}. Clean production reference, empty set, no crew."
+    )
+
+
+def build_character_sheet_prompt(
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_face_ref: bool = False,
+    force_creature: bool = False,
+) -> str:
+    """H3 / Qwen prompt for a 3-panel character or entity reference still."""
+    who = (name or "character").strip() or "character"
+    look = (notes or "").strip()
+    creature = bool(force_creature) or _sheet_is_creature(who, look)
+    if creature:
+        return build_creature_sheet_prompt(
+            who, look, style_line=style_line, has_ref=has_face_ref
+        )
+    if not look:
+        look = "distinctive face, clear age, hair, wardrobe, and proportions"
+    style = _sheet_style_line(
+        style_line,
+        fallback="photorealistic live-action cinematography, natural skin texture",
+    )
+    identity = ""
+    if has_face_ref:
+        identity = (
+            "IDENTITY LOCK: <Picture 1> is the face / identity reference for this character. "
+            "All three panels must show the same person as Picture 1 — identical face shape, "
+            "eyes, nose, mouth, age, skin tone, and hair. Do not invent a different face. "
+        )
+    return (
+        f"Locked static character reference sheet for {who}. "
+        f"{identity}"
+        "One continuous shot, no cuts, camera completely locked, no pan, no zoom, no dialogue, silent. "
+        "A single wide photographic frame divided into three equal vertical panels side by side "
+        "on a seamless medium-grey studio backdrop with soft even studio lighting, no text, no logos, no watermark. "
+        "Left panel: close-up head-and-shoulders portrait facing camera, neutral expression, sharp facial detail. "
+        "Center panel: full-body front standing pose, arms relaxed at sides, head-to-toe visible, same identity and wardrobe. "
+        "Right panel: full-body back view, identical stance and clothing, same hair and proportions. "
+        "All three panels show the exact same person with consistent face, body, and outfit. "
+        f"Subject appearance: {look}. "
+        f"Visual craft: {style}. "
+        "Clean production reference plate, not a story scene, no props clutter, bare studio floor."
+    )
+
+
+def build_location_sheet_prompt(
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_place_ref: bool = False,
+) -> str:
+    """Still / Qwen prompt for a single empty location plate (no triptych)."""
+    place = (name or "location").strip() or "location"
+    look = (notes or "").strip() or (
+        "clear architecture, lighting, materials, and spatial depth"
+    )
+    style = _sheet_style_line(
+        style_line,
+        fallback="photorealistic live-action cinematography, natural materials",
+    )
+    place_lock = ""
+    if has_place_ref:
+        place_lock = (
+            "PLACE LOCK: <Picture 1> is the visual reference for this location. "
+            "Match architecture, materials, lighting, and spatial layout of Picture 1 — "
+            "same place, not a different set. Remove any people or creatures from the reference; "
+            "this plate is for the empty location only. "
+        )
+    return (
+        f"Empty LOCATION reference still of '{place}'. "
+        f"{place_lock}"
+        f"Place description (follow exactly): {look}. "
+        "ONE single wide cinematic photograph of the whole place — one cohesive establishing frame. "
+        "Do NOT split into panels, triptych, grid, collage, or side-by-side views. "
+        "No black bars, no panel dividers, no multi-angle montage. "
+        "Show architecture, depth, light, materials, and atmosphere. "
+        f"Visual craft: {style}. "
+        "EMPTY set only: no people, no characters, no creatures, no animals, no silhouettes, "
+        "no faces, no figures. Environment plate for production reference."
+    )
+
+
+def sheet_prompt_for_kind(
+    kind: str,
+    name: str,
+    notes: str = "",
+    *,
+    style_line: str = "",
+    has_ref: bool = False,
+) -> str:
+    k, _ = asset_kind_key(kind)
+    if k == "location":
+        return build_location_sheet_prompt(
+            name, notes, style_line=style_line, has_place_ref=has_ref
+        )
+    if k == "creature":
+        return build_creature_sheet_prompt(
+            name, notes, style_line=style_line, has_ref=has_ref
+        )
+    if k == "vehicle":
+        return build_vehicle_sheet_prompt(
+            name, notes, style_line=style_line, has_ref=has_ref
+        )
+    return build_character_sheet_prompt(
+        name, notes, style_line=style_line, has_face_ref=has_ref, force_creature=False
+    )
+
+
+def qwen_sheet_negative(kind: str, notes: str = "") -> str:
+    """Negatives tuned per card type for Qwen Image."""
+    k, _ = asset_kind_key(kind)
+    look = f"{notes or ''}".lower()
+    if k == "location":
+        return (
+            "person, human, character, people, crowd, face, portrait, creature, animal, "
+            "monster, zombie, ghost, silhouette, figure, triptych, panel grid, collage, "
+            "split screen, watermark, text, logo"
+        )
+    if k == "creature":
+        bans = [
+            "human, person, man, woman, child, face portrait of a human, "
+            "generic stock monster, identical reused creature, watermark, text, logo",
+        ]
+        # Ban common stock tropes unless the notes ask for them
+        stock = [
+            ("dragon", ("dragon", "ejder", "wyvern", "drake"), "dragon, wyvern, western dragon, scaled four-legged dragon"),
+            ("kaiju", ("kaiju", "godzilla"), "kaiju, godzilla"),
+            ("zombie", ("zombie", "zombi", "undead"), "zombie, undead walker"),
+            ("ghost", ("ghost", "hayalet", "specter", "phantom"), "sheet ghost, translucent ghost"),
+        ]
+        for _label, tokens, ban in stock:
+            if not any(t in look for t in tokens):
+                bans.append(ban)
+        return ", ".join(bans)
+    if k == "vehicle":
+        return (
+            "person, human, crew, pilot, face, portrait, creature, animal, monster, "
+            "generic stock spaceship, identical reused craft, watermark, text, logo"
+        )
+    return "watermark, text, logo, blurry face, different person per panel"
 
 
 def is_tripanel_still(path: Path) -> bool:
@@ -382,118 +642,6 @@ def split_tripanel_still(src: Path, dest_dir: Path, stem: str) -> list[Path]:
             rgb.crop((left, 0, right, h)).save(dest, "PNG")
             out.append(dest)
         return out
-
-
-def build_character_sheet_prompt(
-    name: str,
-    notes: str = "",
-    *,
-    style_line: str = "",
-    has_face_ref: bool = False,
-    force_creature: bool = False,
-) -> str:
-    """H3 SCENE prompt for a 3-panel character turnaround still (portrait|front|back)."""
-    who = (name or "character").strip() or "character"
-    look = (notes or "").strip()
-    creature = bool(force_creature) or _sheet_is_creature(who, look)
-    if not look:
-        look = (
-            "legendary dragon: massive scaled body, four legs, membranous wings, long tail, "
-            "horned reptilian head, no human anatomy"
-            if creature
-            else "distinctive face, clear age, hair, wardrobe, and proportions"
-        )
-    style = (style_line or "").strip() or (
-        "cinematic fantasy creature photography, detailed scales and anatomy"
-        if creature
-        else "photorealistic live-action cinematography, natural skin texture"
-    )
-    identity = ""
-    if has_face_ref:
-        if creature:
-            identity = (
-                "IDENTITY LOCK: <Picture 1> is the creature / species reference. "
-                "All three panels must show the same non-human creature as Picture 1 — "
-                "identical head shape, scales/fur, colors, and proportions. "
-                "Do not turn it into a human wearing a costume or mask. "
-            )
-        else:
-            identity = (
-                "IDENTITY LOCK: <Picture 1> is the face / identity reference for this character. "
-                "All three panels must show the same person as Picture 1 — identical face shape, "
-                "eyes, nose, mouth, age, skin tone, and hair. Do not invent a different face. "
-            )
-    if creature:
-        return (
-            f"Locked static CREATURE reference sheet for {who}. "
-            f"{identity}"
-            "CRITICAL: the subject is a full non-human creature (animal / mythical beast), "
-            "NOT a human, NOT a person in a dragon mask, NOT cosplay, NOT a bipedal humanoid "
-            "wearing a costume. Show the real creature body. "
-            "One continuous shot, no cuts, camera completely locked, no pan, no zoom, no dialogue, silent. "
-            "A single wide photographic frame divided into three equal vertical panels side by side "
-            "on a seamless medium-grey studio backdrop with soft even studio lighting, no text, no logos, no watermark. "
-            "Left panel: close-up of the creature HEAD only (snout/jaws/eyes/horns), facing camera, sharp scale detail. "
-            "Center panel: full-body FRONT or three-quarter standing pose of the entire creature, "
-            "head-to-tail / wings visible, four legs or true creature anatomy, grounded on studio floor. "
-            "Right panel: full-body REAR or opposite three-quarter of the same creature, identical species and markings. "
-            "All three panels show the exact same creature with consistent anatomy, color, and scale pattern. "
-            f"Creature appearance: {look}. "
-            f"Visual craft: {style}. "
-            "Clean production reference plate, not a story scene, empty grey studio, no human figures."
-        )
-    return (
-        f"Locked static character reference sheet for {who}. "
-        f"{identity}"
-        "One continuous shot, no cuts, camera completely locked, no pan, no zoom, no dialogue, silent. "
-        "A single wide photographic frame divided into three equal vertical panels side by side "
-        "on a seamless medium-grey studio backdrop with soft even studio lighting, no text, no logos, no watermark. "
-        "Left panel: close-up head-and-shoulders portrait facing camera, neutral expression, sharp facial detail. "
-        "Center panel: full-body front standing pose, arms relaxed at sides, head-to-toe visible, same identity and wardrobe. "
-        "Right panel: full-body back view, identical stance and clothing, same hair and proportions. "
-        "All three panels show the exact same person with consistent face, body, and outfit. "
-        f"Subject appearance: {look}. "
-        f"Visual craft: {style}. "
-        "Clean production reference plate, not a story scene, no props clutter, bare studio floor."
-    )
-
-
-
-def build_location_sheet_prompt(
-    name: str,
-    notes: str = "",
-    *,
-    style_line: str = "",
-    has_place_ref: bool = False,
-) -> str:
-    """H3 SCENE prompt for a single location reference still (one frame, no triptych)."""
-    place = (name or "location").strip() or "location"
-    look = (notes or "").strip() or (
-        "clear architecture, lighting, materials, and spatial depth"
-    )
-    style = (style_line or "").strip() or (
-        "photorealistic live-action cinematography, natural materials"
-    )
-    place_lock = ""
-    if has_place_ref:
-        place_lock = (
-            "PLACE LOCK: <Picture 1> is the visual reference for this location. "
-            "Match architecture, materials, lighting, and spatial layout of Picture 1 — "
-            "same place, not a different set. "
-        )
-    return (
-        f"Locked static location reference still for {place}. "
-        f"{place_lock}"
-        "One continuous shot, no cuts, camera completely locked, no dialogue, silent. "
-        "ONE single wide cinematic photograph of the whole place — one cohesive frame only. "
-        "Do NOT split into panels, triptych, grid, collage strips, or side-by-side views. "
-        "No black bars, no panel dividers, no multi-angle montage. "
-        "Show the full space in one establishing hero angle: architecture, depth, light, "
-        "materials, and atmosphere readable at a glance. "
-        f"Place description: {look}. "
-        f"Visual craft: {style}. "
-        "Clean production reference plate, empty of named characters unless required by the description."
-    )
 
 
 def _clean_audio(raw: Any) -> dict[str, str]:
@@ -770,7 +918,33 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
             out["take_index"] = max(1, int(item.get("take_index") or 1))
         except Exception:
             out["take_index"] = 1
+    chapter = str(item.get("chapter") or "").strip()
+    if chapter:
+        out["chapter"] = chapter
+    scene = str(item.get("scene") or "").strip()
+    if scene:
+        out["scene"] = scene
     return out
+
+
+def _clean_chapters(raw: Any, shots: list[Any] | None = None) -> list[str]:
+    """Ordered chapter names. Keeps empty chapters (no shots yet) from the list."""
+    names: list[str] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                n = str(item.get("name") or item.get("title") or "").strip()
+            else:
+                n = str(item or "").strip()
+            if n and n not in names:
+                names.append(n)
+    for s in shots or []:
+        if not isinstance(s, dict):
+            continue
+        n = str(s.get("chapter") or "").strip() or "Bölüm 1"
+        if n not in names:
+            names.append(n)
+    return names
 
 
 def split_shots(script: str) -> list[str]:
@@ -825,12 +999,16 @@ def load() -> dict[str, Any]:
     data.setdefault("characters", [])
     data.setdefault("locations", [])
     data.setdefault("creatures", [])
+    data.setdefault("vehicles", [])
+    data["image_provider"] = "image_studio" if data.get("image_provider") == "image_studio" else "minimax"
     if not isinstance(data["characters"], list):
         data["characters"] = []
     if not isinstance(data["locations"], list):
         data["locations"] = []
     if not isinstance(data["creatures"], list):
         data["creatures"] = []
+    if not isinstance(data["vehicles"], list):
+        data["vehicles"] = []
     data["setup"] = _clean_setup(data.get("setup"))
     data["audio"] = _clean_audio(data.get("audio"))
     data["shots"] = _migrate_shots(data)
@@ -856,7 +1034,7 @@ def load() -> dict[str, Any]:
     return data
 
 
-def save(data: dict[str, Any]) -> dict[str, Any]:
+def save(data: dict[str, Any], *, preserve_stills: bool = True) -> dict[str, Any]:
     prev: dict[str, Any] = {}
     if CINEMA_FILE.is_file():
         try:
@@ -871,6 +1049,8 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
         data = {**data, "setup": prev.get("setup")}
     if "audio" not in data:
         data = {**data, "audio": prev.get("audio")}
+    if "image_provider" not in data:
+        data = {**data, "image_provider": prev.get("image_provider") or "minimax"}
     for key in ("duration", "quality", "steps"):
         if key not in data and prev.get(key) is not None:
             data = {**data, key: prev.get(key)}
@@ -921,6 +1101,10 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
             data["role_script"] if "role_script" in data else (prev.get("role_script") or "")
         ),
         "shots": shots,
+        "chapters": _clean_chapters(
+            data["chapters"] if "chapters" in data else prev.get("chapters"),
+            shots,
+        ),
         "setup": _clean_setup(data.get("setup")),
         "audio": _clean_audio(data.get("audio")),
         "duration": duration,
@@ -928,20 +1112,28 @@ def save(data: dict[str, Any]) -> dict[str, Any]:
         "steps": steps,
         "seed": seed,
         "seed_lock": seed_lock,
+        "image_provider": "image_studio" if data.get("image_provider") == "image_studio" else "minimax",
         "characters": [
             _clean_asset(x, "character")
-            for x in _keep_asset_stills(data.get("characters") or [], prev.get("characters") or [])
+            for x in (_keep_asset_stills(data.get("characters") or [], prev.get("characters") or []) if preserve_stills else (data.get("characters") or []))
         ],
         "locations": [
             _clean_asset(x, "location")
-            for x in _keep_asset_stills(data.get("locations") or [], prev.get("locations") or [])
+            for x in (_keep_asset_stills(data.get("locations") or [], prev.get("locations") or []) if preserve_stills else (data.get("locations") or []))
         ],
         "creatures": [
             _clean_asset(x, "creature")
-            for x in _keep_asset_stills(
+            for x in (_keep_asset_stills(
                 data["creatures"] if "creatures" in data else (prev.get("creatures") or []),
                 prev.get("creatures") or [],
-            )
+            ) if preserve_stills else (data["creatures"] if "creatures" in data else (prev.get("creatures") or [])))
+        ],
+        "vehicles": [
+            _clean_asset(x, "vehicle")
+            for x in (_keep_asset_stills(
+                data["vehicles"] if "vehicles" in data else (prev.get("vehicles") or []),
+                prev.get("vehicles") or [],
+            ) if preserve_stills else (data["vehicles"] if "vehicles" in data else (prev.get("vehicles") or [])))
         ],
         "studio_mode": _clean_studio_mode(
             data["studio_mode"] if "studio_mode" in data else prev.get("studio_mode")
@@ -1174,6 +1366,8 @@ def _clean_asset(item: Any, kind: str) -> dict[str, Any]:
         "notes": notes,
         "voice": str(item.get("voice") or "").strip(),
     }
+    if item.get("library_id"):
+        out["library_id"] = str(item["library_id"]).strip()
     voice_audio = str(item.get("voice_audio") or "").strip()
     if voice_audio:
         out["voice_audio"] = Path(voice_audio).name
@@ -1203,7 +1397,7 @@ def upsert_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     else:
         items.append(cleaned)
     data[key] = items
-    save(data)
+    save(data, preserve_stills="images" not in asset)
     return cleaned
 
 
@@ -1223,7 +1417,7 @@ def update_asset(kind: str, asset_id: str, fields: dict[str, Any]) -> Optional[d
     cleaned = _clean_asset(merged, kind)
     items[idx] = cleaned
     data[key] = items
-    save(data)
+    save(data, preserve_stills="images" not in (fields or {}))
     return cleaned
 
 
@@ -1237,15 +1431,18 @@ def delete_asset(kind: str, asset_id: str) -> bool:
     if len(data[key]) == before:
         return False
     save(data)
+    # A film card can share its stills with another card or the global library.
+    # Only remove physical files after checking every owner, not just this kind.
+    owners = [x for group in ("characters", "locations", "creatures", "vehicles") for x in (data.get(group) or [])]
+    library = load_library()
+    owners.extend(x for group in ("characters", "locations", "creatures", "vehicles") for x in (library.get(group) or []))
     keep_files = {
         Path(str(image.get("file"))).name
-        for item in data[key]
+        for item in owners
         for image in item.get("images") or []
         if isinstance(image, dict) and image.get("file")
     }
-    for item in data[key]:
-        if item.get("image"):
-            keep_files.add(Path(str(item["image"])).name)
+    keep_files.update(Path(str(item["image"])).name for item in owners if item.get("image"))
     for item in removed:
         images = list(item.get("images") or [])
         if item.get("image"):
@@ -1257,6 +1454,9 @@ def delete_asset(kind: str, asset_id: str) -> bool:
             if not filename:
                 continue
             name = Path(str(filename)).name
+            match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back)\.png", name)
+            if match and (match.group(1) + ".png") not in keep_files:
+                _unlink_retry(REFS_DIR / (match.group(1) + ".png"))
             if name in keep_files:
                 continue
             for path in (REFS_DIR / name, COMFY_INPUT_DIR / name):
@@ -1302,6 +1502,7 @@ def match_prompt(text: str, lib: Optional[dict[str, Any]] = None) -> list[dict[s
     for kind, key in (
         ("character", "characters"),
         ("creature", "creatures"),
+        ("vehicle", "vehicles"),
         ("location", "locations"),
     ):
         for raw in lib.get(key) or []:
@@ -1350,7 +1551,9 @@ def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optiona
         if kind == "character":
             role = "character identity / wardrobe lock"
         elif kind == "creature":
-            role = "creature / species lock"
+            role = "entity appearance / silhouette lock"
+        elif kind == "vehicle":
+            role = "vehicle / craft appearance lock"
         else:
             role = "location / set lock"
         lines.append(
@@ -1461,6 +1664,8 @@ def bind_prompt(
         "lora_strength": chosen_strength,
         "has_character": any(h.get("kind") == "character" for h in hits),
         "has_location": any(h.get("kind") == "location" for h in hits),
+        "has_vehicle": any(h.get("kind") == "vehicle" for h in hits),
+        "has_creature": any(h.get("kind") == "creature" for h in hits),
     }
 
 
@@ -1520,6 +1725,10 @@ def apply_reentry_modes(
 
     Same beat / same cast overlap → keep continue. Cutaway or different cast with
     no overlap → t2v so last-frame drift does not steal character identity.
+
+    JSON / editor shots with mode_locked (or section_id) keep their declared
+    new/continue choice — including a locked Continue at the start of a
+    chapter produce batch (so last-frame can chain from the previous chapter).
     """
     lib = lib or load()
     out: list[dict[str, Any]] = []
@@ -1533,9 +1742,13 @@ def apply_reentry_modes(
         mode = str(shot.get("mode") or "t2v").lower()
         if mode in ("devam", "i2v", "last_frame"):
             mode = "continue"
+        locked = bool(shot.get("mode_locked") or shot.get("section_id"))
         if i == 0:
-            mode = "t2v"
-        elif not (shot.get("mode_locked") or shot.get("section_id")) and curr and not (curr & prev):
+            # Unlocked first shot of a produce batch starts fresh; locked
+            # Continue keeps last-frame (parent resolved at queue time).
+            if not locked:
+                mode = "t2v"
+        elif not locked and curr and not (curr & prev):
             mode = "t2v"
         shot["mode"] = mode
         out.append(shot)
@@ -1643,6 +1856,20 @@ def bound_character_portraits(text: str, lib: Optional[dict[str, Any]] = None) -
     seen: set[str] = set()
     for hit in match_prompt(text, lib):
         if hit.get("kind") != "character":
+            continue
+        for file in character_portrait_files(hit):
+            if file not in seen:
+                seen.add(file)
+                files.append(file)
+    return files
+
+
+def bound_vehicle_stills(text: str, lib: Optional[dict[str, Any]] = None) -> list[str]:
+    """Vehicle/craft stills named in this prompt — kept on continue for craft identity."""
+    files: list[str] = []
+    seen: set[str] = set()
+    for hit in match_prompt(text, lib):
+        if hit.get("kind") != "vehicle":
             continue
         for file in character_portrait_files(hit):
             if file not in seen:
@@ -2252,6 +2479,7 @@ def _blank_seamless_template() -> dict[str, Any]:
         ],
         "locations": [{"name": "", "notes": "", "trigger": ""}],
         "creatures": [],
+        "vehicles": [],
         "_user": {"scenes": 5, "about": ""},
         "takes": [
             {
@@ -2309,6 +2537,7 @@ def project_json_template(kind: str = "") -> dict[str, Any]:
         ],
         "locations": [{"name": "", "notes": "", "trigger": ""}],
         "creatures": [{"name": "", "notes": "", "trigger": ""}],
+        "vehicles": [{"name": "", "notes": "", "trigger": ""}],
         # Fallback: 12×5s = 60s (full template lives in schemas/h3-cinema-v1.example.json)
         "sections": [
             {
@@ -2388,6 +2617,130 @@ def _section_from_shot(shot: Any) -> dict[str, Any]:
     return row
 
 
+def _shot_is_empty(shot: Any) -> bool:
+    """True when a scene card has no author text yet (ready to receive JSON)."""
+    if not isinstance(shot, dict):
+        return True
+    text = str(shot.get("text") or shot.get("prompt") or shot.get("h3Prompt") or "").strip()
+    if text:
+        return False
+    structured = shot.get("structured")
+    if isinstance(structured, dict):
+        for key in (
+            "title",
+            "location",
+            "character",
+            "action",
+            "camera",
+            "visual_style",
+            "audio",
+            "music",
+            "important",
+            "logline",
+            "dialogue",
+        ):
+            if str(structured.get(key) or "").strip():
+                return False
+    return True
+
+
+def _chapter_of_shot(shot: Any) -> str:
+    if not isinstance(shot, dict):
+        return "Bölüm 1"
+    return str(shot.get("chapter") or "").strip() or "Bölüm 1"
+
+
+def _merge_shots_into_chapter(
+    existing: list[Any],
+    incoming: list[dict[str, Any]],
+    *,
+    chapter: str,
+    chapters_order: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Put imported scenes into one chapter; leave other chapters untouched."""
+    ch = str(chapter or "").strip() or "Bölüm 1"
+    base = [s for s in (existing or []) if isinstance(s, dict)]
+    fresh = [dict(s) for s in (incoming or []) if isinstance(s, dict)]
+    for row in fresh:
+        row["chapter"] = ch
+    if not fresh:
+        return base
+
+    order = list(chapters_order or [])
+    if ch not in order:
+        order.append(ch)
+    buckets: dict[str, list[dict[str, Any]]] = {name: [] for name in order}
+    for s in base:
+        name = _chapter_of_shot(s)
+        buckets.setdefault(name, []).append(s)
+        if name not in order:
+            order.append(name)
+
+    cur = list(buckets.get(ch) or [])
+    if cur and all(_shot_is_empty(s) for s in cur):
+        # Empty chapter placeholder(s) → replace with imported scenes
+        if len(cur) == 1 and cur[0].get("id"):
+            fresh[0]["id"] = cur[0]["id"]
+            if "enabled" in cur[0]:
+                fresh[0]["enabled"] = cur[0].get("enabled") is not False
+        cur = fresh
+    elif cur and _shot_is_empty(cur[-1]):
+        keep_id = str(cur[-1].get("id") or "").strip()
+        first = fresh[0]
+        if keep_id:
+            first["id"] = keep_id
+        if "enabled" in cur[-1]:
+            first["enabled"] = cur[-1].get("enabled") is not False
+        cur = cur[:-1] + [first] + fresh[1:]
+    else:
+        cur = cur + fresh
+    buckets[ch] = cur
+
+    out: list[dict[str, Any]] = []
+    for name in order:
+        out.extend(buckets.get(name) or [])
+    return out
+
+
+def _append_shots_fill_tail(
+    existing: list[Any],
+    incoming: list[dict[str, Any]],
+    *,
+    chapter: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Append imported scenes onto the current film / latest chapter.
+    If the last scene card is still empty, fill it with the first imported
+    section, then append the rest into the same chapter.
+    """
+    base = [s for s in (existing or []) if isinstance(s, dict)]
+    fresh = [dict(s) for s in (incoming or []) if isinstance(s, dict)]
+    if not fresh:
+        return base
+    ch = str(chapter or "").strip()
+    if not ch:
+        if base:
+            ch = str(base[-1].get("chapter") or "").strip()
+        ch = ch or "Bölüm 1"
+    for row in fresh:
+        if not str(row.get("chapter") or "").strip():
+            row["chapter"] = ch
+    if base and _shot_is_empty(base[-1]):
+        keep_id = str(base[-1].get("id") or "").strip()
+        keep_ch = str(base[-1].get("chapter") or ch).strip() or ch
+        first = fresh[0]
+        if keep_id:
+            first["id"] = keep_id
+        first["chapter"] = keep_ch
+        if "enabled" in base[-1]:
+            first["enabled"] = base[-1].get("enabled") is not False
+        base[-1] = first
+        base.extend(fresh[1:])
+        return base
+    base.extend(fresh)
+    return base
+
+
 def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, Any]:
     if isinstance(item, str):
         return _clean_shot(
@@ -2451,6 +2804,7 @@ def export_project_json() -> dict[str, Any]:
         "characters": [_asset_public(x, "character") for x in (data.get("characters") or [])],
         "locations": [_asset_public(x, "location") for x in (data.get("locations") or [])],
         "creatures": [_asset_public(x, "creature") for x in (data.get("creatures") or [])],
+        "vehicles": [_asset_public(x, "vehicle") for x in (data.get("vehicles") or [])],
         "sections": [_section_from_shot(s) for s in shots],
     }
 
@@ -2483,13 +2837,16 @@ def import_project_json(
     new_film: bool = True,
     keep_stills: bool = True,
     redo_characters: bool = False,
+    chapter: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Build cinema cast + sections from portable JSON.
 
     mode:
       - replace: overwrite characters/locations/creatures/shots from JSON
-      - merge: merge assets by name; replace shots when sections present
+      - merge: merge assets by name; append/fill shots (optionally into one chapter)
+    chapter:
+      - when set, forces merge into that chapter only
     """
     payload = _coerce_project_payload(raw)
     user_meta = payload.get("_user") if isinstance(payload.get("_user"), dict) else {}
@@ -2503,6 +2860,11 @@ def import_project_json(
     mode_l = (mode or "replace").strip().lower()
     if mode_l not in ("replace", "merge"):
         mode_l = "replace"
+    imported_n = 0
+    target_chapter = str(chapter or "").strip()
+    if target_chapter:
+        mode_l = "merge"
+        new_film = False
 
     # JSON is a content package. Its legacy settings are deliberately ignored;
     # the controls currently selected in Studio are the source of production truth.
@@ -2543,6 +2905,13 @@ def import_project_json(
     chars_in = payload.get("characters") or payload.get("cast") or []
     locs_in = payload.get("locations") or payload.get("places") or []
     creatures_in = payload.get("creatures") or payload.get("monsters") or []
+    vehicles_in = (
+        payload.get("vehicles")
+        or payload.get("crafts")
+        or payload.get("ships")
+        or payload.get("vehicles_list")
+        or []
+    )
 
     # Archive current before replace-into-new-film
     if new_film and mode_l == "replace":
@@ -2568,17 +2937,25 @@ def import_project_json(
     if logline:
         data["role_script"] = logline
 
+    prev_chars = list(data.get("characters") or [])
+    prev_locs = list(data.get("locations") or [])
+    prev_creatures = list(data.get("creatures") or [])
+    prev_vehicles = list(data.get("vehicles") or [])
+
     if mode_l == "replace":
         data["characters"] = _merge_named_assets("character", [], chars_in)
         data["locations"] = _merge_named_assets("location", [], locs_in)
         data["creatures"] = _merge_named_assets("creature", [], creatures_in)
+        data["vehicles"] = _merge_named_assets("vehicle", [], vehicles_in)
         if shots:
             data["shots"] = shots
-        elif sections == [] and (chars_in or locs_in or creatures_in):
+            imported_n = len(shots)
+        elif sections == [] and (chars_in or locs_in or creatures_in or vehicles_in):
             # Cast-only package — keep existing shots unless empty film
             data.setdefault("shots", data.get("shots") or [])
         else:
             data["shots"] = shots
+            imported_n = len(shots)
     else:
         data["characters"] = _merge_named_assets(
             "character", data.get("characters") or [], chars_in
@@ -2589,10 +2966,29 @@ def import_project_json(
         data["creatures"] = _merge_named_assets(
             "creature", data.get("creatures") or [], creatures_in
         )
+        data["vehicles"] = _merge_named_assets(
+            "vehicle", data.get("vehicles") or [], vehicles_in
+        )
         if shots:
-            data["shots"] = shots
+            chapters = _clean_chapters(data.get("chapters"), data.get("shots") or [])
+            if target_chapter and target_chapter not in chapters:
+                chapters.append(target_chapter)
+            last_ch = target_chapter or (chapters[-1] if chapters else "Bölüm 1")
+            if target_chapter:
+                data["shots"] = _merge_shots_into_chapter(
+                    data.get("shots") or [],
+                    shots,
+                    chapter=last_ch,
+                    chapters_order=chapters,
+                )
+            else:
+                data["shots"] = _append_shots_fill_tail(
+                    data.get("shots") or [], shots, chapter=last_ch
+                )
+            data["chapters"] = _clean_chapters(chapters, data["shots"])
+            imported_n = len(shots)
 
-    stills_kept = {"characters": 0, "locations": 0, "creatures": 0}
+    stills_kept = {"characters": 0, "locations": 0, "creatures": 0, "vehicles": 0}
     if keep_stills:
         lib_assets = load_library()
         data["locations"], stills_kept["locations"] = _adopt_stills_by_name(
@@ -2605,6 +3001,11 @@ def import_project_json(
             cur.get("creatures") or [],
             lib_assets.get("creatures") or [],
         )
+        data["vehicles"], stills_kept["vehicles"] = _adopt_stills_by_name(
+            data.get("vehicles") or [],
+            cur.get("vehicles") or [],
+            lib_assets.get("vehicles") or [],
+        )
         if not redo_characters and selected_mode != "seamless":
             data["characters"], stills_kept["characters"] = _adopt_stills_by_name(
                 data.get("characters") or [],
@@ -2614,11 +3015,34 @@ def import_project_json(
 
     out = save(data)
 
+    def _name_set(rows: list[Any]) -> set[str]:
+        return {
+            str(x.get("name") or "").strip().lower()
+            for x in (rows or [])
+            if isinstance(x, dict) and str(x.get("name") or "").strip()
+        }
+
+    new_assets = {
+        "characters": sorted(
+            _name_set(out.get("characters")) - _name_set(prev_chars if mode_l == "merge" else [])
+        ),
+        "locations": sorted(
+            _name_set(out.get("locations")) - _name_set(prev_locs if mode_l == "merge" else [])
+        ),
+        "creatures": sorted(
+            _name_set(out.get("creatures")) - _name_set(prev_creatures if mode_l == "merge" else [])
+        ),
+        "vehicles": sorted(
+            _name_set(out.get("vehicles")) - _name_set(prev_vehicles if mode_l == "merge" else [])
+        ),
+    }
+
     if save_to_library:
         for kind, key in (
             ("character", "characters"),
             ("location", "locations"),
             ("creature", "creatures"),
+            ("vehicle", "vehicles"),
         ):
             for asset in out.get(key) or []:
                 if not str(asset.get("name") or "").strip():
@@ -2642,13 +3066,16 @@ def import_project_json(
         "studio_mode": _clean_studio_mode(out.get("studio_mode")) or "assets",
         "seamless": (_clean_studio_mode(out.get("studio_mode")) == "seamless"),
         "mode": mode_l,
+        "chapter": target_chapter or None,
         "title": out.get("title") or "",
         "film_id": out.get("film_id") or "",
         "counts": {
             "characters": len(out.get("characters") or []),
             "locations": len(out.get("locations") or []),
             "creatures": len(out.get("creatures") or []),
+            "vehicles": len(out.get("vehicles") or []),
             "sections": len(out.get("shots") or []),
+            "imported": imported_n,
             "takes": len(
                 {
                     int(s.get("take_index") or 0)
@@ -2657,6 +3084,7 @@ def import_project_json(
                 }
             ),
         },
+        "new_assets": new_assets,
         "stills_kept": stills_kept,
         "warnings": warnings,
         "cinema": out,

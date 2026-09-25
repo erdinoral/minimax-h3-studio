@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema129" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema174" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -260,9 +260,7 @@
             <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
           <label id="cont-which-label">Hangi videodan devam?</label>
-          <select id="continue-source">
-            <option value="">— bitmiş video seç —</option>
-          </select>
+          <select id="continue-source"></select>
           <label class="check"><input type="checkbox" id="continue-audio-continuity" checked /> Önceki klibin ses atmosferini devam ettir <small>(beta)</small></label>
           <div class="continue-preview hidden" id="continue-box">
             <span id="continue-label">Son kare</span>
@@ -632,15 +630,27 @@
           <label><span id="cinema-seed-label">Seed</span>
             <input type="number" id="cinema-seed" value="-1" />
           </label>
+          <div class="cinema-image-provider" role="group" aria-labelledby="cinema-image-provider-label">
+            <span id="cinema-image-provider-label">Görsel üretimi</span>
+            <div class="ios-segment" id="cinema-image-provider">
+              <button type="button" class="on" data-image-provider="minimax" aria-pressed="true">MiniMax</button>
+                <button type="button" data-image-provider="image_studio" aria-pressed="false">Qwen Image</button>
+            </div>
+            <span class="muted" id="cinema-image-provider-status" aria-live="polite"></span>
+          </div>
           <label class="cinema-seamless-label" title="Aynı seed ile look kıyasla">
             <input type="checkbox" id="cinema-seed-lock" />
             <span id="cinema-seed-lock-label">Seed kilidi</span>
           </label>
-          <label><span id="cinema-lora-label">LoRA</span>
-            <select id="cinema-lora-select">
-              <option value="">Yok (varsayılan)</option>
-            </select>
-          </label>
+          <div class="cinema-lora-row">
+            <label class="cinema-lora-field"><span id="cinema-lora-label">LoRA</span>
+              <select id="cinema-lora-select">
+                <option value="">Yok (varsayılan)</option>
+              </select>
+            </label>
+            <button type="button" class="btn-secondary" id="btn-cinema-lora-save">Kaydet</button>
+          </div>
+          <p class="muted mode-hint" id="cinema-lora-hint">Seç → Kaydet. İndirilmemişse otomatik iner, sonra üretime hazır olur.</p>
           <div class="chips cinema-studio-mode" id="cinema-studio-mode" role="group" aria-label="Üretim modu">
             <button type="button" class="chip on" data-cinemamode="seamless" id="cinema-mode-seamless">Kesintisiz · ~1 dk</button>
             <button type="button" class="chip" data-cinemamode="assets" id="cinema-mode-assets">Karakter / mekan</button>
@@ -707,7 +717,7 @@
           </section>
           <section class="cinema-stack" data-fold="creatures">
             <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="creatures" aria-expanded="true">
-              <span class="cinema-fold-title" id="cinema-creature-title">Yaratıklar</span>
+              <span class="cinema-fold-title" id="cinema-creature-title">Varlıklar</span>
               <span class="cinema-fold-meta"><span id="cinema-creature-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▼</span></span>
             </button>
             <div class="cinema-fold-summary" id="cinema-creature-summary"></div>
@@ -718,22 +728,22 @@
                 <button type="button" class="chip" data-asset-tab="create" id="cinema-creature-tab-create">Oluştur</button>
               </div>
               <div class="cinema-asset-tab-panel" data-asset-kind="creature" data-asset-panel="list">
-                <p class="muted mode-hint" id="cinema-creature-hint">Ejderha, canavar, hayvan… Shot’ta adı yazınca görsel kilitlenir.</p>
+                <p class="muted mode-hint" id="cinema-creature-hint">Canavar, hayalet, zombi, gölge veya hayvan… Görünümü tanıma göre oluşur; shot’ta adıyla çağır.</p>
                 <div id="cinema-creatures" class="cinema-cards"></div>
-                <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-creature">Yaratık ekle+</button>
+                <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-creature">Varlık ekle+</button>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="creature" data-asset-panel="library">
-                <p class="muted mode-hint" id="cinema-creature-lib-hint">Kalıcı yaratıklar — Filme ekle ile buraya çek.</p>
+                <p class="muted mode-hint" id="cinema-creature-lib-hint">Kalıcı varlıklar — Filme ekle ile buraya çek.</p>
                 <div id="cinema-creature-library" class="cinema-library-list"></div>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="creature" data-asset-panel="create">
-                <p class="muted mode-hint" id="cinema-creature-create-hint">Tam yaratık sheet (insan/maske yok). 3 panel: kafa · önden gövde · arkadan.</p>
-                <label class="cinema-field-label" id="cinema-creature-create-name-label">Yaratık adı</label>
-                <input type="text" id="cinema-creature-create-name" placeholder="Emberborn Dragon" />
-                <label class="cinema-field-label" id="cinema-creature-create-notes-label">Anatomi / görünüm</label>
-                <textarea id="cinema-creature-create-notes" rows="4" placeholder="full non-human dragon, four legs, wings, scales, glowing eyes — no human, no mask, no cosplay"></textarea>
+                <p class="muted mode-hint" id="cinema-creature-create-hint">Her varlık adı + notuna göre benzersiz görünür; stok canavar varsayılmaz. Üç panelde tanımdaki form korunur.</p>
+                <label class="cinema-field-label" id="cinema-creature-create-name-label">Varlık adı</label>
+                <input type="text" id="cinema-creature-create-name" placeholder="The Shape" />
+                <label class="cinema-field-label" id="cinema-creature-create-notes-label">Görünüm / davranış</label>
+                <textarea id="cinema-creature-create-notes" rows="4" placeholder="Uzun, insanı andıran bir gölge; yüzü ve gövdesi asla tam görünmez…"></textarea>
                 <label class="cinema-field-label" id="cinema-creature-create-ref-label">Referans görsel (opsiyonel)</label>
-                <p class="muted mode-hint" id="cinema-creature-create-ref-hint">Varsa sheet bu yaratığa benzeyecek.</p>
+                <p class="muted mode-hint" id="cinema-creature-create-ref-hint">Varsa sheet bu varlığa benzeyecek.</p>
                 <div class="cinema-sheet-ref-row">
                   <label class="file-pick">
                     <input type="file" id="cinema-creature-ref-file" class="file-pick-input" accept="image/*" />
@@ -748,6 +758,52 @@
                   <button type="button" class="btn-secondary hidden" id="btn-cinema-save-creature-lib">Kütüphaneye kaydet</button>
                 </div>
                 <p class="muted" id="cinema-creature-create-status"></p>
+              </div>
+            </div>
+          </section>
+          <section class="cinema-stack" data-fold="vehicles">
+            <button type="button" class="cinema-col-head cinema-fold-toggle" data-fold="vehicles" aria-expanded="true">
+              <span class="cinema-fold-title" id="cinema-vehicle-title">Araçlar</span>
+              <span class="cinema-fold-meta"><span id="cinema-vehicle-count">0</span> <span class="cinema-fold-chevron" aria-hidden="true">▼</span></span>
+            </button>
+            <div class="cinema-fold-summary" id="cinema-vehicle-summary"></div>
+            <div class="cinema-fold-body">
+              <div class="chips cinema-asset-tabs" data-asset-kind="vehicle" role="tablist">
+                <button type="button" class="chip on" data-asset-tab="list" id="cinema-vehicle-tab-list">Bu film</button>
+                <button type="button" class="chip" data-asset-tab="library" id="cinema-vehicle-tab-library">Kütüphane</button>
+                <button type="button" class="chip" data-asset-tab="create" id="cinema-vehicle-tab-create">Oluştur</button>
+              </div>
+              <div class="cinema-asset-tab-panel" data-asset-kind="vehicle" data-asset-panel="list">
+                <p class="muted mode-hint" id="cinema-vehicle-hint">Uzay gemisi, araba, mecha… Görünümü tanıma göre kilitlenir; shot’ta adıyla çağır. Continue’da son karede olmasa da aynı araç kalır.</p>
+                <div id="cinema-vehicles" class="cinema-cards"></div>
+                <button type="button" class="btn-secondary cinema-add-btn" id="btn-cinema-add-vehicle">Araç ekle+</button>
+              </div>
+              <div class="cinema-asset-tab-panel hidden" data-asset-kind="vehicle" data-asset-panel="library">
+                <p class="muted mode-hint" id="cinema-vehicle-lib-hint">Kalıcı araçlar — Filme ekle ile buraya çek.</p>
+                <div id="cinema-vehicle-library" class="cinema-library-list"></div>
+              </div>
+              <div class="cinema-asset-tab-panel hidden" data-asset-kind="vehicle" data-asset-panel="create">
+                <p class="muted mode-hint" id="cinema-vehicle-create-hint">Her araç adı + notuna göre benzersiz görünür; stok gemi/araba varsayılmaz. Üç panelde siluet ve malzeme korunur.</p>
+                <label class="cinema-field-label" id="cinema-vehicle-create-name-label">Araç adı</label>
+                <input type="text" id="cinema-vehicle-create-name" placeholder="Aurora Drift" />
+                <label class="cinema-field-label" id="cinema-vehicle-create-notes-label">Görünüm / siluet</label>
+                <textarea id="cinema-vehicle-create-notes" rows="4" placeholder="Uzun gövdeli mat siyah uzay gemisi; asimetrik kanat, turuncu motor ışıması…"></textarea>
+                <label class="cinema-field-label" id="cinema-vehicle-create-ref-label">Referans görsel (opsiyonel)</label>
+                <p class="muted mode-hint" id="cinema-vehicle-create-ref-hint">Varsa sheet bu araca benzeyecek.</p>
+                <div class="cinema-sheet-ref-row">
+                  <label class="file-pick">
+                    <input type="file" id="cinema-vehicle-ref-file" class="file-pick-input" accept="image/*" />
+                    <span class="file-pick-btn" id="cinema-vehicle-ref-pick">Görsel seç</span>
+                    <span class="file-pick-name" id="cinema-vehicle-ref-name">Seçilmedi</span>
+                  </label>
+                  <button type="button" class="btn-secondary hidden" id="btn-cinema-vehicle-ref-clear">Kaldır</button>
+                </div>
+                <div id="cinema-vehicle-ref-preview" class="cinema-sheet-ref-preview hidden"></div>
+                <div class="row-btns cinema-create-actions">
+                  <button type="button" class="cta" id="btn-cinema-create-vehicle">Görsel oluştur</button>
+                  <button type="button" class="btn-secondary hidden" id="btn-cinema-save-vehicle-lib">Kütüphaneye kaydet</button>
+                </div>
+                <p class="muted" id="cinema-vehicle-create-status"></p>
               </div>
             </div>
           </section>
@@ -803,11 +859,10 @@
             <h3 id="cinema-script-title">Bölümler / sahneler</h3>
             <button type="button" class="cta" id="btn-cinema-plan">Planla</button>
           </div>
-          <textarea id="cinema-shot-draft" rows="3" placeholder="Hızlı serbest metin (isteğe bağlı)… Kaydetmeden eklemek için aşağıdaki düğmeyi kullan."></textarea>
+          <textarea id="cinema-shot-draft" rows="3" placeholder="Hızlı serbest metin (isteğe bağlı)… Kaydetmeden eklemek için bölüm içindeki «Taslağı ekle»yi kullan."></textarea>
           <div class="cinema-shot-add">
-            <button type="button" class="btn-secondary" id="btn-cinema-add-t2v">+ Yeni bölüm</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-add-t2v">+ Bölüm ekle</button>
             <button type="button" class="btn-secondary" id="btn-cinema-add-cont">+ Continue</button>
-            <button type="button" class="btn-ghost" id="btn-cinema-add-draft">Taslağı ekle</button>
           </div>
           <div id="cinema-shots" class="cinema-shots"></div>
           <p class="muted" id="cinema-hint">JSON’da kaç take varsa o kadar iş. 8 shot = 1 take (5sn → 40sn).</p>
@@ -875,7 +930,7 @@
             <h3 id="cinema-json-dialog-title">Film JSON</h3>
             <button type="button" class="menu-btn" id="btn-cinema-json-close">Kapat</button>
           </header>
-          <p class="muted cinema-scene-hint" id="cinema-json-hint">JSON sadece hikâye, karakter, mekân ve sahneleri taşır. Stil, ön ayar, süre, kalite, LoRA ve mod seçimin ekranda aynen korunur.</p>
+          <p class="muted cinema-scene-hint" id="cinema-json-hint">JSON hikâye, karakter, mekân, varlık, araç ve sahneleri bu bölüme ekler. Stil / süre / kalite ekranda kalır. Aynı adlı karakter/mekan/varlık/araç yeniden üretilmez.</p>
           <label class="cinema-json-file-label file-pick">
             <input type="file" id="cinema-json-file" class="file-pick-input" accept=".json,application/json" />
             <span class="file-pick-btn" id="cinema-json-file-btn">JSON dosyası seç</span>
@@ -895,21 +950,21 @@
       <div class="cinema-scene-modal hidden" id="cinema-scene-modal" aria-hidden="true">
         <div class="cinema-scene-dialog" role="dialog" aria-modal="true" aria-labelledby="cinema-scene-dialog-title">
           <header>
-            <h3 id="cinema-scene-dialog-title">Bölüm düzenle</h3>
+            <h3 id="cinema-scene-dialog-title">Sahne düzenle</h3>
             <button type="button" class="menu-btn" id="btn-cinema-scene-close">Kapat</button>
           </header>
-          <p class="muted cinema-scene-hint" id="cinema-scene-hint">JSON'daki temel bölüm bilgisini düzenle: karakterler, sahne ve prompt.</p>
+          <p class="muted cinema-scene-hint" id="cinema-scene-hint">JSON'daki temel sahne bilgisini düzenle: karakterler, mekan ve prompt.</p>
           <div class="cinema-scene-fields">
             <section class="cinema-scene-group">
               <div class="cinema-scene-row">
-                <label class="cinema-scene-grow"><span>Bölüm başlığı</span><input id="cinema-scene-title" type="text" data-scene-field="title" autocomplete="off" /></label>
+                <label class="cinema-scene-grow"><span>Sahne başlığı</span><input id="cinema-scene-title" type="text" data-scene-field="title" autocomplete="off" /></label>
                 <label class="cinema-scene-lang"><span>Video türü</span>
                   <select id="cinema-scene-type"><option value="t2v">Yeni video</option><option value="continue">Devam videosu</option></select>
                 </label>
                 <label class="cinema-scene-lang"><span>Süre (sn)</span><input id="cinema-scene-duration" type="number" min="1" max="15" step="1" value="5" /></label>
               </div>
               <label><span>Karakter çağırmaları</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character" placeholder="Master Kyros, Seraph Vane"></textarea></label>
-              <label><span>Sahne</span><textarea id="cinema-scene-location" rows="3" data-scene-field="location" placeholder="Bu bölümde ne oluyor?"></textarea></label>
+              <label><span>Mekan / durum</span><textarea id="cinema-scene-location" rows="3" data-scene-field="location" placeholder="Bu sahnede ne oluyor?"></textarea></label>
               <label><span>Prompt</span><textarea id="cinema-scene-action" rows="7" data-scene-field="action" placeholder="Videoda üretilecek görsel ve aksiyon açıklaması"></textarea></label>
             </section>
           </div>
@@ -1163,8 +1218,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema123" charset="utf-8"></script>
-  <script src="/static/film-workspace.js?v=cinema112" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema149" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema174" charset="utf-8"></script>
+  <script src="/static/film-workspace.js?v=cinema173" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema174" charset="utf-8"></script>
 </body>
 </html>

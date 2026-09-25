@@ -40,6 +40,7 @@ from lib.comfy import (
     MULTISHOT_MAX_SHOTS,
 )
 from lib import h3_models
+from lib import qwen_still
 from lib.loras import (
     LORAS_DIR,
     apply_trigger,
@@ -1206,6 +1207,8 @@ class ImageStudioReferenceBody(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=6000)
     aspect: str = "16:9"
     steps: int = Field(30, ge=1, le=80)
+    source_image: Optional[str] = None
+    negative: str = ""
 
 
 class MotionTransferChainBody(GenerateBody):
@@ -1223,6 +1226,8 @@ class BatchBody(BaseModel):
     link_continue: bool = True
     # True: first prompt continues from last queued/running/done (append chain)
     append_to_chain: bool = True
+    # Explicit parent for a single Director scene; never substitute the global tip.
+    continue_from_job_id: Optional[str] = None
     seed: int = -1
     music_id: Optional[str] = None
     silent_audio: bool = False
@@ -1270,10 +1275,11 @@ class CinemaProduceBody(BaseModel):
     append_to_chain: bool = False
     audio: Optional[dict[str, Any]] = None
     seamless: bool = False
-    # First queue missing character/creature/location sheets; scenes start after they finish
+    # First queue missing character/creature/vehicle/location sheets; scenes start after they finish
     prepare_sheets: bool = True
     # If true, queue sheets even when the card already has a still
     force_sheets: bool = False
+    image_provider: str = "minimax"
     post_pass: Optional[str] = None
 
     @field_validator("seed", "steps", mode="before")
@@ -1285,6 +1291,25 @@ class CinemaProduceBody(BaseModel):
             return int(v)
         except Exception:
             return -1
+
+
+class CinemaSingleProduceBody(BaseModel):
+    shot_id: str
+    duration: int = 5
+    aspect: str = "16:9"
+    quality: str = "736"
+    steps: int = 20
+    seed: int = -1
+    silent_audio: bool = False
+    purpose: Optional[str] = None
+    sampler: str = "res_multistep"
+    scheduler: str = "simple"
+    lora_id: Optional[str] = None
+    lora_name: Optional[str] = None
+    lora_strength: Optional[float] = None
+    sage_attention: Optional[str] = "auto"
+    post_pass: Optional[str] = None
+    image_provider: str = "minimax"
 
 
 class StoryboardBody(BaseModel):
@@ -2590,7 +2615,18 @@ async def batch(body: BatchBody):
     append_global = bool(body.link_continue) and bool(body.append_to_chain)
     tip = _chain_tip() if append_global else None
     chain_next = intra_batch or append_global
-    if use_per_shot:
+    if body.continue_from_job_id:
+        tip = _clip_record(body.continue_from_job_id)
+        if not tip or tip.get("status") not in ("queued", "running", "done"):
+            raise HTTPException(400, "Seçilen önceki sahne klibi bulunamadı")
+        first_mode = shot_modes[0] if shot_modes else ""
+        # Single-shot continue OR multi-shot batch whose first scene is Continue
+        # (e.g. chapter produce chaining from the previous chapter's last frame).
+        if use_per_shot and first_mode in ("continue", "devam", "i2v", "last_frame"):
+            pass
+        elif len(prompts) != 1 or not use_per_shot or first_mode != "continue":
+            raise HTTPException(400, "Önceki klip yalnızca devam sahnesinde kullanılabilir")
+    elif use_per_shot:
         # Mixed New Video / Continue: do not auto-continue from the global chain tip
         tip = None
         append_global = False
@@ -2633,7 +2669,7 @@ async def batch(body: BatchBody):
             elif append_global and i == 0 and start_from_tip:
                 want_continue = True
             if want_continue:
-                if not parent:
+                if not parent and not body.continue_from_job_id:
                     extra_tip = _chain_tip()
                     parent = extra_tip["id"] if extra_tip else None
                 if parent:
@@ -2656,16 +2692,19 @@ async def batch(body: BatchBody):
             # can restart every clip from the same location still instead of
             # the previous video's final frame.
             character_refs = cinema.bound_character_portraits(text, lib)
+            vehicle_refs = cinema.bound_vehicle_stills(text, lib)
             shot_text = bound["prompt"] if bound.get("hits") else text
             if mode in ("continue", "face_continue"):
-                # Continue = parent last frame + optional character portraits only.
-                # Never carry location/creature reference plates into this list.
-                shot_refs = list(face_refs) if face_refs else []
+                # Continue = parent last frame + character portraits + named vehicles.
+                # Vehicles stay because craft often leaves the last frame (boarding,
+                # cutaways) and must not morph into a different ship/car.
+                # Location plates stay out — they fight the last frame.
                 if body.face_lock and character_refs:
                     face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
-                    if face_refs:
-                        shot_refs = list(face_refs)
-                if face_refs:
+                shot_refs = list(face_refs) if face_refs else []
+                if vehicle_refs:
+                    shot_refs = list(dict.fromkeys([*shot_refs, *vehicle_refs]))[:9]
+                if shot_refs:
                     mode = "face_continue"
             else:
                 shot_refs = bound["ref_images"] or (list(face_refs) if face_refs else [])
@@ -2675,9 +2714,9 @@ async def batch(body: BatchBody):
                     if bound["has_character"] and not bound["has_location"]
                     else "ref"
                 )
-            # Accumulate character portraits only. `shot_refs` may also include
-            # a location plate for an initial Ref2VA shot and must not leak into
-            # later Continue jobs.
+            # Accumulate character portraits only. Location plates on an initial
+            # Ref2VA shot must not leak into later Continue jobs — vehicles are
+            # re-bound per shot from the prompt instead.
             if body.face_lock and character_refs:
                 face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
             lora_src, graph = _lora_src_for_shot(body, bound, mode)
@@ -3067,6 +3106,8 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
     """
     if _running or any(j.get("status") in ("queued", "running") for j in _jobs):
         raise HTTPException(409, "H3 üretimi/kuyruğu boş olmalı — Image Studio ayrı ComfyUI ve aynı VRAM'i kullanır")
+    if await comfy.healthy():
+        await comfy.free_memory()
     prompt = body.prompt.strip()
     request_body = {
         "prompt": prompt,
@@ -3074,6 +3115,7 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
         "steps": max(20, min(40, int(body.steps or 30))),
         "mode": "txt2img",
         "count": 1,
+        "negative": body.negative,
     }
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=4.0)) as client:
@@ -3082,6 +3124,19 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
             if health_response.is_error or not health_payload.get("ok"):
                 raise HTTPException(503, "Image Studio veya kendi ComfyUI'si açık değil")
             image_comfy_url = str(health_payload.get("comfy_url") or "").rstrip("/")
+            if body.source_image:
+                source_name = Path(body.source_image).name
+                source_path = next((p for p in (REFS / source_name, COMFY_INPUT / source_name) if p.is_file()), None)
+                if not source_path:
+                    raise HTTPException(400, "Kaynak referans görseli bulunamadı")
+                upload_response = await client.post(
+                    f"{IMAGE_STUDIO_URL}/api/upload",
+                    files={"file": (source_path.name, source_path.read_bytes(), "image/png")},
+                )
+                upload_payload = upload_response.json() if upload_response.content else {}
+                if upload_response.is_error:
+                    raise HTTPException(upload_response.status_code, str(upload_payload.get("detail") or "Image Studio referansı yükleyemedi"))
+                request_body.update({"mode": "vary", "image": upload_payload.get("name") or "", "denoise": 0.55})
             response = await client.post(f"{IMAGE_STUDIO_URL}/api/generate", json=request_body)
             payload = response.json() if response.content else {}
             if response.is_error:
@@ -3249,6 +3304,21 @@ async def delete_ref(filename: str):
             removed = _unlink_retry(path) or removed
     if not removed:
         raise HTTPException(404, "görsel yok")
+    match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back)\.png", name)
+    if match:
+        source_name = match.group(1) + ".png"
+        owners = cinema.load()
+        library = cinema.load_library()
+        source_in_use = any(
+            source_name == str(im.get("file") or "")
+            for collection in (owners, library)
+            for kind in ("characters", "locations", "creatures", "vehicles")
+            for asset in (collection.get(kind) or [])
+            for im in (asset.get("images") or [])
+            if isinstance(im, dict)
+        )
+        if not source_in_use:
+            _unlink_retry(REFS / source_name)
     meta = _load_ref_meta()
     if meta.pop(name, None) is not None:
         _save_ref_meta(meta)
@@ -4131,6 +4201,83 @@ async def cinema_patch_creature(asset_id: str, body: dict[str, Any]):
     return updated
 
 
+@app.post("/api/cinema/vehicle")
+async def cinema_add_vehicle(body: dict[str, Any]):
+    return cinema.upsert_asset("vehicle", body or {})
+
+
+@app.patch("/api/cinema/vehicle/{asset_id}")
+async def cinema_patch_vehicle(asset_id: str, body: dict[str, Any]):
+    updated = cinema.update_asset("vehicle", asset_id, body or {})
+    if not updated:
+        raise HTTPException(404, "araç yok")
+    return updated
+
+
+@app.delete("/api/cinema/vehicle/{asset_id}")
+async def cinema_del_vehicle(asset_id: str):
+    data = cinema.load()
+    found = next((x for x in (data.get("vehicles") or []) if str(x.get("id") or "") == str(asset_id)), None)
+    name = str((found or {}).get("name") or "")
+    if not cinema.delete_asset("vehicle", asset_id):
+        raise HTTPException(404, "araç yok")
+    _remember_removed_asset("vehicle", name, asset_id)
+    return {"ok": True}
+
+
+@app.delete("/api/cinema/asset-image/{kind}/{asset_id}/{filename}")
+async def cinema_delete_asset_image(kind: str, asset_id: str, filename: str):
+    """Remove one still, never the card; keep shared files used by other cards."""
+    try:
+        kind, key = cinema.asset_kind_key(kind)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    name = Path(filename).name
+    if not name or name != filename:
+        raise HTTPException(400, "Geçersiz görsel adı")
+    film = cinema.load()
+    card = next((x for x in film.get(key) or [] if str(x.get("id") or "") == asset_id), None)
+    if not card:
+        raise HTTPException(404, "Kart bulunamadı")
+    old_images = list(card.get("images") or [])
+    images = [x for x in old_images if not (isinstance(x, dict) and str(x.get("file") or "") == name)]
+    if len(images) == len(old_images) and str(card.get("image") or "") != name:
+        raise HTTPException(404, "Görsel bu kartta yok")
+    updated = cinema.update_asset(kind, asset_id, {
+        "images": images, "image": str((images[0] or {}).get("file") or "") if images else "",
+        "url": str((images[0] or {}).get("url") or "") if images else "",
+    })
+    library_id = str(card.get("library_id") or asset_id)
+    if library_id:
+        library = cinema.load_library()
+        linked = next((x for x in library.get(key) or [] if str(x.get("id") or "") == library_id), None)
+        if linked:
+            linked_images = [x for x in (linked.get("images") or []) if not (isinstance(x, dict) and str(x.get("file") or "") == name)]
+            linked["images"] = linked_images
+            linked["image"] = str((linked_images[0] or {}).get("file") or "") if linked_images else ""
+            linked["url"] = str((linked_images[0] or {}).get("url") or "") if linked_images else ""
+            cinema.save_library(library)
+    film = cinema.load()
+    library = cinema.load_library()
+    still_used = any(
+        name == str(im.get("file") or "") or name == str(asset.get("image") or "")
+        for collection in (film, library)
+        for group in ("characters", "locations", "creatures", "vehicles")
+        for asset in (collection.get(group) or [])
+        for im in ((asset.get("images") or []) or [{}])
+        if isinstance(im, dict)
+    )
+    file_deleted = False
+    if not still_used:
+        for path in (REFS / name, COMFY_INPUT / name):
+            if path.is_file():
+                file_deleted = _unlink_retry(path) or file_deleted
+        match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back)\.png", name)
+        if match:
+            _unlink_retry(REFS / (match.group(1) + ".png"))
+    return {"ok": True, "asset": updated, "file_deleted": file_deleted}
+
+
 @app.delete("/api/cinema/creature/{asset_id}")
 async def cinema_del_creature(asset_id: str):
     data = cinema.load()
@@ -4144,9 +4291,9 @@ async def cinema_del_creature(asset_id: str):
 
 @app.get("/api/cinema/library")
 async def cinema_library_get(kind: Optional[str] = None):
-    """Global character/location/creature library (persists across films)."""
+    """Global character/location/creature/vehicle library (persists across films)."""
     k = (kind or "").strip().lower()
-    if k in ("character", "location", "creature"):
+    if k in ("character", "location", "creature", "vehicle"):
         return {"ok": True, **cinema.list_library(k)}
     return {"ok": True, **cinema.list_library()}
 
@@ -4191,7 +4338,7 @@ async def cinema_library_delete(kind: str, asset_id: str):
 
 
 class CinemaSheetBody(BaseModel):
-    kind: str = "character"  # character | location
+    kind: str = "character"  # character | location | creature | vehicle
     name: str = Field(..., min_length=1)
     notes: str = ""
     asset_id: Optional[str] = None
@@ -4204,6 +4351,7 @@ class CinemaSheetBody(BaseModel):
     # Optional Comfy upload name(s) from /api/refs/upload
     ref_image: Optional[str] = None
     ref_images: Optional[list[str]] = None
+    image_provider: str = "minimax"
 
     @field_validator("ref_images", mode="before")
     @classmethod
@@ -4224,7 +4372,9 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
     if not aid:
         return
     kind = "location" if str(job.get("sheet_kind") or "") == "location" else (
-        "creature" if str(job.get("sheet_kind") or "") == "creature" else "character"
+        "creature" if str(job.get("sheet_kind") or "") == "creature" else (
+            "vehicle" if str(job.get("sheet_kind") or "") == "vehicle" else "character"
+        )
     )
     try:
         if not job.get("last_frame_path"):
@@ -4243,7 +4393,11 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
         slog.warn_job(job, "sheet asset missing", asset=aid[:8])
         return
     images = list(found.get("images") or [])
-    if len(images) >= cinema.MAX_ASSET_IMAGES:
+    auto_only = (not images) or all(
+        str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")
+        for im in images
+    )
+    if len(images) >= cinema.MAX_ASSET_IMAGES and not auto_only:
         slog.warn_job(job, "sheet asset image cap")
         return
     rid = str(uuid.uuid4())[:12]
@@ -4251,7 +4405,7 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
     REFS.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
     panel_paths = [dest]
-    if kind in ("character", "creature"):
+    if kind in ("character", "creature", "vehicle"):
         try:
             panel_paths = cinema.split_tripanel_still(dest, REFS, f"h3_sheet_{rid}")
         except Exception as e:
@@ -4267,10 +4421,6 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
         uploaded.append({"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
     if not uploaded:
         return
-    auto_only = (not images) or all(
-        str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")
-        for im in images
-    )
     images = uploaded if auto_only else (uploaded + images)
     found["images"] = images[: cinema.MAX_ASSET_IMAGES]
     cinema.upsert_asset(kind, found)
@@ -4329,6 +4479,13 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı")
     try:
+        if body.image_provider == "image_studio":
+            return await _queue_cinema_qwen_sheet_job(
+                kind=body.kind or "character", name=body.name, notes=body.notes or "",
+                asset_id=body.asset_id, quality=body.quality, steps=body.steps,
+                aspect=body.aspect or "16:9", style=body.style,
+                ref_image=body.ref_image or next(iter(body.ref_images or []), None),
+            )
         return await _queue_cinema_sheet_job(
             kind=body.kind or "character",
             name=body.name,
@@ -4345,6 +4502,158 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
         )
     except ValueError as e:
         raise HTTPException(400, str(e)[:300]) from e
+
+
+async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
+    """Put a still in H3's ordinary FIFO queue so it appears in Production List."""
+    kind, _ = cinema.asset_kind_key(kwargs.get("kind") or "character")
+    name = str(kwargs.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Kart adı gerekli")
+    missing = qwen_still.missing_models(COMFY_ROOT)
+    if missing:
+        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+    job = {
+        "id": uuid.uuid4().hex,
+        "mode": "qwen_sheet",
+        "lane": "director",
+        "status": "queued",
+        "progress": 0,
+        "progress_label": "Qwen görseli sırada",
+        "prompt": f"Qwen görsel · {name}",
+        "created_at": time.time(),
+        "image_provider": "image_studio",
+        "sheet_kind": kind,
+        "sheet_name": name,
+        "sheet_asset_id": kwargs.get("asset_id"),
+        "qwen_sheet_args": kwargs,
+    }
+    async with _lock:
+        _jobs.append(job)
+        _save_jobs()
+    _ensure_queue_loop()
+    return {"job": job, "kind": kind, "image_provider": "image_studio", "queued": True}
+
+
+async def _generate_cinema_image_studio_sheet(
+    *, kind: str, name: str, notes: str = "", asset_id: Optional[str] = None,
+    quality: str = "736", steps: int = 20, aspect: str = "16:9",
+    style: Optional[str] = None, ref_image: Optional[str] = None,
+    job: Optional[dict] = None,
+) -> dict[str, Any]:
+    """Make a Qwen still in H3's own ComfyUI, then attach it to the Director card."""
+    kind, key = cinema.asset_kind_key(kind)
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(400, "Kart adı gerekli")
+    lib = cinema.load()
+    previous = next((x for x in lib.get(key) or [] if asset_id and str(x.get("id") or "") == str(asset_id)), None)
+    setup = lib.get("setup") or {}
+    style_key = normalize_style(style or setup.get("style") or "realistic")
+    style_line = style_craft_line(style_key)
+    prompt = cinema.sheet_prompt_for_kind(
+        kind, name, notes, style_line=style_line, has_ref=bool(ref_image),
+    )
+    negative = cinema.qwen_sheet_negative(kind, notes)
+    image_steps = 20 if normalize_quality(quality) in ("352", "480") or steps <= 12 else 30
+    missing = qwen_still.missing_models(COMFY_ROOT)
+    if missing:
+        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+    if not await comfy.healthy():
+        raise HTTPException(503, "H3 ComfyUI kapalı")
+    source_name = ""
+    if ref_image:
+        ref_name = Path(ref_image).name
+        ref_path = next((p for p in (REFS / ref_name, COMFY_INPUT / ref_name) if p.is_file()), None)
+        if not ref_path:
+            raise HTTPException(400, "Kaynak referans görseli bulunamadı")
+        source_name = await comfy.upload_image(ref_path, f"h3_qwen_source_{uuid.uuid4().hex[:12]}.png")
+    graph = qwen_still.build_graph(
+        prompt=prompt,
+        negative=negative,
+        aspect="16:9" if kind != "location" else aspect,
+        steps=image_steps, seed=uuid.uuid4().int % (2**32), source_image=source_name,
+    )
+    try:
+        prompt_id = str(job.get("prompt_id") or "") if job and job.get("_reattach") else ""
+        if not prompt_id:
+            prompt_id = await comfy.queue_prompt(graph)
+        if job:
+            job["prompt_id"] = prompt_id
+            job["progress"] = 1
+            job["progress_label"] = "Qwen ComfyUI'de çalışıyor"
+            _save_jobs()
+        deadline = time.monotonic() + 45 * 60
+        source = None
+        stop_ws = asyncio.Event()
+        async def _on_progress(pct: int, label: str, meta: Optional[dict] = None):
+            if not job or job.get("status") != "running":
+                return
+            job["progress"] = max(1, min(99, int(pct)))
+            job["progress_label"] = label
+            job["progress_source"] = "ws"
+            if meta:
+                job.update({k: meta[k] for k in ("comfy_step", "comfy_step_max") if k in meta})
+            _save_jobs_throttled(0.8)
+        ws_task = asyncio.create_task(comfy.watch_prompt(prompt_id, _on_progress, stop_event=stop_ws)) if job else None
+        try:
+            while time.monotonic() < deadline:
+                if job and job.get("status") == "cancelled":
+                    raise HTTPException(409, "Qwen görsel üretimi durduruldu")
+                await asyncio.sleep(1.5)
+                history = (await comfy.history(prompt_id)).get(prompt_id) or {}
+                status = history.get("status") or {}
+                if status.get("status_str") == "error":
+                    raise HTTPException(502, "Qwen görsel üretimi ComfyUI'de hata verdi")
+                outputs = history.get("outputs") or {}
+                images = (outputs.get("70") or {}).get("images") or []
+                if images:
+                    info = images[0]
+                    filename = Path(str(info.get("filename") or "")).name
+                    subfolder = Path(str(info.get("subfolder") or ""))
+                    candidate = (COMFY_OUTPUT / subfolder / filename).resolve()
+                    if not candidate.is_relative_to(COMFY_OUTPUT.resolve()) or not candidate.is_file():
+                        raise HTTPException(502, "Qwen görsel çıktısı bulunamadı")
+                    source = candidate
+                    break
+        finally:
+            stop_ws.set()
+            if ws_task is not None:
+                ws_task.cancel()
+        if source is None:
+            raise HTTPException(504, "Qwen görsel üretimi 45 dakika içinde tamamlanmadı")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"H3 ComfyUI Qwen üretimi başarısız: {exc}") from exc
+    REFS.mkdir(parents=True, exist_ok=True)
+    sheet_source = REFS / f"h3_sheet_{uuid.uuid4().hex[:12]}.png"
+    shutil.copy2(source, sheet_source)
+    paths = [sheet_source]
+    if kind != "location":
+        paths = cinema.split_tripanel_still(sheet_source, REFS, sheet_source.stem)
+    uploaded = []
+    for path in paths:
+        comfy_name = await comfy.upload_image(path, path.name)
+        uploaded.append({"file": comfy_name, "url": f"/api/refs/{path.name}"})
+    if sheet_source not in paths:
+        _unlink_retry(sheet_source)
+    old_images = list((previous or {}).get("images") or [])
+    auto_only = not old_images or all(
+        str((x.get("file") if isinstance(x, dict) else x) or "").startswith("h3_sheet_")
+        for x in old_images
+    )
+    asset = cinema.upsert_asset(kind, {
+        **(previous or {}), **({"id": asset_id} if asset_id else {}),
+        "name": name, "notes": notes,
+        "images": uploaded if auto_only else (uploaded + old_images)[:cinema.MAX_ASSET_IMAGES],
+        **({"source_ref": ref_image} if ref_image else {}),
+    })
+    try:
+        cinema.save_film_asset_to_library(kind, asset["id"])
+    except Exception as exc:
+        slog.warn("image studio sheet library save", err=exc)
+    return {"asset": asset, "kind": kind, "prompt": prompt, "image_provider": "image_studio", "prompt_id": prompt_id}
 
 
 async def _queue_cinema_sheet_job(
@@ -4383,19 +4692,16 @@ async def _queue_cinema_sheet_job(
         refs.insert(0, one)
     refs = refs[:3]
     has_ref = bool(refs)
-    if kind == "location":
-        prompt = cinema.build_location_sheet_prompt(
-            name, notes, style_line=style_line, has_place_ref=has_ref
-        )
-    else:
-        prompt = cinema.build_character_sheet_prompt(
-            name,
-            notes,
-            style_line=style_line,
-            has_face_ref=has_ref,
-            force_creature=(kind == "creature"),
-        )
+    prompt = cinema.sheet_prompt_for_kind(
+        kind, name, notes, style_line=style_line, has_ref=has_ref,
+    )
+    previous_asset = next(
+        (x for x in (cinema.load().get(cinema.asset_kind_key(kind)[1]) or [])
+         if asset_id and str(x.get("id") or "") == str(asset_id)),
+        None,
+    )
     asset_payload: dict[str, Any] = {
+        **(previous_asset or {}),
         "name": name,
         "notes": notes,
     }
@@ -4411,7 +4717,7 @@ async def _queue_cinema_sheet_job(
     gen_kwargs: dict[str, Any] = {
         "prompt": prompt,
         "duration": dur,
-        "aspect": aspect or "16:9",
+        "aspect": "16:9" if kind != "location" else (aspect or "16:9"),
         "quality": quality_n,
         "seed": seed if seed is not None else -1,
         "steps": steps_n,
@@ -4483,16 +4789,95 @@ def _asset_needs_sheet(asset: Any, *, force: bool = False) -> bool:
     return True
 
 
+def _norm_asset_name(name: Any) -> str:
+    return str(name or "").strip().lower()
+
+
+def _sheet_name_allow(
+    kind: str,
+    asset: dict[str, Any],
+    only_names: Optional[dict[str, Any]] = None,
+) -> bool:
+    """If only_names is set, require asset name (or call alias) to be listed for that kind."""
+    if not only_names:
+        return True
+    bucket = only_names.get(kind) or only_names.get(
+        {"character": "characters", "location": "locations", "creature": "creatures", "vehicle": "vehicles"}.get(kind, "")
+    )
+    if bucket is None:
+        return True
+    allowed = {_norm_asset_name(x) for x in (bucket or []) if str(x or "").strip()}
+    if not allowed:
+        return False
+    names = {_norm_asset_name(asset.get("name"))}
+    for alias in asset.get("calls") or asset.get("aliases") or []:
+        n = _norm_asset_name(alias)
+        if n:
+            names.add(n)
+    return bool(names & allowed)
+
+
+def _mentioned_sheet_names(
+    cine: dict[str, Any], shots: Optional[list[Any]] = None
+) -> dict[str, list[str]]:
+    """Names from shot prompts / character call fields that map to cast cards."""
+    rows = shots if isinstance(shots, list) else (cine.get("shots") or [])
+    texts: list[str] = []
+    for s in rows:
+        if not isinstance(s, dict):
+            continue
+        if s.get("enabled") is False:
+            continue
+        bits = [str(s.get("text") or "")]
+        structured = s.get("structured") if isinstance(s.get("structured"), dict) else {}
+        for key in ("character", "location", "action", "title"):
+            bits.append(str(structured.get(key) or ""))
+        blob = "\n".join(x for x in bits if x.strip())
+        if blob.strip():
+            texts.append(blob)
+    hits: dict[str, set[str]] = {
+        "character": set(),
+        "creature": set(),
+        "vehicle": set(),
+        "location": set(),
+    }
+    for blob in texts:
+        for asset in cinema.match_prompt(blob, cine):
+            kind = str(asset.get("kind") or "")
+            name = _norm_asset_name(asset.get("name"))
+            if kind in hits and name:
+                hits[kind].add(name)
+    return {k: sorted(v) for k, v in hits.items()}
+
+
 async def _queue_sheets_for_cinema(
     cine: dict[str, Any],
     *,
     kinds: Optional[list[str]] = None,
     force: bool = False,
+    only_names: Optional[dict[str, Any]] = None,
+    mentioned_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Queue Görsel oluştur (sheet) for cast cards that still lack stills."""
+    """Queue Görsel oluştur for cast that still lack stills.
+
+    Skips assets that already have stills (unless force).
+    only_names limits to those names (e.g. newly imported cast).
+    mentioned_only limits to assets named in scene prompts / call lists.
+    """
     if not await comfy.healthy():
         return []
-    want = {cinema.asset_kind_key(k)[0] for k in (kinds or ["character", "location", "creature"])}
+    want = {cinema.asset_kind_key(k)[0] for k in (kinds or ["character", "location", "creature", "vehicle"])}
+    name_filter = dict(only_names or {})
+    if mentioned_only:
+        mentioned = _mentioned_sheet_names(cine)
+        for kind, names in mentioned.items():
+            prev = {_norm_asset_name(x) for x in (name_filter.get(kind) or []) if str(x or "").strip()}
+            if prev:
+                name_filter[kind] = sorted(prev & set(names))
+            else:
+                name_filter[kind] = names
+        if not any(name_filter.get(k) for k in ("character", "creature", "vehicle", "location")):
+            return []
     queued: list[dict[str, Any]] = []
     setup = cine.get("setup") if isinstance(cine.get("setup"), dict) else {}
     style = setup.get("style") if setup.get("style") not in (None, "", "auto") else None
@@ -4508,14 +4893,17 @@ async def _queue_sheets_for_cinema(
     for kind, key in (
         ("character", "characters"),
         ("creature", "creatures"),
+        ("vehicle", "vehicles"),
         ("location", "locations"),
     ):
         if kind not in want:
             continue
         for asset in cine.get(key) or []:
-            if kind == "character" and not force:
+            if not isinstance(asset, dict):
                 continue
-            if not _asset_needs_sheet(asset, force=force and kind == "character"):
+            if not _sheet_name_allow(kind, asset, name_filter if name_filter else None):
+                continue
+            if not _asset_needs_sheet(asset, force=force):
                 continue
             aid = str(asset.get("id") or "")
             if aid and any(
@@ -4579,6 +4967,202 @@ async def _maybe_continue_pending_produce() -> None:
         slog.warn("cinema pending produce failed", err=e)
 
 
+@app.post("/api/cinema/produce-one")
+async def cinema_produce_one(body: CinemaSingleProduceBody):
+    """Queue one stored Director shot without replacing the film's shot list."""
+    lib = cinema.load()
+    shots = lib.get("shots") or []
+    index = next((i for i, s in enumerate(shots) if str(s.get("id") or "") == body.shot_id), -1)
+    if index < 0:
+        raise HTTPException(404, "Sahne bulunamadı")
+    shot = shots[index]
+    if not str(shot.get("text") or "").strip():
+        raise HTTPException(400, "Önce sahne metnini doldurun")
+    if body.image_provider == "image_studio":
+        setup = lib.get("setup") or {}
+        style = setup.get("style") if setup.get("style") not in (None, "", "auto") else None
+        for asset in cinema.match_prompt(str(shot["text"]), lib):
+            kind = str(asset.get("kind") or "")
+            if kind not in ("character", "creature", "vehicle", "location") or not _asset_needs_sheet(asset):
+                continue
+            await _generate_cinema_image_studio_sheet(
+                kind=kind, name=str(asset.get("name") or ""), notes=str(asset.get("notes") or ""),
+                asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
+                aspect=body.aspect, style=style,
+            )
+        lib = cinema.load()
+    mode = "continue" if shot.get("mode") == "continue" else "t2v"
+    parent_id = None
+    if mode == "continue":
+        previous = next((s for s in reversed(shots[:index]) if str(s.get("text") or "").strip()), None)
+        if not previous:
+            raise HTTPException(400, "Devam için önceki sahne yok")
+        candidates = [j for j in _jobs if j.get("shot_id") == previous.get("id") and j.get("status") in ("queued", "running", "done")]
+        candidates.sort(key=lambda j: float(j.get("created_at") or 0))
+        if not candidates:
+            raise HTTPException(400, "Önceki sahnenin klibi yok; önce onu üretin")
+        parent_id = candidates[-1]["id"]
+    audio = cinema._clean_audio(lib.get("audio"))
+    silent = audio.get("mode") == "silent" or body.silent_audio
+    head = "\n\n".join(x for x in (
+        cinema.setup_preamble(lib.get("setup") or {}),
+        "" if silent else cinema.film_audio_preamble(audio),
+        "" if silent else cinema.cast_voice_bible(lib),
+    ) if x)
+    prompt = cinema.apply_look(str(shot["text"]), head)
+    refs = cinema.bound_character_portraits(prompt, lib)[:9]
+    batch_id = str(uuid.uuid4())[:8]
+    queued = await batch(BatchBody(
+        prompts=[prompt], modes=[mode], continue_from_job_id=parent_id,
+        link_continue=False, append_to_chain=False,
+        duration=body.duration, aspect=body.aspect, quality=body.quality,
+        steps=body.steps, seed=body.seed, silent_audio=silent,
+        purpose=body.purpose, sampler=body.sampler, scheduler=body.scheduler,
+        ref_images=refs or None, ref_role="face" if refs else None,
+        lora_id=body.lora_id, lora_name=body.lora_name,
+        lora_strength=body.lora_strength, sage_attention=body.sage_attention,
+        post_pass=body.post_pass, cinema_batch=batch_id,
+        score_id=audio.get("score_id") or None, lane="director",
+    ))
+    for job in queued.get("jobs") or []:
+        job["shot_id"] = body.shot_id
+        job["shot_index"] = index + 1
+    if queued.get("jobs"):
+        _save_jobs()
+    return queued
+
+
+def _cinema_shot_already_produced(
+    shot: Any,
+    *,
+    shot_index: int | None = None,
+    last_batch: str = "",
+) -> bool:
+    """True if this shot already has a finished or in-flight video job."""
+    if not isinstance(shot, dict):
+        return False
+    sid = str(shot.get("id") or "").strip()
+    batch = str(last_batch or "").strip()
+    idx = int(shot_index or 0)
+
+    def _busy(j: dict[str, Any]) -> bool:
+        st = str(j.get("status") or "").lower()
+        return st in ("done", "queued", "running")
+
+    for j in _jobs:
+        if not isinstance(j, dict) or not _busy(j):
+            continue
+        if sid and str(j.get("shot_id") or "") == sid:
+            return True
+        if (
+            batch
+            and idx > 0
+            and str(j.get("cinema_batch") or "") == batch
+            and str(j.get("mode") or "").lower() != "multishot"
+            and int(j.get("shot_index") or j.get("batch_index") or 0) == idx
+        ):
+            return True
+    if batch and sid:
+        # Seamless Multishot covering the whole last batch counts as done for every shot
+        for j in _jobs:
+            if not isinstance(j, dict) or not _busy(j):
+                continue
+            if (
+                str(j.get("cinema_batch") or "") == batch
+                and str(j.get("mode") or "").lower() == "multishot"
+                and str(j.get("status") or "").lower() == "done"
+            ):
+                return True
+    return False
+
+
+def _latest_job_for_shot_id(shot_id: str) -> Optional[dict[str, Any]]:
+    """Newest queued/running/done job tagged with this cinema shot id."""
+    sid = str(shot_id or "").strip()
+    if not sid:
+        return None
+    hits = [
+        j
+        for j in _jobs
+        if isinstance(j, dict)
+        and str(j.get("shot_id") or "") == sid
+        and str(j.get("status") or "").lower() in ("done", "queued", "running")
+    ]
+    if not hits:
+        return None
+    hits.sort(key=lambda j: float(j.get("created_at") or 0))
+    return hits[-1]
+
+
+def _cinema_previous_continue_parent(
+    lib: dict[str, Any], first_shot: dict[str, Any]
+) -> Optional[str]:
+    """Job id of the previous film scene — used to start a chapter Continue chain."""
+    fid = str((first_shot or {}).get("id") or "").strip()
+    if not fid:
+        return None
+    full = [s for s in (lib.get("shots") or []) if isinstance(s, dict)]
+    idx = next((i for i, s in enumerate(full) if str(s.get("id") or "") == fid), -1)
+    if idx <= 0:
+        return None
+    for prev in reversed(full[:idx]):
+        if not str(prev.get("text") or "").strip():
+            continue
+        job = _latest_job_for_shot_id(str(prev.get("id") or ""))
+        if job and job.get("id"):
+            return str(job["id"])
+    return None
+
+
+def _merge_produce_shots_into_lib(
+    existing: list[Any], incoming: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Update shots from produce payload without dropping empty / disabled cards."""
+    by_id = {
+        str(s.get("id") or ""): s
+        for s in (incoming or [])
+        if isinstance(s, dict) and str(s.get("id") or "").strip()
+    }
+    existing_by_id = {
+        str(s.get("id") or ""): s
+        for s in (existing or [])
+        if isinstance(s, dict) and str(s.get("id") or "").strip()
+    }
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in existing or []:
+        if not isinstance(raw, dict):
+            continue
+        sid = str(raw.get("id") or "").strip()
+        if sid and sid in by_id:
+            row = dict(by_id[sid])
+            # Produce payload often omits chapter — keep the stored chapter
+            if not str(row.get("chapter") or "").strip():
+                prev_ch = str(raw.get("chapter") or "").strip()
+                if prev_ch:
+                    row["chapter"] = prev_ch
+            merged.append(row)
+            seen.add(sid)
+        else:
+            merged.append(raw)
+            if sid:
+                seen.add(sid)
+    for s in incoming or []:
+        sid = str(s.get("id") or "").strip()
+        if sid and sid not in seen:
+            row = dict(s)
+            if not str(row.get("chapter") or "").strip():
+                prev = existing_by_id.get(sid) or {}
+                prev_ch = str(prev.get("chapter") or "").strip()
+                if prev_ch:
+                    row["chapter"] = prev_ch
+            merged.append(row)
+            seen.add(sid)
+        elif not sid:
+            merged.append(s)
+    return merged
+
+
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
@@ -4602,9 +5186,37 @@ async def cinema_produce(body: CinemaProduceBody):
         lib0["quality"] = normalize_quality(body.quality)
         lib0["steps"] = body.steps if body.steps and body.steps > 0 else 20
         cinema.save(lib0)
-        sheets = await _queue_sheets_for_cinema(
-            cinema.load(), force=bool(body.force_sheets)
-        )
+        if body.image_provider == "image_studio":
+            source = cinema.load()
+            setup = source.get("setup") or {}
+            style = setup.get("style") if setup.get("style") not in (None, "", "auto") else None
+            mentioned = _mentioned_sheet_names(source)
+            sheets = []
+            for kind, key in (("character", "characters"), ("creature", "creatures"), ("vehicle", "vehicles"), ("location", "locations")):
+                allow = {_norm_asset_name(x) for x in (mentioned.get(kind) or [])}
+                for asset in source.get(key) or []:
+                    if not isinstance(asset, dict):
+                        continue
+                    if allow and not _sheet_name_allow(kind, asset, {kind: list(allow)}):
+                        continue
+                    if not allow and not body.force_sheets:
+                        # No call-list hits — only force regenerates everything
+                        continue
+                    if not _asset_needs_sheet(asset, force=bool(body.force_sheets)):
+                        continue
+                    result = await _queue_cinema_qwen_sheet_job(
+                        kind=kind, name=str(asset.get("name") or ""),
+                        notes=str(asset.get("notes") or ""), asset_id=asset.get("id"),
+                        quality=body.quality, steps=body.steps, aspect=body.aspect,
+                        style=style,
+                    )
+                    sheets.append({"kind": kind, "name": asset.get("name"), "job_id": (result.get("job") or {}).get("id")})
+        else:
+            sheets = await _queue_sheets_for_cinema(
+                cinema.load(),
+                force=bool(body.force_sheets),
+                mentioned_only=not bool(body.force_sheets),
+            )
         if sheets:
             lib0 = cinema.load()
             payload = body.model_dump()
@@ -4632,8 +5244,9 @@ async def cinema_produce(body: CinemaProduceBody):
         lib["setup"] = cinema._clean_setup(body.setup)
     audio = cinema._clean_audio(body.audio if body.audio is not None else lib.get("audio"))
     lib["audio"] = audio
-    lib["shots"] = parsed
-    lib["script"] = "\n\n---\n\n".join(s["text"] for s in parsed)
+    # Keep empty / disabled scene cards; only refresh texts from produce payload
+    lib["shots"] = _merge_produce_shots_into_lib(lib.get("shots") or [], parsed)
+    lib["script"] = "\n\n---\n\n".join(s["text"] for s in parsed if s.get("text"))
     lib["duration"] = body.duration
     lib["quality"] = normalize_quality(body.quality)
     lib["steps"] = body.steps if body.steps and body.steps > 0 else 20
@@ -4662,10 +5275,38 @@ async def cinema_produce(body: CinemaProduceBody):
     )
     # Cutaway / no cast overlap with previous shot → t2v (avoid wrong last-frame drift)
     parsed = cinema.apply_reentry_modes(parsed, lib)
-    lib["shots"] = parsed
+    lib["shots"] = _merge_produce_shots_into_lib(lib.get("shots") or [], parsed)
     cinema.save(lib)
-    prompts = [cinema.apply_look(s["text"], head) for s in parsed]
-    modes = [s["mode"] for s in parsed]
+
+    # Skip scenes that already finished (or are still in the queue)
+    last_batch = str(audio.get("last_batch") or "")
+    skipped_done: list[dict[str, Any]] = []
+    to_queue: list[dict[str, Any]] = []
+    full_ids = [str(s.get("id") or "") for s in (lib.get("shots") or [])]
+    for i, s in enumerate(parsed):
+        sid = str(s.get("id") or "")
+        full_idx = (full_ids.index(sid) + 1) if sid and sid in full_ids else i + 1
+        if _cinema_shot_already_produced(s, shot_index=full_idx, last_batch=last_batch):
+            skipped_done.append(s)
+        else:
+            to_queue.append(s)
+    if not to_queue:
+        return {
+            "ok": True,
+            "count": 0,
+            "skipped_done": len(skipped_done),
+            "cinema_batch": last_batch,
+            "message": "Tüm sahneler zaten üretilmiş — yalnızca eksikler kuyruğa alınır",
+            "jobs": [],
+        }
+
+    want_seamless = bool(body.seamless)
+    # Partial re-run cannot use a full Multishot pack
+    if want_seamless and skipped_done:
+        want_seamless = False
+
+    prompts = [cinema.apply_look(s["text"], head) for s in to_queue]
+    modes = [s["mode"] for s in to_queue]
     # Face-lock refs: only character portraits named in the shots.
     # Location plates must not kill Multishot — they are not face lock.
     cast_refs: list[str] = []
@@ -4675,13 +5316,18 @@ async def cinema_produce(body: CinemaProduceBody):
                 cast_refs.append(f)
     cast_refs = cast_refs[:9]
     still_lock = bool(cast_refs)
-    want_seamless = bool(body.seamless)
     if want_seamless and still_lock:
         want_seamless = False
+    # Chapter / partial produce: if the first queued scene is Continue, seed
+    # last-frame from the previous film scene's clip (usually previous chapter).
+    chain_parent: Optional[str] = None
+    first_mode = str((to_queue[0] or {}).get("mode") or "").lower() if to_queue else ""
+    if first_mode in ("continue", "devam", "i2v", "last_frame"):
+        chain_parent = _cinema_previous_continue_parent(lib, to_queue[0])
     if want_seamless:
         queued = await _queue_cinema_seamless(
             body=body,
-            parsed=parsed,
+            parsed=to_queue,
             prompts=prompts,
             lib=lib,
             audio=audio,
@@ -4691,7 +5337,7 @@ async def cinema_produce(body: CinemaProduceBody):
         )
     else:
         chain_modes = modes
-        if body.seamless:
+        if body.seamless and not skipped_done:
             chain_modes = ["t2v"] + ["continue"] * max(0, len(prompts) - 1)
         bb = BatchBody(
             prompts=prompts,
@@ -4703,7 +5349,8 @@ async def cinema_produce(body: CinemaProduceBody):
             sampler=body.sampler,
             scheduler=body.scheduler,
             link_continue=bool(body.link_continue or body.seamless),
-            append_to_chain=bool(body.append_to_chain),
+            append_to_chain=bool(body.append_to_chain) or bool(skipped_done) or bool(chain_parent),
+            continue_from_job_id=chain_parent,
             seed=body.seed,
             silent_audio=silent,
             purpose=purpose or "short_film",
@@ -4724,9 +5371,12 @@ async def cinema_produce(body: CinemaProduceBody):
     for i, job in enumerate(queued.get("jobs") or []):
         if (job.get("mode") or "").lower() == "multishot":
             continue
-        if i < len(parsed):
-            job["shot_id"] = parsed[i].get("id")
-            job["shot_index"] = i + 1
+        if i < len(to_queue):
+            job["shot_id"] = to_queue[i].get("id")
+            # Preserve original scene number in the full film list
+            full_ids = [str(s.get("id") or "") for s in (lib.get("shots") or [])]
+            sid = str(to_queue[i].get("id") or "")
+            job["shot_index"] = (full_ids.index(sid) + 1) if sid in full_ids else i + 1
     if queued.get("jobs"):
         _save_jobs()
     audio["last_batch"] = cinema_batch
@@ -4737,10 +5387,13 @@ async def cinema_produce(body: CinemaProduceBody):
     queued["seamless"] = bool(want_seamless)
     queued["takes"] = int(queued.get("takes") or (len(queued.get("jobs") or []) if want_seamless else 0) or 0)
     queued["still_lock"] = still_lock
+    queued["skipped_done"] = len(skipped_done)
     queued["preview"] = cinema.produce_preview(lib)
     slog.info(
         "cinema produce",
         shots=len(parsed),
+        queued=len(to_queue),
+        skipped_done=len(skipped_done),
         count=queued.get("count"),
         batch=cinema_batch,
         seamless=bool(want_seamless),
@@ -5150,6 +5803,7 @@ class CinemaImportJsonBody(BaseModel):
     generate_sheets: bool = False
     keep_stills: bool = True
     redo_characters: bool = False
+    chapter: Optional[str] = None
 
 
 @app.post("/api/cinema/import-json")
@@ -5170,6 +5824,7 @@ async def cinema_import_json(body: CinemaImportJsonBody):
             new_film=bool(body.new_film),
             keep_stills=bool(body.keep_stills),
             redo_characters=bool(body.redo_characters),
+            chapter=str(body.chapter or "").strip() or None,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)[:400]) from e
@@ -5178,7 +5833,20 @@ async def cinema_import_json(body: CinemaImportJsonBody):
     sheets: list[dict[str, Any]] = []
     if body.generate_sheets:
         try:
-            sheets = await _queue_sheets_for_cinema(out.get("cinema") or {})
+            new_assets = out.get("new_assets") if isinstance(out.get("new_assets"), dict) else {}
+            only_names = {
+                "character": new_assets.get("characters") or [],
+                "creature": new_assets.get("creatures") or [],
+                "vehicle": new_assets.get("vehicles") or [],
+                "location": new_assets.get("locations") or [],
+            }
+            # New cast only; also require mention in imported / existing scenes
+            sheets = await _queue_sheets_for_cinema(
+                out.get("cinema") or {},
+                only_names=only_names,
+                mentioned_only=True,
+                force=bool(body.redo_characters),
+            )
         except Exception as e:
             slog.warn("cinema import-json sheets", err=e)
         # Reload cinema after sheet upserts
@@ -5187,12 +5855,14 @@ async def cinema_import_json(body: CinemaImportJsonBody):
             "characters": len(out["cinema"].get("characters") or []),
             "locations": len(out["cinema"].get("locations") or []),
             "creatures": len(out["cinema"].get("creatures") or []),
+            "vehicles": len(out["cinema"].get("vehicles") or []),
             "sections": len(out["cinema"].get("shots") or []),
         }
     out["sheets_queued"] = sheets
     slog.info(
         "cinema import-json",
         mode=out.get("mode"),
+        chapter=out.get("chapter"),
         counts=out.get("counts"),
         sheets=len(sheets),
     )
@@ -7227,6 +7897,24 @@ def _queue_has_prompt(pid: str, items: list) -> bool:
 
 
 async def _run_job(job: dict):
+    if job.get("mode") == "qwen_sheet":
+        job["status"] = "running"
+        job["started_at"] = time.time()
+        job["progress_label"] = "Qwen görseli hazırlanıyor"
+        _save_jobs()
+        await _free_llm_for_production()
+        result = await _generate_cinema_image_studio_sheet(**(job.get("qwen_sheet_args") or {}), job=job)
+        if job.get("status") != "cancelled":
+            job["status"] = "done"
+            job["progress"] = 100
+            job["progress_label"] = "görsel karta eklendi"
+            job["done_at"] = time.time()
+            job["sheet_asset_id"] = (result.get("asset") or {}).get("id")
+            job["sheet_attached"] = True
+            job["sheet_still_urls"] = [im.get("url") for im in ((result.get("asset") or {}).get("images") or []) if isinstance(im, dict) and im.get("url")]
+            _save_jobs()
+        await _maybe_continue_pending_produce()
+        return
     job["status"] = "running"
     job["error"] = None
     if not job.get("started_at"):
@@ -7826,6 +8514,8 @@ async def _queue_loop():
                 slog.exception("queue ← error", e, job=job.get("id", "")[:8])
             finally:
                 _running = False
+                if job.get("mode") == "qwen_sheet" and job.get("status") in ("error", "cancelled"):
+                    await _maybe_continue_pending_produce()
             await _free_comfy_if_idle(reason="queue idle after clip")
             # Tight turnaround so continue #2 starts immediately after #1
             await asyncio.sleep(0.05)

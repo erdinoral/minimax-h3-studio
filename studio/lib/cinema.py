@@ -1723,8 +1723,8 @@ def apply_reentry_modes(
 ) -> list[dict[str, Any]]:
     """Honor the shot list. Do not rewrite it from the production queue or cast overlap.
 
-    The first shot of a produce batch is always a new video. Later shots keep
-    the mode written on the card: continue uses the previous shot in this list.
+    Preserve explicit Continue even at a batch boundary. The caller resolves
+    its predecessor from the film or rejects a missing parent.
     """
     out: list[dict[str, Any]] = []
     for i, raw in enumerate(shots or []):
@@ -1734,9 +1734,7 @@ def apply_reentry_modes(
         mode = str(shot.get("mode") or "t2v").lower()
         if mode in ("devam", "i2v", "last_frame"):
             mode = "continue"
-        if i == 0:
-            mode = "t2v"
-        elif mode not in ("continue", "t2v"):
+        if mode not in ("continue", "t2v"):
             mode = "t2v"
         shot["mode"] = mode
         out.append(shot)

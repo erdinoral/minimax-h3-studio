@@ -995,6 +995,8 @@ def _archive_job_to_gallery(job: dict) -> None:
         "quality": job.get("quality"),
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
+        "shot_id": job.get("shot_id"),
+        "shot_index": job.get("shot_index"),
         "music_id": job.get("music_id"),
         "cinema_batch": job.get("cinema_batch"),
         "score_id": job.get("score_id"),
@@ -1242,6 +1244,7 @@ class BatchBody(BaseModel):
     append_to_chain: bool = True
     # Explicit parent for a single Director scene; never substitute the global tip.
     continue_from_job_id: Optional[str] = None
+    parent_job_ids: Optional[list[Optional[str]]] = None
     seed: int = -1
     music_id: Optional[str] = None
     silent_audio: bool = False
@@ -2651,6 +2654,13 @@ async def batch(body: BatchBody):
         tip = None
         append_global = False
         chain_next = True
+    if body.parent_job_ids is not None and len(body.parent_job_ids) != len(prompts):
+        raise HTTPException(400, "Önceki klip listesi çekim sayısıyla eşleşmiyor")
+    for parent_id in body.parent_job_ids or []:
+        if parent_id:
+            source = _clip_record(parent_id)
+            if not source or source.get("status") not in ("queued", "running", "done"):
+                raise HTTPException(400, "Seçilen önceki klip bulunamadı veya başarısız")
     policy = {
         "purpose": purpose or ("music_video" if silent else "short_film"),
         "silentAudio": silent,
@@ -2690,10 +2700,11 @@ async def batch(body: BatchBody):
                 want_continue = True
             elif append_global and i == 0 and start_from_tip:
                 want_continue = True
-            if i == 0 and use_per_shot:
-                # This package always opens on a new video. The production
-                # list is a different queue and must not supply the first frame.
-                want_continue = False
+            explicit_parent = (body.parent_job_ids or [])[i] if i < len(body.parent_job_ids or []) else None
+            if explicit_parent and want_continue:
+                parent = explicit_parent
+            if want_continue and not parent:
+                raise HTTPException(400, "Devam için önceki klip seçilmeli; yeni videoya dönüştürülmedi")
             if want_continue:
                 if parent:
                     cont_from = parent
@@ -2721,19 +2732,10 @@ async def batch(body: BatchBody):
             vehicle_refs = cinema.bound_vehicle_stills(text, lib)
             shot_text = bound["prompt"] if bound.get("hits") else text
             if mode in ("continue", "face_continue"):
-                # Continue = parent last frame + characters/vehicles named in THIS shot.
-                # Do not carry the whole chapter cast — that fights the last frame
-                # after a mid-chapter New (e.g. new→cont×3 → new → cont×7).
+                # Exact continuation uses FL2VA first_frame, never Ref2VA identity stills.
                 shot_refs = []
-                if body.face_lock and character_refs:
-                    shot_refs.extend(character_refs)
-                if vehicle_refs:
-                    shot_refs = list(dict.fromkeys([*shot_refs, *vehicle_refs]))
-                shot_refs = shot_refs[:9]
-                if shot_refs:
-                    mode = "face_continue"
-                else:
-                    mode = "continue"
+                mode = "continue"
+                shot_text = text
             else:
                 shot_refs = bound["ref_images"] or (
                     list(character_refs) if body.face_lock and character_refs else []
@@ -2806,6 +2808,11 @@ async def batch(body: BatchBody):
                 "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
                 **shot_lora,
             }
+            if cont_from:
+                source = _clip_record(cont_from)
+                if source:
+                    for field in ("width", "height", "aspect"):
+                        if source.get(field): job[field] = source[field]
             if mode == "face" and shot_refs:
                 job["prompt"] = enhance_ref_prompt(
                     shot_text, n_images=len(shot_refs), role="face"
@@ -4999,6 +5006,19 @@ async def _maybe_continue_pending_produce() -> None:
         slog.warn("cinema pending produce failed", err=e)
 
 
+def _cinema_previous_clip(shots: list[dict], shot_id: str) -> Optional[str]:
+    index = next((i for i, s in enumerate(shots) if str(s.get("id") or "") == shot_id), -1)
+    previous = next((s for s in reversed(shots[:max(index, 0)]) if str(s.get("text") or "").strip()), None)
+    if not previous:
+        return None
+    live_ids = {str(j.get("id") or "") for j in _jobs}
+    candidates = [j for j in [*_jobs, *(g for g in _gallery if str(g.get("id") or "") not in live_ids)]
+                  if j.get("shot_id") == previous.get("id")
+                  and j.get("status", "done") in ("queued", "running", "done")]
+    candidates.sort(key=lambda j: float(j.get("created_at") or j.get("done_at") or 0))
+    return str(candidates[-1]["id"]) if candidates else None
+
+
 @app.post("/api/cinema/produce-one")
 async def cinema_produce_one(body: CinemaSingleProduceBody):
     """Queue one stored Director shot without replacing the film's shot list."""
@@ -5026,14 +5046,9 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
     mode = "continue" if shot.get("mode") == "continue" else "t2v"
     parent_id = None
     if mode == "continue":
-        previous = next((s for s in reversed(shots[:index]) if str(s.get("text") or "").strip()), None)
-        if not previous:
-            raise HTTPException(400, "Devam için önceki sahne yok")
-        candidates = [j for j in _jobs if j.get("shot_id") == previous.get("id") and j.get("status") in ("queued", "running", "done")]
-        candidates.sort(key=lambda j: float(j.get("created_at") or 0))
-        if not candidates:
+        parent_id = _cinema_previous_clip(shots, body.shot_id)
+        if not parent_id:
             raise HTTPException(400, "Önceki sahnenin klibi yok; önce onu üretin")
-        parent_id = candidates[-1]["id"]
     audio = cinema._clean_audio(lib.get("audio"))
     silent = audio.get("mode") == "silent" or body.silent_audio
     head = "\n\n".join(x for x in (
@@ -5339,6 +5354,20 @@ async def cinema_produce(body: CinemaProduceBody):
 
     prompts = [cinema.apply_look(s["text"], head) for s in to_queue]
     modes = [s["mode"] for s in to_queue]
+    parent_job_ids = []
+    full_shots = lib.get("shots") or []
+    for i, shot in enumerate(to_queue):
+        parent_id = None
+        if shot.get("mode") == "continue":
+            index = next((n for n, s in enumerate(full_shots) if s.get("id") == shot.get("id")), -1)
+            previous = next((s for s in reversed(full_shots[:max(index, 0)]) if str(s.get("text") or "").strip()), None)
+            within_batch = i > 0 and previous and previous.get("id") == to_queue[i-1].get("id")
+            if not within_batch:
+                parent_id = _cinema_previous_clip(full_shots, str(shot.get("id") or ""))
+                if not parent_id:
+                    raise HTTPException(400, "Devam sahnesinin önceki klibi yok; önce onu üretin")
+        parent_job_ids.append(parent_id)
+
     # Face-lock refs: only character portraits named in the shots.
     # Location plates must not kill Multishot — they are not face lock.
     cast_refs: list[str] = []
@@ -5373,7 +5402,8 @@ async def cinema_produce(body: CinemaProduceBody):
             scheduler=body.scheduler,
             link_continue=False,
             append_to_chain=False,
-            continue_from_job_id=None,
+            continue_from_job_id=parent_job_ids[0] if parent_job_ids else None,
+            parent_job_ids=parent_job_ids,
             seed=body.seed,
             silent_audio=silent,
             purpose=purpose or "short_film",
@@ -7981,24 +8011,13 @@ async def _run_job(job: dict):
             for x in (job.get("ref_images") or [])
             if x and (job.get("ref_role") == "face" or mode in ("face", "face_continue"))
         ]
-        # Repair queued Cinema jobs created by older builds too.  They may have
-        # stored a location plate in `ref_images` as if it were a face reference.
-        # For a continuation, rebuild that list from named character cards only;
-        # the parent clip's final frame remains the actual continuation canvas.
-        if job.get("cinema_batch") and mode == "face_continue":
-            lib_now = cinema.load()
-            prompt_now = str(job.get("prompt") or "")
-            chars = cinema.bound_character_portraits(prompt_now, lib_now)
-            vehicles = cinema.bound_vehicle_stills(prompt_now, lib_now)
-            face_refs = list(dict.fromkeys([*chars, *vehicles]))[:8]
-            if face_refs:
-                job["ref_images"] = face_refs
-                job["ref_role"] = "face"
-            else:
-                mode = "continue"
-                job["mode"] = "continue"
-                job["ref_images"] = []
-                job["ref_role"] = None
+        if mode == "face_continue" and job.get("continue_from"):
+            mode = "continue"
+            job["mode"] = mode
+            job["ref_images"] = []
+            job["ref_role"] = None
+            job["h3_models"] = h3_models.resolve("fl2va")
+            face_refs = []
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
         lora_name, lora_strength = _lora_for_graph(job)

@@ -163,6 +163,10 @@ POST /api/loras/import     # { url, filename? } direct HF / .safetensors link
 
 [ComfyUI-H3-Multishot](https://github.com/jlucasmcrell/ComfyUI-H3-Multishot) (jlucasmcrell) is a **custom node pack**, not a LoRA. It welds 10–15s H3 blocks into **one take** (picture + audio, no cut at the join). Studio queues that as a single Comfy graph (`H3MultishotSampler`, CORE path — last-frame hand-off, no Motion-Context / JoyEcho). v2.7: decoded frames pass through **`H3ChainNormalize`** (colour/texture drift) and optional character **voice clips** (`voice_ref` / `_2` / `_3`) from the character card.
 
+Studio enables `preview_first_shot` for Multishot jobs. Once shot 1 decodes, the pack writes an early MP4 under `app/output/video/H3_FIRSTSHOT/`; this does not change the final chain. Studio keeps `low_ram_master` off because its current final-output graph consumes the in-memory master frames.
+
+In Scene settings, **Fast draft preview (TAE)** is an opt-in for testing composition and motion. It replaces only the video VAE decode with the Multishot pack's `H3TAEDecode`; sampling and audio still run normally. Expect softer, less accurate textures than a final render. Install [Kijai's H3 TAE checkpoint](https://huggingface.co/Kijai/MiniMax-H3-TAE) as `app/models/vae_approx/taeh3.safetensors` and restart ComfyUI before using it. If the checkbox is off, the normal video VAE path is unchanged.
+
 **Install (existing Pinokio install):** menu **Download Models → H3 Multishot (Seamless Chain) nodes**, or **Update**. Then **Stop → Start** so Comfy loads the pack.
 
 **Cinema:** **Kesintisiz zincir** (on when the pack is present). Shot texts are joined with `---` and render as one clip per **take** (max 8 shots, e.g. 8×5s = 40s). In JSON, `takes[]` is the scene list of **one continuing film**: “5 sahneli” = 5 takes × 8 shots (Sahne 1…5), then concat. A flat `sections[]` list still auto-chunks every 8. Pack limit is 8 shots **per take**, not per film. Uncheck it to use the older per-shot Continue chain (last-frame I2V, up to 80 shots).

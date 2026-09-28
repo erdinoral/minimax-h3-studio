@@ -12,7 +12,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema174" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema176" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -323,6 +323,7 @@
           <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step">Hızlı</button>
         </div>
         <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Step sayısı Ayarlar’daki kutudan gelir — LoRA zorlamaz.</p>
+        <label class="check"><input type="checkbox" id="fast-tae-preview" /> <span data-i18n="ayar.fastPreview">Hızlı taslak önizleme (TAE; final kalite değil)</span></label>
         <label class="check rewriter-toggle"><input type="checkbox" id="prompt-rewriter-enabled" /> <span id="prompt-optimize-label">Prompt’u LLM ile düzenle</span></label>
         <p class="muted mode-hint" id="prompt-rewriter-status">Yönetmen LLM kontrol ediliyor…</p>
         <label><span id="ayar-sampler-label">Sampler</span>
@@ -581,17 +582,17 @@
   <div class="overlay cinema-dock hidden" id="view-cinema">
     <div class="gallery-panel cinema-panel is-mode-seamless">
       <header>
-        <h2>Direktör · Sinema stüdyosu</h2>
-        <select id="cinema-film-select" title="Film"></select>
-        <button type="button" class="btn-ghost" id="btn-cinema-film-new">Yeni film</button>
-        <button type="button" class="btn-ghost" id="btn-cinema-film-delete">Filmi sil</button>
-        <input type="text" id="cinema-title" placeholder="Film adı" />
-        <button type="button" class="btn-ghost" id="btn-cinema-export">Zip</button>
-        <button type="button" class="btn-ghost" id="btn-cinema-json">JSON</button>
-        <label class="file-pick file-pick-inline">
-          <input type="file" id="cinema-import-file" class="file-pick-input" accept=".zip,.json,application/zip,application/json" />
-          <span class="file-pick-btn" id="cinema-import-btn">İçe aktar</span>
+        <div class="cinema-header-left">
+          <h2>Direktör · Sinema stüdyosu</h2>
+          <select id="cinema-film-select" title="Film"></select>
+          <button type="button" class="btn-ghost" id="btn-cinema-film-new">Yeni film</button>
+          <button type="button" class="btn-ghost" id="btn-cinema-film-delete">Filmi sil</button>
+        </div>
+        <label class="cinema-film-name">
+          <span id="cinema-film-name-label">Film adı</span>
+          <input type="text" id="cinema-title" placeholder="Film adı" />
         </label>
+        <input type="file" id="cinema-import-file" class="hidden" accept=".zip,.json,application/zip,application/json" tabindex="-1" aria-hidden="true" />
       </header>
       <div class="cinema-setup-bar">
         <div class="film-pills" id="cinema-pills"></div>
@@ -610,18 +611,26 @@
             <button type="button" class="chip" data-speed="draft" id="cinema-speed-draft">Taslak</button>
             <button type="button" class="chip" data-speed="final" id="cinema-speed-final">Final</button>
           </div>
-          <div class="chips cinema-quality-chips" id="cinema-quality-chips">
-            <button type="button" class="chip" data-quality="352">352p</button>
-            <button type="button" class="chip" data-quality="480">480p</button>
-            <button type="button" class="chip" data-quality="608">608p</button>
-            <button type="button" class="chip" data-quality="736">736p</button>
-            <button type="button" class="chip" data-quality="768">768p</button>
-            <button type="button" class="chip" data-quality="1088">1088p</button>
+          <div class="res-drop" id="cinema-quality-drop">
+            <button type="button" class="res-drop-toggle" id="cinema-quality-toggle" aria-expanded="false" aria-controls="cinema-quality-chips">
+              <span id="cinema-quality-current">736p</span>
+              <span class="res-drop-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="res-drop-panel chips cinema-quality-chips" id="cinema-quality-chips">
+              <button type="button" class="chip" data-quality="352">352p</button>
+              <button type="button" class="chip" data-quality="480">480p</button>
+              <button type="button" class="chip" data-quality="608">608p</button>
+              <button type="button" class="chip" data-quality="736">736p</button>
+              <button type="button" class="chip" data-quality="768">768p</button>
+              <button type="button" class="chip" data-quality="1088">1088p</button>
+            </div>
           </div>
-          <label id="cinema-post-label">Son geçiş</label>
-          <div class="chips cinema-quality-chips" id="cinema-post-pass-chips">
-            <button type="button" class="chip on" data-post="">Kapalı</button>
-            <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
+          <div class="cinema-post-switch" id="cinema-post-pass-chips">
+            <label class="cinema-seamless-switch">
+              <span id="cinema-post-upscale-label">1.5× upscale</span>
+              <input type="checkbox" id="cinema-post-upscale" />
+              <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+            </label>
             <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
           <label><span id="cinema-steps-label">Adım</span>
@@ -643,17 +652,24 @@
             <span id="cinema-seed-lock-label">Seed kilidi</span>
           </label>
           <div class="cinema-lora-row">
-            <label class="cinema-lora-field"><span id="cinema-lora-label">LoRA</span>
-              <select id="cinema-lora-select">
-                <option value="">Yok (varsayılan)</option>
-              </select>
+            <div class="res-drop cinema-lora-drop" id="cinema-lora-drop">
+              <button type="button" class="res-drop-toggle" id="cinema-lora-toggle" aria-expanded="false" aria-controls="cinema-lora-panel">
+                <span id="cinema-lora-label">LoRA</span>
+                <span class="res-drop-chevron" aria-hidden="true"></span>
+              </button>
+              <div class="res-drop-panel cinema-lora-panel" id="cinema-lora-panel">
+                <select id="cinema-lora-select" class="hidden" multiple>
+                  <option value="">Yok (varsayılan)</option>
+                </select>
+                <div class="lora-check-list" id="cinema-lora-check-list" aria-label="Director LoRA selection"></div>
+                <button type="button" class="btn-secondary" id="btn-cinema-lora-save">Kaydet</button>
+              </div>
+            </div>
+            <label class="cinema-seamless-switch" title="Kesintisiz">
+              <span id="cinema-seamless-switch-label">Kesintisiz</span>
+              <input type="checkbox" id="cinema-seamless-toggle" checked />
+              <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
             </label>
-            <button type="button" class="btn-secondary" id="btn-cinema-lora-save">Kaydet</button>
-          </div>
-          <p class="muted mode-hint" id="cinema-lora-hint">Seç → Kaydet. İndirilmemişse otomatik iner, sonra üretime hazır olur.</p>
-          <div class="chips cinema-studio-mode" id="cinema-studio-mode" role="group" aria-label="Üretim modu">
-            <button type="button" class="chip on" data-cinemamode="seamless" id="cinema-mode-seamless">Kesintisiz · ~1 dk</button>
-            <button type="button" class="chip" data-cinemamode="assets" id="cinema-mode-assets">Karakter / mekan</button>
           </div>
           <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
           <p class="muted mode-hint" id="cinema-mode-hint">JSON takes[] = sahne. 5 sahneli = 5 take × 8 shot, hikaye devam. Karakter/mekan kartı gerekmez</p>
@@ -1218,8 +1234,8 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema174" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema176" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema173" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema174" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema176" charset="utf-8"></script>
 </body>
 </html>

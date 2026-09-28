@@ -1907,12 +1907,13 @@ def force_continue_chain(
     shots: list[dict[str, Any]],
     brief: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Normalize production into section chains.
+    """Shot list order is the chain. A new video is a separate scene.
 
-    The first shot in every ``sectionId`` is a new T2V video. Only a later shot
-    that explicitly requests ``linkToPrev: "continue"`` in that same section
-    inherits the prior clip's last frame. A location/action change must get a new
-    section ID even when the character remains the same.
+    Shot 1 is always a new T2V video. A later shot continues only when it asks
+    for ``linkToPrev: "continue"`` and stays in the same section — that clip
+    starts from the previous shot's last frame. A new section, or an explicit
+    standalone/new shot, is a hard cut: the scene may change, and it does not
+    inherit the previous clip's last frame.
     """
     out: list[dict[str, Any]] = []
     previous_section = ""
@@ -1927,9 +1928,12 @@ def force_continue_chain(
             else:
                 section_number += 1
                 section = f"scene-{section_number}"
-        is_same_section = bool(i and section == previous_section)
+        same_scene = bool(i and section == previous_section)
         shot["sectionId"] = section
-        shot["linkToPrev"] = "continue" if is_same_section and requested == "continue" else "standalone"
+        if same_scene and requested == "continue":
+            shot["linkToPrev"] = "continue"
+        else:
+            shot["linkToPrev"] = "standalone"
         out.append(shot)
         previous_section = section
     return out

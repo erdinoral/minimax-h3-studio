@@ -34,6 +34,7 @@ from lib.comfy import (
     build_multishot_prompt,
     detect_sage_mode,
     detect_multishot_pack,
+    detect_h3_tae,
     detect_vfi_model,
     enhance_ref_prompt,
     enhance_video_ref_prompt,
@@ -596,6 +597,18 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
         file=getattr(body, "lora_name", None) or "",
     )
     src = LoraSrc()
+    requested_names = str(getattr(body, "lora_name", None) or "").split("|")
+    if len(requested_names) > 1:
+        usable = []
+        for name in requested_names[:3]:
+            selected_spec = find_spec(file=name)
+            if _ok(selected_spec):
+                usable.append(selected_spec)
+        if usable:
+            src.lora_id = usable[0].get("id") or ""
+            src.lora_name = "|".join(spec["file"] for spec in usable)
+            src.lora_strength = getattr(body, "lora_strength", None)
+        return src, graph
     if _ok(char_spec):
         src.lora_id = char_id
         src.lora_name = char_spec.get("file")
@@ -1177,6 +1190,7 @@ class GenerateBody(BaseModel):
     lora_strength: Optional[float] = None
     sage_attention: Optional[str] = "auto"
     post_pass: Optional[str] = None
+    fast_preview: bool = False
     sheet_job: bool = False
 
     @field_validator("seed", "steps", mode="before")
@@ -2438,6 +2452,11 @@ async def generate(body: GenerateBody):
         mode = "audio_continue"
 
     await _free_llm_for_production()
+    if body.fast_preview and not detect_h3_tae(COMFY_ROOT):
+        raise HTTPException(
+            400,
+            "H3 TAE modeli bulunamadı: app/models/vae_approx/taeh3.safetensors",
+        )
     if continue_aspect:
         body.aspect = continue_aspect
     w, h = resolve_size(body.aspect, body.quality)
@@ -2518,6 +2537,7 @@ async def generate(body: GenerateBody):
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
         "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
         "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+        "fast_preview": bool(body.fast_preview),
         "sheet_job": bool(getattr(body, "sheet_job", False)),
         **lora_applied,
     }
@@ -2641,10 +2661,12 @@ async def batch(body: BatchBody):
     sampler = body.sampler or "res_multistep"
     scheduler = body.scheduler or "simple"
     base_steps, base_sampler, base_scheduler = steps, sampler, scheduler
-    # Face lock: body refs, else inherit from tip chain
+    # Face lock: for mixed New/Continue batches, bind portraits per shot only.
+    # Preloading every cast still into face_refs makes each Continue fight the
+    # previous last frame (especially after a mid-chapter New hard cut).
     face_refs: list[str] = []
     face_sz = "max"
-    if body.face_lock:
+    if body.face_lock and not use_per_shot:
         if body.ref_images and (body.ref_role or "face") == "face":
             face_refs = [str(x) for x in body.ref_images if x][:9]
             face_sz = body.ref_image_size or "max"
@@ -2668,10 +2690,11 @@ async def batch(body: BatchBody):
                 want_continue = True
             elif append_global and i == 0 and start_from_tip:
                 want_continue = True
+            if i == 0 and use_per_shot:
+                # This package always opens on a new video. The production
+                # list is a different queue and must not supply the first frame.
+                want_continue = False
             if want_continue:
-                if not parent and not body.continue_from_job_id:
-                    extra_tip = _chain_tip()
-                    parent = extra_tip["id"] if extra_tip else None
                 if parent:
                     cont_from = parent
                     mode = "face_continue" if face_refs else "continue"
@@ -2679,9 +2702,12 @@ async def batch(body: BatchBody):
                     cont_from = None
                     mode = "face" if face_refs else "t2v"
             else:
+                # New video: hard cut. Scene may change. Do not carry the
+                # previous clip's last frame or its continuation refs.
                 cont_from = None
-                # First shot with face lock → Ref2VA face; else plain t2v
-                mode = "face" if face_refs else "t2v"
+                parent = None
+                face_refs = []
+                mode = "t2v"
             bound = cinema.bind_prompt(
                 text,
                 existing_refs=list(face_refs) if face_refs else [],
@@ -2695,29 +2721,31 @@ async def batch(body: BatchBody):
             vehicle_refs = cinema.bound_vehicle_stills(text, lib)
             shot_text = bound["prompt"] if bound.get("hits") else text
             if mode in ("continue", "face_continue"):
-                # Continue = parent last frame + character portraits + named vehicles.
-                # Vehicles stay because craft often leaves the last frame (boarding,
-                # cutaways) and must not morph into a different ship/car.
-                # Location plates stay out — they fight the last frame.
+                # Continue = parent last frame + characters/vehicles named in THIS shot.
+                # Do not carry the whole chapter cast — that fights the last frame
+                # after a mid-chapter New (e.g. new→cont×3 → new → cont×7).
+                shot_refs = []
                 if body.face_lock and character_refs:
-                    face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
-                shot_refs = list(face_refs) if face_refs else []
+                    shot_refs.extend(character_refs)
                 if vehicle_refs:
-                    shot_refs = list(dict.fromkeys([*shot_refs, *vehicle_refs]))[:9]
+                    shot_refs = list(dict.fromkeys([*shot_refs, *vehicle_refs]))
+                shot_refs = shot_refs[:9]
                 if shot_refs:
                     mode = "face_continue"
+                else:
+                    mode = "continue"
             else:
-                shot_refs = bound["ref_images"] or (list(face_refs) if face_refs else [])
+                shot_refs = bound["ref_images"] or (
+                    list(character_refs) if body.face_lock and character_refs else []
+                )
             if bound.get("hits") and shot_refs and mode == "t2v":
                 mode = (
                     "face"
                     if bound["has_character"] and not bound["has_location"]
                     else "ref"
                 )
-            # Accumulate character portraits only. Location plates on an initial
-            # Ref2VA shot must not leak into later Continue jobs — vehicles are
-            # re-bound per shot from the prompt instead.
-            if body.face_lock and character_refs:
+            # Optional accumulate only for non-per-shot global face chains.
+            if not use_per_shot and body.face_lock and character_refs:
                 face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
             lora_src, graph = _lora_src_for_shot(body, bound, mode)
             shot_steps, shot_sampler, shot_scheduler = _with_lora_preset(
@@ -2748,7 +2776,11 @@ async def batch(body: BatchBody):
                 "continue_from": cont_from,
                 "first_frame_name": None,
                 "ref_images": shot_refs,
-                "ref_image_size": "max" if shot_refs else None,
+                "ref_image_size": (
+                    "match"
+                    if mode in ("continue", "face_continue")
+                    else ("max" if shot_refs else None)
+                ),
                 "ref_role": (
                     "face"
                     if mode in ("face", "face_continue")
@@ -5318,12 +5350,6 @@ async def cinema_produce(body: CinemaProduceBody):
     still_lock = bool(cast_refs)
     if want_seamless and still_lock:
         want_seamless = False
-    # Chapter / partial produce: if the first queued scene is Continue, seed
-    # last-frame from the previous film scene's clip (usually previous chapter).
-    chain_parent: Optional[str] = None
-    first_mode = str((to_queue[0] or {}).get("mode") or "").lower() if to_queue else ""
-    if first_mode in ("continue", "devam", "i2v", "last_frame"):
-        chain_parent = _cinema_previous_continue_parent(lib, to_queue[0])
     if want_seamless:
         queued = await _queue_cinema_seamless(
             body=body,
@@ -5336,28 +5362,27 @@ async def cinema_produce(body: CinemaProduceBody):
             purpose=purpose or "short_film",
         )
     else:
-        chain_modes = modes
-        if body.seamless and not skipped_done:
-            chain_modes = ["t2v"] + ["continue"] * max(0, len(prompts) - 1)
         bb = BatchBody(
             prompts=prompts,
-            modes=chain_modes,
+            modes=modes,
             duration=body.duration,
             aspect=body.aspect,
             quality=body.quality,
             steps=body.steps if body.steps and body.steps > 0 else 20,
             sampler=body.sampler,
             scheduler=body.scheduler,
-            link_continue=bool(body.link_continue or body.seamless),
-            append_to_chain=bool(body.append_to_chain) or bool(skipped_done) or bool(chain_parent),
-            continue_from_job_id=chain_parent,
+            link_continue=False,
+            append_to_chain=False,
+            continue_from_job_id=None,
             seed=body.seed,
             silent_audio=silent,
             purpose=purpose or "short_film",
             face_lock=True,
-            ref_images=cast_refs or None,
-            ref_role="face" if cast_refs else None,
-            ref_image_size="max" if cast_refs else None,
+            # Per-shot character/vehicle bind in batch — do not flood Continues
+            # with every cast still from the chapter (breaks last-frame after New).
+            ref_images=None,
+            ref_role=None,
+            ref_image_size=None,
             lora_id=body.lora_id,
             lora_name=body.lora_name,
             lora_strength=body.lora_strength,
@@ -7370,7 +7395,7 @@ async def director_commit(body: DirectorCommitBody):
                 sampler=sampler,
                 scheduler=scheduler,
                 link_continue=bool(link),
-                append_to_chain=bool(link),
+                append_to_chain=False,
                 face_lock=True,
                 music_id=music_id,
                 silent_audio=silent,
@@ -7961,9 +7986,11 @@ async def _run_job(job: dict):
         # For a continuation, rebuild that list from named character cards only;
         # the parent clip's final frame remains the actual continuation canvas.
         if job.get("cinema_batch") and mode == "face_continue":
-            face_refs = cinema.bound_character_portraits(
-                str(job.get("prompt") or ""), cinema.load()
-            )
+            lib_now = cinema.load()
+            prompt_now = str(job.get("prompt") or "")
+            chars = cinema.bound_character_portraits(prompt_now, lib_now)
+            vehicles = cinema.bound_vehicle_stills(prompt_now, lib_now)
+            face_refs = list(dict.fromkeys([*chars, *vehicles]))[:8]
             if face_refs:
                 job["ref_images"] = face_refs
                 job["ref_role"] = "face"
@@ -8012,6 +8039,7 @@ async def _run_job(job: dict):
                 post_pass=_normalize_post_pass(job.get("post_pass")),
                 chain_normalize=bool(job.get("chain_normalize", True)),
                 voice_names=[str(x) for x in (job.get("voice_refs") or []) if x][:3],
+                preview_first_shot=True,
             )
         elif mode in ("ref", "face", "v2v"):
             refs = [str(x) for x in (job.get("ref_images") or []) if x]
@@ -8038,6 +8066,7 @@ async def _run_job(job: dict):
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
                 post_pass=_normalize_post_pass(job.get("post_pass")),
+                fast_preview_tae=detect_h3_tae(COMFY_ROOT) if job.get("fast_preview") else None,
             )
         elif mode == "audio_continue":
             if not first or not job.get("continue_from"):
@@ -8075,6 +8104,7 @@ async def _run_job(job: dict):
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
                 post_pass=_normalize_post_pass(job.get("post_pass")),
+                fast_preview_tae=detect_h3_tae(COMFY_ROOT) if job.get("fast_preview") else None,
             )
         elif mode == "face_continue" or (
             (mode == "continue" or job.get("continue_from")) and face_refs
@@ -8095,7 +8125,7 @@ async def _run_job(job: dict):
                 role="face_continue",
                 n_face=n_face,
             )
-            size_mode = job.get("ref_image_size") or "max"
+            size_mode = "match"
             prompt = build_ref2va_prompt(
                 text=text,
                 ref_image_names=refs,
@@ -8114,9 +8144,11 @@ async def _run_job(job: dict):
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
                 post_pass=_normalize_post_pass(job.get("post_pass")),
+                fast_preview_tae=detect_h3_tae(COMFY_ROOT) if job.get("fast_preview") else None,
             )
             job["mode"] = "face_continue"
             job["ref_role"] = "face"
+            job["ref_image_size"] = "match"
         else:
             prompt = build_t2v_prompt(
                 text=prompt_text,
@@ -8136,6 +8168,7 @@ async def _run_job(job: dict):
                 lora_strength=lora_strength,
                 sage_attention=_sage_mode(job),
                 post_pass=_normalize_post_pass(job.get("post_pass")),
+                fast_preview_tae=detect_h3_tae(COMFY_ROOT) if job.get("fast_preview") else None,
             )
         job["progress"] = 10
         job["progress_label"] = "Comfy kuyruğa"

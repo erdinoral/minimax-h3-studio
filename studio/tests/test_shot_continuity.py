@@ -20,7 +20,10 @@ class ShotContinuityTests(unittest.TestCase):
             {"h3Prompt": "X enters a castle.", "sectionId": "castle", "linkToPrev": "continue"},
             {"h3Prompt": "X crosses the castle hall.", "sectionId": "castle", "linkToPrev": "continue"},
         ])
-        self.assertEqual([s["linkToPrev"] for s in result], ["standalone", "continue", "standalone", "continue"])
+        self.assertEqual(
+            [s["linkToPrev"] for s in result],
+            ["standalone", "continue", "standalone", "continue"],
+        )
 
     def test_plain_script_shots_start_new_videos(self):
         result = normalize_produce_shots(script="X in a car.\n\n---\n\nX at a castle.")

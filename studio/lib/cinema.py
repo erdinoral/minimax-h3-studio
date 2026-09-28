@@ -1721,38 +1721,25 @@ def apply_reentry_modes(
     shots: list[dict[str, Any]],
     lib: Optional[dict[str, Any]] = None,
 ) -> list[dict[str, Any]]:
-    """Hard-cut (t2v) when a shot has no character continuity with the previous shot.
+    """Honor the shot list. Do not rewrite it from the production queue or cast overlap.
 
-    Same beat / same cast overlap → keep continue. Cutaway or different cast with
-    no overlap → t2v so last-frame drift does not steal character identity.
-
-    JSON / editor shots with mode_locked (or section_id) keep their declared
-    new/continue choice — including a locked Continue at the start of a
-    chapter produce batch (so last-frame can chain from the previous chapter).
+    The first shot of a produce batch is always a new video. Later shots keep
+    the mode written on the card: continue uses the previous shot in this list.
     """
-    lib = lib or load()
     out: list[dict[str, Any]] = []
-    prev: set[str] = set()
     for i, raw in enumerate(shots or []):
         if not isinstance(raw, dict):
             continue
         shot = dict(raw)
-        text = str(shot.get("text") or shot.get("h3Prompt") or "")
-        curr = character_ids_in_text(text, lib)
         mode = str(shot.get("mode") or "t2v").lower()
         if mode in ("devam", "i2v", "last_frame"):
             mode = "continue"
-        locked = bool(shot.get("mode_locked") or shot.get("section_id"))
         if i == 0:
-            # Unlocked first shot of a produce batch starts fresh; locked
-            # Continue keeps last-frame (parent resolved at queue time).
-            if not locked:
-                mode = "t2v"
-        elif not locked and curr and not (curr & prev):
+            mode = "t2v"
+        elif mode not in ("continue", "t2v"):
             mode = "t2v"
         shot["mode"] = mode
         out.append(shot)
-        prev = curr
     return out
 
 

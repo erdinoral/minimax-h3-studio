@@ -413,6 +413,7 @@ def build_t2v_prompt(
     lora_strength: float = 0.75,
     sage_attention: Optional[str] = "auto",
     post_pass: str = "",
+    fast_preview_tae: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build FL2VA graph. silent_audio skips AudioVAE load + VAEDecodeAudio (faster end)."""
     m = {**DEFAULT_MODELS, **(models or {})}
@@ -528,6 +529,11 @@ def build_t2v_prompt(
             "inputs": {"image": last_frame_name},
         }
         g["104"]["inputs"]["last_frame"] = ["201", 0]
+    if fast_preview_tae:
+        g["10"] = {
+            "class_type": "H3TAEDecode",
+            "inputs": {"samples": ["14", 0], "tae_name": fast_preview_tae},
+        }
     return apply_image_post(
         apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),
         post_pass=post_pass,
@@ -543,6 +549,18 @@ def detect_multishot_pack(comfy_root: Optional[Path] = None) -> bool:
     """True when jlucasmcrell's Seamless Chain pack is on disk (Comfy must restart to load it)."""
     root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
     return (root / "custom_nodes" / MULTISHOT_PACK / "__init__.py").is_file()
+
+
+def detect_h3_tae(comfy_root: Optional[Path] = None) -> Optional[str]:
+    """Return the installed H3 draft decoder, if present; finals use the full VAE."""
+    root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
+    folder = root / "models" / "vae_approx"
+    if not folder.is_dir():
+        return None
+    for path in sorted(folder.glob("taeh3*.safetensors")):
+        if path.is_file() and path.stat().st_size > 0:
+            return path.name
+    return None
 
 
 def build_multishot_prompt(
@@ -566,6 +584,7 @@ def build_multishot_prompt(
     post_pass: str = "",
     chain_normalize: bool = True,
     voice_names: Optional[list[str]] = None,
+    preview_first_shot: bool = True,
 ) -> dict[str, Any]:
     """CORE Seamless Chain: H3MultishotSampler (last-frame weld, no Motion-Context).
 
@@ -612,6 +631,7 @@ def build_multishot_prompt(
                 "sampler_name": sampler,
                 "scheduler": scheduler,
                 "save_every_shot": False,
+                "preview_first_shot": bool(preview_first_shot),
             },
         },
         "92": {
@@ -684,6 +704,7 @@ def build_ref2va_prompt(
     lora_strength: float = 0.75,
     sage_attention: Optional[str] = "auto",
     post_pass: str = "",
+    fast_preview_tae: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build Ref2VA graph (MiniMaxH3ReferenceToVideo + Ref2VA UNET).
 
@@ -834,6 +855,11 @@ def build_ref2va_prompt(
                 "audio": ["23", 0],
                 "fps": 24.0,
             },
+        }
+    if fast_preview_tae:
+        g["10"] = {
+            "class_type": "H3TAEDecode",
+            "inputs": {"samples": ["14", 0], "tae_name": fast_preview_tae},
         }
     return apply_image_post(
         apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),

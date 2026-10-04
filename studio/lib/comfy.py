@@ -35,26 +35,34 @@ def enhance_ref_prompt(
     if n_images <= 0:
         return prompt
     has_tags = any(f"<Picture {i}>" in prompt for i in range(1, n_images + 1))
-    if role == "face_continue":
-        # Pictures 1..n_face = identity; last picture = previous last frame
-        nf = max(1, min(int(n_face or max(1, n_images - 1)), n_images))
-        face_pics = ", ".join(f"<Picture {i}>" for i in range(1, nf + 1))
-        frame_pic = f"<Picture {n_images}>" if n_images > nf else None
+    if role in ("face_continue", "asset_continue"):
+        # Picture 1 is the previous final frame, not a portrait. Portraits
+        # follow only as identity references; never ask H3 to animate them.
+        face_pics = ", ".join(f"<Picture {i}>" for i in range(2, n_images + 1))
         lock = (
-            f"{face_pics} {'is' if nf == 1 else 'are'} the face / identity reference "
-            f"for the main character. Lock this person's face, age, hair, eyes and skin "
-            f"exactly — do not change who they are."
+            "<Picture 1> is the exact final frame of the previous clip and the "
+            "opening frame of this clip at 0.00 seconds. Preserve its framing, "
+            "camera, pose, costume, lighting and scene layout. Continue the "
+            "action from this frame without restarting the scene."
         )
-        if frame_pic:
-            lock += (
-                f" {frame_pic} is the exact last frame of the previous clip and is the "
-                f"primary composition lock: keep its camera, framing, body pose, wardrobe "
-                f"state, lighting, and ongoing action at the first moment. Continue forward "
-                f"from that instant while keeping the face locked to {face_pics}. Do not "
-                f"restart from a portrait pose or establishing still."
+        if face_pics:
+            identity_rule = (
+                f" {face_pics} {'is' if n_images == 2 else 'are'} identity reference(s) only. "
+                "Use their facial features for the matching named character already "
+                "present in <Picture 1>; do not use their background, pose, framing "
+                "or lighting. Never animate a portrait or turn it into the scene."
             )
-        if "identity" not in prompt.lower() or frame_pic and frame_pic not in prompt:
-            prompt = f"{lock}\n\n{prompt}".strip()
+            if role == "asset_continue":
+                identity_rule = (
+                    f" {face_pics} are the separately numbered asset references. "
+                    "Use each for its assigned subject identity, vehicle geometry, entity appearance "
+                    "or environment materials only. They are not opening frames. Do not copy their "
+                    "camera angle, pose, studio background, panel layout or composition. "
+                    "Never turn a reference sheet into a filmed poster or collage. "
+                    "The opening composition and ongoing motion come from <Picture 1>."
+                )
+            lock += identity_rule
+        prompt = f"{lock}\n\n{prompt}".strip()
     elif role == "face":
         pics = ", ".join(f"<Picture {i}>" for i in range(1, n_images + 1))
         lock = (
@@ -870,6 +878,27 @@ def build_ref2va_prompt(
     )
 
 
+def add_h3_first_frame_guide(graph: dict[str, Any], first_frame_name: str) -> dict[str, Any]:
+    """Anchor frame zero on a Ref2VA graph while retaining its identity references."""
+    if not first_frame_name:
+        raise ValueError("Devam için başlangıç karesi gerekli")
+    if graph.get("104", {}).get("class_type") != "MiniMaxH3ReferenceToVideo":
+        raise ValueError("İlk kare kılavuzu Ref2VA grafiği gerektirir")
+    graph["450"] = {"class_type": "LoadImage", "inputs": {"image": first_frame_name}}
+    graph["451"] = {
+        "class_type": "MiniMaxH3AddGuide",
+        "inputs": {
+            "positive": ["104", 0],
+            "latent": ["104", 1],
+            "vae": ["11", 0],
+            "image": ["450", 0],
+            "frame_idx": 0,
+        },
+    }
+    graph["16"]["inputs"]["conditioning"] = ["451", 0]
+    return graph
+
+
 def detect_vfi_model(comfy_root: Optional[Path] = None) -> Optional[str]:
     """First FILM/RIFE file in models/frame_interpolation, if any."""
     root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
@@ -964,8 +993,9 @@ def apply_lora(
         st = 0.75
     src = ["6", 0]
     for i, name in enumerate(names):
+        weight = float(strength.get(name, 0.75)) if isinstance(strength, dict) else st
         nid = "7" if i == 0 else f"lora_stack_{i + 1}"
-        g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": src, "lora_name": name, "strength_model": st}}
+        g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": src, "lora_name": name, "strength_model": weight}}
         for other_id, node in g.items():
             if other_id == nid:
                 continue

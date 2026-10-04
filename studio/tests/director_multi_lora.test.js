@@ -16,13 +16,14 @@ test('Director keeps three picks, disables the fourth and sends the full stack',
     elements[id] = {boxes, querySelectorAll: () => boxes};
   }
   elements['view-cinema'] = {classList: {contains: () => false}};
-  const context = vm.createContext({$: id => elements[id], state: {loraCatalog: catalog}, updateLoraHint() {}, appliedLoraSpec: () => null});
+  const context = vm.createContext({$: id => elements[id], state: {loraCatalog: catalog}, updateLoraHint() {}, loraWeight: spec => spec.id === "b" ? 0 : spec.strength, appliedLoraSpec: () => null});
   const start = source.indexOf('  function selectedLoraIds(');
   const end = source.indexOf('  function collectGenerateKnobs()', start);
   vm.runInContext(source.slice(start, end), context);
   vm.runInContext('syncLoraSelection(["a", "b", "c"]);', context);
   assert.equal(elements['cinema-lora-check-list'].boxes[3].disabled, true);
   assert.equal(vm.runInContext('collectLoraPayload().lora_name', context), 'a.safetensors|b.safetensors|c.safetensors');
+  assert.equal(vm.runInContext('collectLoraPayload().lora_strengths["b.safetensors"]', context), 0);
   vm.runInContext('syncLoraSelection(["a", "b", "c", "d"]);', context);
   assert.equal(elements['cinema-lora-select'].selectedOptions.length, 3);
   assert.ok(source.includes('syncLoraSelection(pickedIds.length ? pickedIds : [ready.id])'));

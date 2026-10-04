@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import httpx
 import psutil  # Moved from _acquire_single_instance for consistency
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
@@ -31,6 +31,7 @@ from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
     build_ref2va_prompt,
+    add_h3_first_frame_guide,
     build_multishot_prompt,
     detect_sage_mode,
     detect_multishot_pack,
@@ -40,11 +41,12 @@ from lib.comfy import (
     enhance_video_ref_prompt,
     MULTISHOT_MAX_SHOTS,
 )
-from lib import h3_models
+from lib import h3_models, optional_models
+from lib.lora_guidance import guidance, guidance_block, save_guidance
 from lib import qwen_still
 from lib.loras import (
     LORAS_DIR,
-    apply_trigger,
+    apply_selected_triggers,
     dest_for,
     file_ready,
     filename_from_url,
@@ -110,6 +112,8 @@ from lib.notify import NotifyService
 from lib.ollama import OllamaClient
 from lib import slog
 from lib import cinema
+from lib import cinema_planner
+from lib import asset_references
 from lib import donors as donor_roll
 
 ROOT = Path(__file__).resolve().parent
@@ -536,6 +540,7 @@ def _lora_fields(body: Any) -> dict[str, Any]:
         "lora_id": (spec or {}).get("id") or (getattr(body, "lora_id", None) or ""),
         "lora_name": name,
         "lora_strength": float(strength) if strength is not None else 0.75,
+        "lora_strengths": getattr(body, "lora_strengths", {}) or {},
     }
 
 
@@ -573,6 +578,7 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
         lora_id = ""
         lora_name = None
         lora_strength = None
+        lora_strengths = {}
 
     def _ok(spec: Optional[dict[str, Any]]) -> bool:
         if not spec or not spec.get("file"):
@@ -587,16 +593,19 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
     char_id = ""
     char_strength = None
     for h in (bound or {}).get("hits") or []:
-        if h.get("kind") == "character" and h.get("lora_id"):
+        if h.get("kind") == "character" and cinema.uses_lora(h) and h.get("lora_id"):
             char_id = str(h["lora_id"]).strip()
             char_strength = h.get("lora_strength")
             break
     char_spec = find_spec(lora_id=char_id) if char_id else None
+    if char_id and (not _ok(char_spec) or not spec_ready(char_spec)):
+        raise HTTPException(400, "Seçili karakter LoRA bu çekimin modeliyle uyumlu değil veya hazır değil")
     glob_spec = find_spec(
         lora_id=getattr(body, "lora_id", None) or "",
         file=getattr(body, "lora_name", None) or "",
     )
     src = LoraSrc()
+    src.lora_strengths = dict(getattr(body, "lora_strengths", {}) or {})
     requested_names = str(getattr(body, "lora_name", None) or "").split("|")
     if len(requested_names) > 1:
         usable = []
@@ -608,11 +617,14 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
             src.lora_id = usable[0].get("id") or ""
             src.lora_name = "|".join(spec["file"] for spec in usable)
             src.lora_strength = getattr(body, "lora_strength", None)
+            for selected_spec in usable:
+                src.lora_strengths.setdefault(selected_spec["file"], selected_spec.get("strength", 0.8))
         return src, graph
     if _ok(char_spec):
         src.lora_id = char_id
         src.lora_name = char_spec.get("file")
         src.lora_strength = char_strength if char_strength is not None else char_spec.get("strength")
+        src.lora_strengths[char_spec["file"]] = src.lora_strength
     elif _ok(glob_spec):
         src.lora_id = getattr(body, "lora_id", None) or glob_spec.get("id") or ""
         src.lora_name = getattr(body, "lora_name", None) or glob_spec.get("file")
@@ -620,7 +632,7 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
     return src, graph
 
 
-def _lora_for_graph(job: dict) -> tuple[Optional[str], float]:
+def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]:
     name = (job.get("lora_name") or "").strip()
     if not name:
         return None, 1.0
@@ -641,6 +653,9 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float]:
     st = job.get("lora_strength")
     if st is None:
         st = (spec or {}).get("strength") or 0.8
+    weights = job.get("lora_strengths") or {}
+    if weights:
+        return "|".join(usable), {item: float(weights.get(item, st)) for item in usable}
     return "|".join(usable), float(st)
 
 
@@ -669,6 +684,8 @@ notifier = NotifyService(NOTIFY_SETTINGS_FILE)
 
 # job queue state
 _jobs: list[dict] = []
+from lib.review_api import create_router as create_review_router
+app.include_router(create_review_router(llm, lambda: _jobs))
 _gallery: list[dict] = []
 _sessions: dict[str, dict] = {}
 _queue_task: Optional[asyncio.Task] = None
@@ -1161,6 +1178,10 @@ def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
 
 
 class GenerateBody(BaseModel):
+    asset_auto_match: bool = False
+    asset_bindings: Optional[list[dict[str, Any]]] = None
+    asset_film_id: Optional[str] = None
+    ref_role: Optional[str] = None
     prompt: str = Field(..., min_length=1)
     duration: int = Field(5, description="4 | 5 | 6 | 8 | 10 | 15")
     aspect: str = "16:9"
@@ -1190,6 +1211,7 @@ class GenerateBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
     sage_attention: Optional[str] = "auto"
     post_pass: Optional[str] = None
     fast_preview: bool = False
@@ -1234,6 +1256,11 @@ class MotionTransferChainBody(GenerateBody):
 
 
 class BatchBody(BaseModel):
+    asset_auto_match: bool = False
+    first_frame_names: Optional[list[Optional[str]]] = None
+    asset_bindings: Optional[list[dict[str, Any]]] = None
+    shot_bindings: Optional[list[Optional[list[dict[str, Any]]]]] = None
+    asset_film_id: Optional[str] = None
     prompts: list[str]
     duration: int = 5
     aspect: str = "16:9"
@@ -1259,6 +1286,7 @@ class BatchBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
     sage_attention: Optional[str] = "auto"
     # Parallel to prompts: "t2v" | "continue". When set, first/continue is per shot.
     modes: Optional[list[str]] = None
@@ -1287,6 +1315,7 @@ class CinemaProduceBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
     sage_attention: Optional[str] = "auto"
     link_continue: bool = True
     append_to_chain: bool = False
@@ -1324,6 +1353,7 @@ class CinemaSingleProduceBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
     sage_attention: Optional[str] = "auto"
     post_pass: Optional[str] = None
     image_provider: str = "minimax"
@@ -1346,6 +1376,7 @@ class StoryboardBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -1370,6 +1401,7 @@ class StoryboardBody(BaseModel):
 
 
 class DirectorChatBody(BaseModel):
+    lora_names: list[str] = Field(default_factory=list, max_length=3)
     session_id: Optional[str] = None
     message: str = ""
     model: Optional[str] = None
@@ -1399,6 +1431,7 @@ class DirectorCommitBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
     post_pass: Optional[str] = None
     prompt_rewriter_enabled: bool = False
     sage_attention: Optional[str] = "auto"
@@ -1410,6 +1443,7 @@ class DirectorRewriteShotsBody(BaseModel):
 
 
 class PromptRewriteBody(BaseModel):
+    lora_names: list[str] = Field(default_factory=list, max_length=3)
     prompt: str = Field(..., min_length=1)
     context: Optional[str] = None
     prompt_rewriter_enabled: bool = True
@@ -2277,6 +2311,48 @@ async def _free_comfy_if_idle(*, reason: str) -> None:
         slog.warn("comfy vram empty skip", err=e, reason=reason)
 
 
+def _asset_plan(text, bindings, lib, existing=(), continuation=False, film_id=None):
+    if film_id and str(lib.get("film_id") or "") != film_id:
+        raise HTTPException(409, "Asset seçimi başka filme ait; referansları yenileyin")
+    try:
+        return asset_references.resolve(text, bindings, lib,
+            lambda f: (REFS / f).is_file() or (COMFY_INPUT / f).is_file(),
+            existing, continuation)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _scene_asset_bindings(body):
+    # A standalone Scene must not inherit a film actor just because its name occurs.
+    if body.asset_bindings is not None:
+        return body.asset_bindings
+    if body.lane == "director" or body.asset_auto_match:
+        return None
+    return []
+
+
+class AssetReferencePreviewBody(BaseModel):
+    prompt: str = ""
+    asset_bindings: Optional[list[dict[str, Any]]] = None
+    asset_film_id: Optional[str] = None
+    ref_images: list[str] = Field(default_factory=list)
+    continuation: bool = False
+    first_frame_name: Optional[str] = None
+
+
+@app.post("/api/asset-references/preview")
+async def asset_reference_preview(body: AssetReferencePreviewBody):
+    plan = _asset_plan(body.prompt, body.asset_bindings, cinema.load(), body.ref_images,
+        continuation=body.continuation or bool(body.first_frame_name), film_id=body.asset_film_id)
+    offset = 1 if body.continuation or body.first_frame_name else 0
+    return {"references": [{"picture": i + 1 + offset, "file": row["file"],
+        "asset": (row.get("asset") or {}).get("name", "User reference"),
+        "kind": (row.get("asset") or {}).get("kind", "general")}
+        for i, row in enumerate(plan["rows"])],
+        "prompt": asset_references.prompt(body.prompt, plan["rows"], start_index=offset),
+        "first_frame_reserved": bool(offset)}
+
+
 @app.post("/api/generate")
 async def generate(body: GenerateBody):
     if body.duration not in ALLOWED_DURATIONS:
@@ -2301,10 +2377,17 @@ async def generate(body: GenerateBody):
             body.prompt = rewritten.strip()
 
     mode = (body.mode or "").strip().lower()
+    reference_plan = None if body.sheet_job else _asset_plan(
+        body.prompt, _scene_asset_bindings(body), cinema.load(), body.ref_images or [],
+        continuation=bool(body.first_frame_name or mode in ("continue", "devam") or
+            (body.continue_from_job_id and mode not in ("t2v", "new", "yeni", "i2v", "image_to_video"))),
+        film_id=body.asset_film_id)
     continue_from = body.continue_from_job_id
     first_frame = body.first_frame_name
+    if first_frame and (Path(first_frame).name != first_frame or not ((REFS / first_frame).is_file() or (COMFY_INPUT / first_frame).is_file())):
+        raise HTTPException(400, "Başlangıç karesi bulunamadı")
     last_frame = body.last_frame_name
-    ref_images = list(body.ref_images or [])
+    ref_images = list(reference_plan["ref_images"] if reference_plan else (body.ref_images or []))
     ref_videos = list(body.ref_videos or [])
     ref_image_size = (body.ref_image_size or "").strip().lower() or None
     continue_aspect = None
@@ -2417,29 +2500,18 @@ async def generate(body: GenerateBody):
         ref_images = []
         ref_videos = []
 
-    cinema_bound = cinema.bind_prompt(
-        body.prompt,
-        existing_refs=ref_images,
-        lora_id=getattr(body, "lora_id", None) or "",
-    )
-    # I2V / FL2VA (first/last frame) stay on those graphs; otherwise named
-    # cinema assets become Ref2VA pictures when the prompt mentions them.
-    # Continue must stay last-frame I2V — character names must not steal Ref2VA.
-    skip_cinema_images = (
-        (bool(first_frame or last_frame) and mode == "t2v")
-        or mode in ("continue", "face_continue")
-    )
-    if cinema_bound["hits"] and not skip_cinema_images:
-        ref_images = cinema_bound["ref_images"]
-        if mode == "t2v" and ref_images:
-            mode = (
-                "face"
-                if cinema_bound["has_character"] and not cinema_bound["has_location"]
-                else "ref"
-            )
-            continue_from = None
+    cinema_bound = reference_plan or cinema.bind_prompt(body.prompt, existing_refs=ref_images)
+    if reference_plan:
+        ref_images = reference_plan["ref_images"]
+        if ref_images and mode == "t2v":
+            mode = "face_continue" if first_frame else "ref"
+        elif ref_images and mode == "continue":
+            mode = "face_continue"
+    # The manifest is annotated only after final image ordering is known.
 
     ref_role = None
+    if mode == "face" and reference_plan and reference_plan["hits"]:
+        mode = "ref"
     if mode == "face":
         ref_role = "face"
         ref_image_size = "max" if (ref_image_size or "max") == "max" else "match"
@@ -2483,7 +2555,7 @@ async def generate(body: GenerateBody):
         prompt_txt = enhance_ref_prompt(
             prompt_txt,
             n_images=len(ref_images),
-            role="face" if mode == "v2v" and ref_images else "general",
+            role="face" if mode == "v2v" and ref_images and not (reference_plan and reference_plan["hits"]) else "general",
         )
         if ref_videos:
             prompt_txt = enhance_video_ref_prompt(
@@ -2498,12 +2570,9 @@ async def generate(body: GenerateBody):
             "silentAudio": silent,
         },
     )
-    prompt_txt = apply_trigger(
-        prompt_txt,
-        find_spec(
-            lora_id=lora_applied.get("lora_id") or "",
-            file=lora_applied.get("lora_name") or "",
-        ),
+    prompt_txt = apply_selected_triggers(
+        prompt_txt, lora_id=lora_applied.get("lora_id") or "",
+        file=lora_applied.get("lora_name") or "",
     )
     job = {
         "id": str(uuid.uuid4()),
@@ -2522,6 +2591,7 @@ async def generate(body: GenerateBody):
         "first_frame_name": first_frame,
         "last_frame_name": last_frame,
         "ref_images": ref_images,
+        "reference_manifest": reference_plan["rows"] if reference_plan else None,
         "ref_videos": ref_videos,
         "include_video_audio": bool(body.include_video_audio),
         "audio_continuity": bool(body.audio_continuity),
@@ -2689,6 +2759,19 @@ async def batch(body: BatchBody):
     parent: Optional[str] = tip["id"] if tip else None
     start_from_tip = bool(parent)
     lib = cinema.load()
+    if body.shot_bindings is not None and len(body.shot_bindings) != len(prompts):
+        raise HTTPException(400, "Asset seçim listesi çekim sayısıyla eşleşmiyor")
+    if body.first_frame_names is not None and len(body.first_frame_names) != len(prompts):
+        raise HTTPException(400, "Başlangıç karesi listesi çekim sayısıyla eşleşmiyor")
+    frame_names = list(body.first_frame_names or [None] * len(prompts))
+    for frame in frame_names:
+        if frame and (Path(frame).name != frame or not ((REFS / frame).is_file() or (COMFY_INPUT / frame).is_file())):
+            raise HTTPException(400, "Başlangıç karesi bulunamadı: " + frame)
+    plans = [_asset_plan(text,
+        body.shot_bindings[i] if body.shot_bindings is not None else _scene_asset_bindings(body),
+        lib, body.ref_images or [],
+        continuation=bool(frame_names[i]) or (shot_modes[i] in ("continue", "devam", "i2v", "last_frame") if i < len(shot_modes) else bool(i or tip)),
+        film_id=body.asset_film_id) for i, text in enumerate(prompts)]
     async with _lock:
         for i, text in enumerate(prompts):
             seed = body.seed if body.seed >= 0 else (int(time.time() * 1000) + i) % (2**53)
@@ -2719,47 +2802,23 @@ async def batch(body: BatchBody):
                 parent = None
                 face_refs = []
                 mode = "t2v"
-            bound = cinema.bind_prompt(
-                text,
-                existing_refs=list(face_refs) if face_refs else [],
-                lora_id=getattr(body, "lora_id", None) or "",
-            )
-            # A scene/location plate is useful for a new shot, but it must
-            # never enter a continuation's identity pool.  Otherwise Ref2VA
-            # can restart every clip from the same location still instead of
-            # the previous video's final frame.
-            character_refs = cinema.bound_character_portraits(text, lib)
-            vehicle_refs = cinema.bound_vehicle_stills(text, lib)
-            shot_text = bound["prompt"] if bound.get("hits") else text
+            bound = plans[i]
+            shot_text = bound["prompt"]
+            shot_refs = bound["ref_images"]
             if mode in ("continue", "face_continue"):
-                # Exact continuation uses FL2VA first_frame, never Ref2VA identity stills.
-                shot_refs = []
-                mode = "continue"
-                shot_text = text
-            else:
-                shot_refs = bound["ref_images"] or (
-                    list(character_refs) if body.face_lock and character_refs else []
-                )
-            if bound.get("hits") and shot_refs and mode == "t2v":
-                mode = (
-                    "face"
-                    if bound["has_character"] and not bound["has_location"]
-                    else "ref"
-                )
-            # Optional accumulate only for non-per-shot global face chains.
-            if not use_per_shot and body.face_lock and character_refs:
-                face_refs = list(dict.fromkeys([*face_refs, *character_refs]))[:9]
+                mode = "face_continue" if shot_refs else "continue"
+            elif shot_refs:
+                mode = "face_continue" if frame_names[i] else "ref"
+            # Each shot's resolved manifest supplies its references. Do not
+            # accumulate another shot's portraits into this selection.
             lora_src, graph = _lora_src_for_shot(body, bound, mode)
             shot_steps, shot_sampler, shot_scheduler = _with_lora_preset(
                 lora_src, base_steps, base_sampler, base_scheduler, graph=graph
             )
             shot_lora = _lora_fields(lora_src)
-            shot_text = apply_trigger(
-                shot_text,
-                find_spec(
-                    lora_id=shot_lora.get("lora_id") or "",
-                    file=shot_lora.get("lora_name") or "",
-                ),
+            shot_text = apply_selected_triggers(
+                shot_text, lora_id=shot_lora.get("lora_id") or "",
+                file=shot_lora.get("lora_name") or "",
             )
             job = {
                 "id": str(uuid.uuid4()),
@@ -2776,8 +2835,9 @@ async def batch(body: BatchBody):
                 "scheduler": shot_scheduler,
                 "progress_label": "sırada",
                 "continue_from": cont_from,
-                "first_frame_name": None,
+                "first_frame_name": frame_names[i] if not cont_from else None,
                 "ref_images": shot_refs,
+                "reference_manifest": bound["rows"],
                 "ref_image_size": (
                     "match"
                     if mode in ("continue", "face_continue")
@@ -2804,6 +2864,9 @@ async def batch(body: BatchBody):
                     if (body.lane or "").strip().lower() == "director" or body.cinema_batch
                     else "scene"
                 ),
+                "film_id": str((lib or {}).get("film_id") or "") if (
+                    (body.lane or "").strip().lower() == "director" or body.cinema_batch
+                ) else "",
                 "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
                 "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
                 **shot_lora,
@@ -3225,7 +3288,8 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
 
 
 @app.post("/api/refs/upload-video")
-async def upload_ref_video(file: UploadFile = File(...)):
+async def upload_ref_video(file: UploadFile = File(...), start: Optional[float] = Form(None),
+                           end: Optional[float] = Form(None)):
     """Upload a reference video to Studio + Comfy input/ for LoadVideo."""
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı — video yüklenemez")
@@ -3243,6 +3307,16 @@ async def upload_ref_video(file: UploadFile = File(...)):
     REF_VIDEOS.mkdir(parents=True, exist_ok=True)
     dest = REF_VIDEOS / local_name
     dest.write_bytes(raw)
+    source_name = local_name
+    if start is not None or end is not None:
+        from lib.media_trim import trim_reference
+        local_name = f"h3_vid_{rid}_trim.mp4"
+        try:
+            dest = await asyncio.to_thread(trim_reference, dest, REF_VIDEOS / local_name, "video", start, end)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(502, "Reference trim failed") from exc
     try:
         comfy_name = await comfy.upload_video(dest, local_name)
     except Exception as e:
@@ -3254,11 +3328,14 @@ async def upload_ref_video(file: UploadFile = File(...)):
         "url": f"/api/ref-videos/{local_name}",
         "bytes": len(raw),
         "kind": "video",
+        "source_filename": source_name,
+        "trim": {"start": start, "end": end} if start is not None else None,
     }
 
 
 @app.post("/api/refs/upload-audio")
-async def upload_ref_audio(file: UploadFile = File(...)):
+async def upload_ref_audio(file: UploadFile = File(...), start: Optional[float] = Form(None),
+                           end: Optional[float] = Form(None)):
     """Upload a voice clip to Studio + Comfy input/ for LoadAudio / Multishot voice_ref."""
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı — ses yüklenemez")
@@ -3276,6 +3353,16 @@ async def upload_ref_audio(file: UploadFile = File(...)):
     REF_AUDIOS.mkdir(parents=True, exist_ok=True)
     dest = REF_AUDIOS / local_name
     dest.write_bytes(raw)
+    source_name = local_name
+    if start is not None or end is not None:
+        from lib.media_trim import trim_reference
+        local_name = f"h3_voice_{rid}_trim.wav"
+        try:
+            dest = await asyncio.to_thread(trim_reference, dest, REF_AUDIOS / local_name, "audio", start, end)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(502, "Reference trim failed") from exc
     try:
         comfy_name = await comfy.upload_audio(dest, local_name)
     except Exception as e:
@@ -3287,6 +3374,8 @@ async def upload_ref_audio(file: UploadFile = File(...)):
         "url": f"/api/ref-audio/{local_name}",
         "bytes": len(raw),
         "kind": "audio",
+        "source_filename": source_name,
+        "trim": {"start": start, "end": end} if start is not None else None,
     }
 
 
@@ -3421,7 +3510,7 @@ async def prompt_rewrite(body: PromptRewriteBody):
     if not await llm.healthy():
         raise HTTPException(503, "Yönetmen LLM hazır değil — Ayarlar’dan model/key aç")
     out = await _rewrite_scene_text(
-        raw, enabled=True, context=body.context or "", require=True
+        raw, enabled=True, context=(body.context or "") + guidance_block(body.lora_names), require=True
     )
     return {"prompt": out, "rewritten": out.strip() != raw}
 
@@ -3503,6 +3592,7 @@ class CinemaDirectorBody(BaseModel):
     logline: Optional[str] = None
     prompt_rewriter_enabled: bool = False
     stream: bool = True
+    lora_names: list[str] = Field(default_factory=list, max_length=3)
 
 
 def _brief_from_cinema_board(
@@ -3620,6 +3710,7 @@ async def _cinema_director_run(body: CinemaDirectorBody, on_status=None) -> dict
         total_seconds=body.total_seconds,
         logline=str(body.logline or "").strip(),
     )
+    brief["lora_names"] = body.lora_names
     # If no cast yet but role text exists, seed characters via outline LLM
     if not brief.get("characters") and role:
         brief["logline"] = brief.get("logline") or role[:240]
@@ -4116,11 +4207,9 @@ async def _queue_cinema_seamless(
             lora_src, steps, sampler, scheduler, graph="fl2va"
         )
         lora_bits = _lora_fields(lora_src)
-        trig_spec = find_spec(
+        texts = [apply_selected_triggers(t,
             lora_id=lora_bits.get("lora_id") or "",
-            file=lora_bits.get("lora_name") or "",
-        )
-        texts = [apply_trigger(t, trig_spec) for t in texts]
+            file=lora_bits.get("lora_name") or "") for t in texts]
         script = "\n---\n".join(texts)
         seed = (base_seed + take_i - 1) if body.seed >= 0 else (base_seed + take_i - 1) % (2**53)
         take_title = str((chunk_parsed[0] or {}).get("take_title") or "").strip()
@@ -4161,6 +4250,7 @@ async def _queue_cinema_seamless(
             "cinema_batch": cinema_batch,
             "batch_id": cinema_batch,
             "lane": "director",
+            "film_id": str((lib or {}).get("film_id") or ""),
             "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
             "voice_refs": _voice_refs_from_hits(merged_hits.get("hits") or []),
             "chain_normalize": True,
@@ -4446,7 +4536,8 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
     panel_paths = [dest]
     if kind in ("character", "creature", "vehicle"):
         try:
-            panel_paths = cinema.split_tripanel_still(dest, REFS, f"h3_sheet_{rid}")
+            splitter = cinema.split_vehicle_still if kind == "vehicle" else cinema.split_tripanel_still
+            panel_paths = splitter(dest, REFS, f"h3_sheet_{rid}")
         except Exception as e:
             slog.warn_job(job, "sheet still split", err=e)
             panel_paths = [dest]
@@ -4463,13 +4554,6 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
     images = uploaded if auto_only else (uploaded + images)
     found["images"] = images[: cinema.MAX_ASSET_IMAGES]
     cinema.upsert_asset(kind, found)
-    # Persist into global library so film switches / empty saves don't lose the sheet
-    try:
-        lib_saved = cinema.save_film_asset_to_library(kind, aid)
-        job["library_id"] = lib_saved.get("id")
-        job["library_saved"] = True
-    except Exception as e:
-        slog.warn_job(job, "sheet library save", err=e)
     job["sheet_still_url"] = uploaded[0]["url"]
     job["sheet_still_urls"] = [row["url"] for row in uploaded]
     job["sheet_attached"] = True
@@ -4518,7 +4602,10 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı")
     try:
-        if body.image_provider == "image_studio":
+        sheet_asset = next((x for x in cinema.load().get("characters", [])
+                            if body.kind == "character" and body.asset_id and x.get("id") == body.asset_id), None)
+        # H3 character weights cannot be applied to a Qwen image model.
+        if body.image_provider == "image_studio" and not (sheet_asset or {}).get("lora_id"):
             return await _queue_cinema_qwen_sheet_job(
                 kind=body.kind or "character", name=body.name, notes=body.notes or "",
                 asset_id=body.asset_id, quality=body.quality, steps=body.steps,
@@ -4545,7 +4632,11 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
 
 async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
     """Put a still in H3's ordinary FIFO queue so it appears in Production List."""
-    kind, _ = cinema.asset_kind_key(kwargs.get("kind") or "character")
+    kind, key = cinema.asset_kind_key(kwargs.get("kind") or "character")
+    actor = next((a for a in cinema.load().get(key, [])
+                  if kwargs.get("asset_id") and a.get("id") == kwargs["asset_id"]), None)
+    if kind == "character" and (actor or {}).get("lora_id"):
+        return await _queue_cinema_sheet_job(**kwargs)
     name = str(kwargs.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "Kart adı gerekli")
@@ -4556,6 +4647,7 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
         "id": uuid.uuid4().hex,
         "mode": "qwen_sheet",
         "lane": "director",
+        "film_id": str(cinema.load().get("film_id") or ""),
         "status": "queued",
         "progress": 0,
         "progress_label": "Qwen görseli sırada",
@@ -4670,7 +4762,8 @@ async def _generate_cinema_image_studio_sheet(
     shutil.copy2(source, sheet_source)
     paths = [sheet_source]
     if kind != "location":
-        paths = cinema.split_tripanel_still(sheet_source, REFS, sheet_source.stem)
+        splitter = cinema.split_vehicle_still if kind == "vehicle" else cinema.split_tripanel_still
+        paths = splitter(sheet_source, REFS, sheet_source.stem)
     uploaded = []
     for path in paths:
         comfy_name = await comfy.upload_image(path, path.name)
@@ -4688,10 +4781,6 @@ async def _generate_cinema_image_studio_sheet(
         "images": uploaded if auto_only else (uploaded + old_images)[:cinema.MAX_ASSET_IMAGES],
         **({"source_ref": ref_image} if ref_image else {}),
     })
-    try:
-        cinema.save_film_asset_to_library(kind, asset["id"])
-    except Exception as exc:
-        slog.warn("image studio sheet library save", err=exc)
     return {"asset": asset, "kind": kind, "prompt": prompt, "image_provider": "image_studio", "prompt_id": prompt_id}
 
 
@@ -4716,6 +4805,9 @@ async def _queue_cinema_sheet_job(
     name = (name or "").strip()
     if not name:
         raise ValueError("ad gerekli")
+    selected_actor = next((a for a in cinema.load().get("characters", []) if asset_id and a.get("id") == asset_id), None)
+    if kind == "character" and selected_actor and cinema.uses_lora(selected_actor):
+        raise ValueError("LoRA kullan açıkken karakter görseli üretilmez")
     notes = (notes or "").strip()
     style_key = normalize_style(style) if style else "realistic"
     if not style:
@@ -4739,6 +4831,17 @@ async def _queue_cinema_sheet_job(
          if asset_id and str(x.get("id") or "") == str(asset_id)),
         None,
     )
+    character_lora = None
+    if kind == "character" and previous_asset and cinema.uses_lora(previous_asset):
+        character_lora = find_spec(lora_id=previous_asset["lora_id"])
+        if not character_lora or not spec_ready(character_lora):
+            raise ValueError("Karakter LoRA dosyası hazır değil")
+        graph = "ref2va" if has_ref else "fl2va"
+        if graph not in (character_lora.get("graphs") or ["fl2va", "ref2va"]):
+            raise ValueError("Karakter LoRA bu görsel üretim biçimiyle uyumlu değil")
+        trigger = str(previous_asset.get("trigger") or "").strip()
+        if trigger:
+            prompt = trigger + ", " + prompt
     asset_payload: dict[str, Any] = {
         **(previous_asset or {}),
         "name": name,
@@ -4767,7 +4870,11 @@ async def _queue_cinema_sheet_job(
         "sheet_job": True,
     }
     still = still_catalog_spec()
-    if still and spec_ready(still):
+    if character_lora:
+        gen_kwargs["lora_id"] = character_lora["id"]
+        gen_kwargs["lora_name"] = character_lora["file"]
+        gen_kwargs["lora_strength"] = previous_asset.get("lora_strength", 0.7)
+    elif still and spec_ready(still):
         gen_kwargs["lora_id"] = still.get("id") or ""
         gen_kwargs["lora_name"] = still.get("file") or ""
         gen_kwargs["lora_strength"] = still.get("strength") or 1.0
@@ -4795,6 +4902,7 @@ async def _queue_cinema_sheet_job(
             j["frame_length"] = duration_to_length(dur)
             j["duration"] = dur
             j["lane"] = "director"
+            j["film_id"] = str(cinema.load().get("film_id") or "")
             ref_bit = (
                 " +yüz" if has_ref and kind == "character" else (" +mekân" if has_ref else "")
             )
@@ -4813,6 +4921,8 @@ async def _queue_cinema_sheet_job(
 
 def _asset_needs_sheet(asset: Any, *, force: bool = False) -> bool:
     if not isinstance(asset, dict):
+        return False
+    if cinema.uses_lora(asset):
         return False
     if not str(asset.get("name") or "").strip():
         return False
@@ -5037,6 +5147,12 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
             kind = str(asset.get("kind") or "")
             if kind not in ("character", "creature", "vehicle", "location") or not _asset_needs_sheet(asset):
                 continue
+            if kind == "character" and asset.get("lora_id"):
+                if not any(j.get("sheet_asset_id") == asset.get("id") and j.get("status") in ("queued", "running") for j in _jobs):
+                    await _queue_cinema_sheet_job(kind=kind, name=asset.get("name") or "", notes=asset.get("notes") or "",
+                                                  asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
+                                                  aspect=body.aspect, style=style)
+                raise HTTPException(409, "LoRA karakter görseli hazırlanıyor; tamamlanınca sahneyi tekrar üretin")
             await _generate_cinema_image_studio_sheet(
                 kind=kind, name=str(asset.get("name") or ""), notes=str(asset.get("notes") or ""),
                 asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
@@ -5057,17 +5173,18 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
         "" if silent else cinema.cast_voice_bible(lib),
     ) if x)
     prompt = cinema.apply_look(str(shot["text"]), head)
-    refs = cinema.bound_character_portraits(prompt, lib)[:9]
+    refs = []
     batch_id = str(uuid.uuid4())[:8]
     queued = await batch(BatchBody(
         prompts=[prompt], modes=[mode], continue_from_job_id=parent_id,
+        shot_bindings=[shot.get("bindings")], first_frame_names=[shot.get("first_frame_name") or None],
         link_continue=False, append_to_chain=False,
         duration=body.duration, aspect=body.aspect, quality=body.quality,
         steps=body.steps, seed=body.seed, silent_audio=silent,
         purpose=body.purpose, sampler=body.sampler, scheduler=body.scheduler,
         ref_images=refs or None, ref_role="face" if refs else None,
         lora_id=body.lora_id, lora_name=body.lora_name,
-        lora_strength=body.lora_strength, sage_attention=body.sage_attention,
+        lora_strength=body.lora_strength, lora_strengths=body.lora_strengths, sage_attention=body.sage_attention,
         post_pass=body.post_pass, cinema_batch=batch_id,
         score_id=audio.get("score_id") or None, lane="director",
     ))
@@ -5377,6 +5494,9 @@ async def cinema_produce(body: CinemaProduceBody):
                 cast_refs.append(f)
     cast_refs = cast_refs[:9]
     still_lock = bool(cast_refs)
+    if any(shot.get("first_frame_name") or _asset_plan(p, shot.get("bindings"), lib)["ref_images"]
+           for p, shot in zip(prompts, to_queue)):
+        want_seamless = False
     if want_seamless and still_lock:
         want_seamless = False
     if want_seamless:
@@ -5394,6 +5514,8 @@ async def cinema_produce(body: CinemaProduceBody):
         bb = BatchBody(
             prompts=prompts,
             modes=modes,
+            shot_bindings=[s.get("bindings") for s in to_queue],
+            first_frame_names=[s.get("first_frame_name") or None for s in to_queue],
             duration=body.duration,
             aspect=body.aspect,
             quality=body.quality,
@@ -5415,7 +5537,7 @@ async def cinema_produce(body: CinemaProduceBody):
             ref_image_size=None,
             lora_id=body.lora_id,
             lora_name=body.lora_name,
-            lora_strength=body.lora_strength,
+            lora_strength=body.lora_strength, lora_strengths=body.lora_strengths,
             sage_attention=_sage_mode(body),
             post_pass=body.post_pass,
             cinema_batch=cinema_batch,
@@ -5478,6 +5600,7 @@ class CinemaProduceFilmBody(BaseModel):
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
+    lora_strengths: dict[str, float] = Field(default_factory=dict)
     sage_attention: Optional[str] = "auto"
     link_continue: bool = True
     seamless: bool = False
@@ -5634,7 +5757,7 @@ async def cinema_produce_film(body: CinemaProduceFilmBody):
         scheduler=body.scheduler,
         lora_id=body.lora_id,
         lora_name=body.lora_name,
-        lora_strength=body.lora_strength,
+        lora_strength=body.lora_strength, lora_strengths=body.lora_strengths,
         sage_attention=_sage_mode(body),
         link_continue=bool(body.link_continue),
         append_to_chain=append_chain,
@@ -5859,10 +5982,13 @@ class CinemaImportJsonBody(BaseModel):
     keep_stills: bool = True
     redo_characters: bool = False
     chapter: Optional[str] = None
+    expected_film_id: Optional[str] = None
 
 
 @app.post("/api/cinema/import-json")
 async def cinema_import_json(body: CinemaImportJsonBody):
+    if body.expected_film_id and cinema.load().get("film_id") != body.expected_film_id:
+        raise HTTPException(409, "aiDirector.filmChanged")
     raw: Any = body.payload
     if raw is None and body.text:
         try:
@@ -5922,6 +6048,52 @@ async def cinema_import_json(body: CinemaImportJsonBody):
         sheets=len(sheets),
     )
     return out
+
+
+class CinemaAIPlanBody(BaseModel):
+    story: str = Field(min_length=1, max_length=24000)
+    shot_count: int = Field(default=12, ge=1, le=40)
+    film_id: str
+    ui_lang: str = "tr"
+    model: Optional[str] = None
+
+
+_cinema_ai_plan_lock = asyncio.Lock()
+
+
+@app.post("/api/cinema/ai-plan")
+async def cinema_ai_plan(body: CinemaAIPlanBody):
+    if not body.story.strip():
+        raise HTTPException(400, "aiDirector.needStory")
+    if _cinema_ai_plan_lock.locked():
+        raise HTTPException(409, "aiDirector.busy")
+    async with _cinema_ai_plan_lock:
+        current = cinema.load()
+        if current.get("film_id") != body.film_id:
+            raise HTTPException(409, "aiDirector.filmChanged")
+        if not await llm.healthy():
+            raise HTTPException(503, "aiDirector.offline")
+        model = await llm.resolve_model(body.model or _director_model)
+        clip = int(current.get("duration") or 5)
+        names = [a.get("lora_file") for a in current.get("characters", []) if a.get("use_lora") and a.get("lora_file")]
+        messages = cinema_planner.planning_messages(current, cinema.project_json_template(),
+            body.story.strip(), body.shot_count, clip, body.ui_lang, guidance_block(names))
+        try:
+            package = await cinema_planner.generate_package(llm, model, messages, current, body.shot_count)
+        except ValueError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        except Exception as exc:
+            slog.warn("cinema AI director failed", err=str(exc))
+            raise HTTPException(502, "aiDirector.failed") from exc
+        if cinema.load().get("film_id") != body.film_id:
+            raise HTTPException(409, "aiDirector.filmChanged")
+        chapters = set(current.get("chapters") or []) | {s.get("chapter") for s in current.get("shots", [])}
+        n = 1
+        while f"Bölüm {n}" in chapters or f"Chapter {n}" in chapters:
+            n += 1
+        # Planning returns a validated package. The UI applies it through the same JSON importer.
+        return {"ok": True, "payload": package, "film_id": body.film_id, "chapter": f"Bölüm {n}",
+                "shot_count": body.shot_count, "duration": clip, "model": model}
 
 
 @app.post("/api/cinema/import")
@@ -6314,6 +6486,7 @@ async def h3_models_get():
     return {
         "ok": True,
         "selected": h3_models.load(),
+        "engine": optional_models.engine_status(),
         "defaults": cat["defaults"],
         "options": cat["options"],
         "folders": cat["folders"],
@@ -6322,6 +6495,35 @@ async def h3_models_get():
             "ref2va": h3_models.resolve("ref2va"),
         },
     }
+
+
+class OptionalModelDownloadBody(BaseModel):
+    id: str
+
+
+class H3EngineBody(BaseModel):
+    engine: str
+
+
+@app.post("/api/h3-models/engine")
+async def h3_engine_set(body: H3EngineBody):
+    try:
+        return {"ok": True, "engine": optional_models.select_engine(body.engine)}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@app.get("/api/h3-models/optional")
+async def optional_models_get():
+    return {"models": optional_models.catalog()}
+
+
+@app.post("/api/h3-models/optional/download")
+async def optional_models_download(body: OptionalModelDownloadBody):
+    try:
+        return await optional_models.start(body.id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @app.post("/api/h3-models")
@@ -6338,6 +6540,28 @@ async def h3_models_set(body: H3ModelsBody):
             "ref2va": h3_models.resolve("ref2va"),
         },
     }
+
+
+class LoraGuidanceBody(BaseModel):
+    file: str = Field(min_length=1, max_length=250)
+    guide: str = Field(default="", max_length=4000)
+    triggers: str = Field(default="", max_length=500)
+
+
+@app.get("/api/loras/guidance")
+async def get_lora_guidance(file: str):
+    try:
+        return guidance(file)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, "loraGuide.failed") from exc
+
+
+@app.post("/api/loras/guidance")
+async def set_lora_guidance(body: LoraGuidanceBody):
+    try:
+        return save_guidance(body.file, body.guide, body.triggers)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, "loraGuide.failed") from exc
 
 
 @app.post("/api/loras/download")
@@ -6932,6 +7156,7 @@ async def _director_chat_impl(body: DirectorChatBody):
     # Ask model; empty answers are retried inside llm.chat, then local fallback
     sys = system_prompt()
     sys = (sys or "") + ui_lang_addendum(ui_lang)
+    sys += guidance_block(body.lora_names)
     sys = (sys or "") + _prompt_optimize_instruction(body.prompt_rewriter_enabled)
     if plan_mode:
         sys = (sys or "") + "\n\n" + PLAN_MODE_ADDENDUM
@@ -7408,6 +7633,7 @@ async def director_commit(body: DirectorCommitBody):
                 lora_id=lora_bits.get("lora_id") or None,
                 lora_name=lora_bits.get("lora_name") or None,
                 lora_strength=lora_bits.get("lora_strength"),
+                lora_strengths=lora_bits.get("lora_strengths") or {},
                 sage_attention=_sage_mode(body),
                 link_continue=bool(link),
                 seamless=False,
@@ -7433,6 +7659,7 @@ async def director_commit(body: DirectorCommitBody):
                 lora_id=lora_bits.get("lora_id") or None,
                 lora_name=lora_bits.get("lora_name") or None,
                 lora_strength=lora_bits.get("lora_strength"),
+                lora_strengths=lora_bits.get("lora_strengths") or {},
                 sage_attention=_sage_mode(body),
                 lane=commit_lane,
                 post_pass=_normalize_post_pass(body.post_pass),
@@ -8004,6 +8231,11 @@ async def _run_job(job: dict):
             job["width"], job["height"] = w, h
             _save_jobs()
         length = duration_to_length(int(job["duration"]))
+        if job.get("reference_manifest"):
+            job["reference_manifest"] = await asset_references.materialize(
+                job["reference_manifest"], REFS, COMFY_INPUT, comfy.upload_image)
+            job["ref_images"] = [row["file"] for row in job["reference_manifest"]]
+            _save_jobs()
         silent = bool(job.get("silent_audio") or job.get("music_id"))
         mode = (job.get("mode") or "t2v").lower()
         face_refs = [
@@ -8011,30 +8243,27 @@ async def _run_job(job: dict):
             for x in (job.get("ref_images") or [])
             if x and (job.get("ref_role") == "face" or mode in ("face", "face_continue"))
         ]
-        if mode == "face_continue" and job.get("continue_from"):
-            mode = "continue"
-            job["mode"] = mode
-            job["ref_images"] = []
-            job["ref_role"] = None
-            job["h3_models"] = h3_models.resolve("fl2va")
-            face_refs = []
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
         lora_name, lora_strength = _lora_for_graph(job)
         models = job.get("h3_models") or h3_models.resolve(h3_models.graph_for_mode(mode))
         prompt_text = str(job.get("prompt") or "").strip()
         if job.get("continue_from") and first and "CONTINUATION LOCK" not in prompt_text:
-            # The input frame is the physical continuation, but this explicit
-            # instruction prevents a detailed new scene prompt from making H3
-            # treat it as a fresh establishing shot.
-            prompt_text = (
-                "CONTINUATION LOCK: Begin on the exact final frame of the previous clip. "
-                "Preserve its composition, camera position, character placement, lighting, "
-                "and ongoing action at the first moment. Continue forward naturally from that "
-                "instant; do not restart the scene, return to a reference still, or introduce "
-                "a new establishing shot.\n\n"
-                + prompt_text
-            )
+            if mode == "face_continue" or face_refs:
+                prompt_text = (
+                    "CONTINUATION LOCK: Begin on the exact first-frame guide from the previous clip. "
+                    "Preserve its composition and ongoing action. Additional references define "
+                    "asset appearance only, never the opening pose or camera.\n\n"
+                    + prompt_text
+                )
+            else:
+                prompt_text = (
+                    "CONTINUATION LOCK: Begin on the exact final frame of the previous clip. "
+                    "Preserve its composition, camera position, character placement, lighting, "
+                    "and ongoing action at the first moment. Continue forward naturally from that "
+                    "instant; do not restart the scene or introduce a new establishing shot.\n\n"
+                    + prompt_text
+                )
         if mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
@@ -8066,7 +8295,7 @@ async def _run_job(job: dict):
                 raise RuntimeError("Referans görsel/video eksik")
             size_mode = job.get("ref_image_size") or ("max" if mode == "face" else "match")
             prompt = build_ref2va_prompt(
-                text=prompt_text,
+                text=asset_references.prompt(prompt_text, job["reference_manifest"]) if job.get("reference_manifest") else prompt_text,
                 ref_image_names=refs,
                 ref_video_names=ref_videos,
                 width=w,
@@ -8128,26 +8357,26 @@ async def _run_job(job: dict):
         elif mode == "face_continue" or (
             (mode == "continue" or job.get("continue_from")) and face_refs
         ):
-            # Face lock + last frame as extra Picture → Ref2VA identity across shots
+            # Make the previous final frame the primary Ref2VA image as well as
+            # the frame-zero guide. A portrait alone can otherwise become the
+            # generated scene despite the separate AddGuide conditioning.
             if not face_refs:
                 raise RuntimeError("Yüz kilidi portreleri eksik")
             if not first:
                 raise RuntimeError("Devam için last frame yok")
-            n_face = len(face_refs)
-            refs = list(face_refs) + [first]
-            if len(refs) > 9:
-                refs = face_refs[:8] + [first]
-                n_face = len(refs) - 1
+            refs = list(dict.fromkeys(x for x in face_refs if x != first))[:8]
+            manifest = job.get("reference_manifest")
+            manifest_rows = [{**next((r for r in (manifest or []) if r.get("file") == f), {}), "file": f} for f in refs]
             text = enhance_ref_prompt(
-                prompt_text,
-                n_images=len(refs),
-                role="face_continue",
-                n_face=n_face,
+                asset_references.prompt(prompt_text, manifest_rows, start_index=1) if manifest else prompt_text,
+                n_images=1 + len(refs),
+                role="asset_continue" if manifest else "face_continue",
+                n_face=len(refs),
             )
             size_mode = "match"
             prompt = build_ref2va_prompt(
                 text=text,
-                ref_image_names=refs,
+                ref_image_names=[first, *refs],
                 width=w,
                 height=h,
                 length=length,
@@ -8165,6 +8394,7 @@ async def _run_job(job: dict):
                 post_pass=_normalize_post_pass(job.get("post_pass")),
                 fast_preview_tae=detect_h3_tae(COMFY_ROOT) if job.get("fast_preview") else None,
             )
+            prompt = add_h3_first_frame_guide(prompt, first)
             job["mode"] = "face_continue"
             job["ref_role"] = "face"
             job["ref_image_size"] = "match"

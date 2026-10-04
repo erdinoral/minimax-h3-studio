@@ -49,7 +49,19 @@
       "visual_style": "ENGLISH. Look for THIS clip if it differs from setup; else leave empty to inherit.",
       "audio": "ENGLISH. Diegetic only. Becomes overall_soundscape. No BGM.",
       "music": "N/A unless the user asked for score. Becomes non_diegetic_music.",
-      "important": "Must-lock details (costume, prop, continuity). Keep short."
+      "important": "Must-lock details (costume, prop, continuity). Keep short.",
+      "reference_subjects": "Exact subject names and reference roles.",
+      "reference_environment": "Exact location name and reference role.",
+      "opening_frame": "Visible composition at the beginning of this clip.",
+      "ending_frame": "Visible composition at the end of this clip.",
+      "camera_framing": "Shot size.",
+      "camera_angle": "Camera height and viewpoint.",
+      "camera_movement": "Choose static, push in, pull out, zoom in, zoom out, pan left, pan right, tilt up, tilt down, truck left, truck right, pedestal up, pedestal down, arc or tracking.",
+      "camera_amplitude": "small, large, or empty for normal.",
+      "camera_speed": "slow, fast, or empty for normal.",
+      "camera_target": "Subject toward which the camera moves.",
+      "transition": "hard cut, reverse angle, or continuous.",
+      "beats": "Timed visible beats at 0s, 2s and 4s; consistent with action."
     },
     "strict_section_contract": {
       "why": "Studio does NOT guess character or location calls from prose inside prompt/action. It binds cards only from the exact section keys below.",
@@ -120,7 +132,8 @@
         "non_diegetic_music: {music}"
       ],
       "quality": "Author fields must be DETAILED so the composed prompt is rich. Short generic beats (he walks, she looks) are rejected. Each action = 2-5 present-tense visible sentences for THIS beat only: body, hands, eyes, weather, props, light. Camera = size + lens feel + move + height (not just close-up). audio = diegetic room/Foley only. music = N/A unless the user asked for score."
-    }
+    },
+    "editor_fields": "Fill the advanced reference, opening/ending frame, camera, transition and beats fields when applicable so the scene editor can display them; do not put them only inside action or camera prose."
   },
   "_user": {
     "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
@@ -168,7 +181,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -182,7 +207,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -196,7 +233,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -210,7 +259,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -224,7 +285,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -238,7 +311,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -252,7 +337,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -266,7 +363,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -280,7 +389,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -294,7 +415,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -308,7 +441,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     },
     {
       "mode": "continue",
@@ -322,7 +467,19 @@
       "visual_style": "",
       "audio": "",
       "music": "N/A",
-      "important": ""
+      "important": "",
+      "reference_subjects": "",
+      "reference_environment": "",
+      "opening_frame": "",
+      "ending_frame": "",
+      "camera_framing": "",
+      "camera_angle": "",
+      "camera_movement": "",
+      "camera_amplitude": "",
+      "camera_speed": "",
+      "camera_target": "",
+      "transition": "",
+      "beats": ""
     }
   ]
 }

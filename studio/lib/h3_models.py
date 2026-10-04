@@ -13,6 +13,8 @@ SETTINGS_PATH = STUDIO_ROOT / "data" / "h3_models.json"
 
 # Empty string = use Studio default for that slot
 SLOT_KEYS = ("unet", "unet_ref2va", "clip", "vae", "audio_vae")
+AUTO_INT8_VAE = "__auto_int8__"
+INT8_VIDEO_VAE = "minimax_h3_video_vae_int8_convrot.safetensors"
 
 FOLDER_MAP: dict[str, tuple[str, ...]] = {
     "unet": ("diffusion_models", "unet"),
@@ -69,6 +71,8 @@ def list_catalog() -> dict[str, Any]:
         hints = HINT_RE.get(key, ())
         files = sorted(files, key=lambda n: _rank(n, hints))
         out["options"][key] = files
+        if key == "vae":
+            out["options"][key].insert(0, AUTO_INT8_VAE)
         out["folders"][key] = list(folders)
     return out
 
@@ -104,7 +108,7 @@ def save(patch: dict[str, Any]) -> dict[str, str]:
             cur[k] = ""
             continue
         opts = set(_list_dir(*FOLDER_MAP[k]))
-        cur[k] = s if s in opts else ""
+        cur[k] = s if s in opts or (k == "vae" and s == AUTO_INT8_VAE) else ""
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(
         json.dumps(cur, indent=2, ensure_ascii=False) + "\n",
@@ -135,7 +139,7 @@ def resolve(graph: str = "fl2va", overrides: Optional[dict[str, Any]] = None) ->
 
     if saved.get("clip"):
         base["clip"] = saved["clip"]
-    if saved.get("vae"):
+    if saved.get("vae") and saved["vae"] != AUTO_INT8_VAE:
         base["vae"] = saved["vae"]
     if saved.get("audio_vae"):
         base["audio_vae"] = saved["audio_vae"]
@@ -146,6 +150,9 @@ def resolve(graph: str = "fl2va", overrides: Optional[dict[str, Any]] = None) ->
     else:
         if saved.get("unet"):
             base["unet"] = saved["unet"]
+    if saved.get("vae") == AUTO_INT8_VAE and "int8_convrot" in base["unet"].lower():
+        if INT8_VIDEO_VAE in _list_dir("vae"):
+            base["vae"] = INT8_VIDEO_VAE
     return base
 
 

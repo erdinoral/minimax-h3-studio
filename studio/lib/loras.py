@@ -319,12 +319,18 @@ def still_catalog_spec() -> Optional[dict[str, Any]]:
 def apply_trigger(text: str, spec: Optional[dict[str, Any]] = None) -> str:
     """Prepend a LoRA trigger word when the prompt does not already include it."""
     trig = str((spec or {}).get("trigger") or "").strip()
+    if (spec or {}).get("file"):
+        from .lora_guidance import guidance
+        try:
+            trig = guidance(spec["file"])["triggers"]
+        except (ValueError, OSError):
+            pass
     body = text or ""
     if not trig:
         return body
-    if trig.lower() in body.lower():
-        return body
-    return f"{trig}, {body}".strip()
+    missing = [word.strip() for word in re.split(r"[,\n]+", trig)
+               if word.strip() and word.strip().lower() not in body.lower()]
+    return f"{', '.join(missing)}, {body}".strip() if missing else body
 
 
 def find_spec(lora_id: str = "", file: str = "") -> Optional[dict[str, Any]]:
@@ -396,3 +402,12 @@ def filename_from_url(url: str, fallback: str = "") -> str:
     if fb.lower().endswith(".safetensors") and is_h3_lora_name(fb):
         return fb
     return ""
+
+
+def apply_selected_triggers(text: str, lora_id: str = "", file: str = "") -> str:
+    """Apply every loaded adapter's trigger, including secondary character adapters."""
+    names = [name.strip() for name in (file or "").split("|") if name.strip()]
+    specs = [find_spec(file=name) for name in names] if names else [find_spec(lora_id=lora_id)]
+    for spec in specs:
+        text = apply_trigger(text, spec)
+    return text

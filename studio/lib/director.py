@@ -2189,6 +2189,10 @@ def format_project_bible(brief: dict[str, Any]) -> str:
         f"silentAudio={_is_silent_brief(brief)}",
         "characters:",
     ]
+    from .lora_guidance import guidance_block
+    block = guidance_block(brief.get("lora_names") or [])
+    if block:
+        lines.insert(0, block)
     if isinstance(chars, list) and chars:
         for c in chars:
             if isinstance(c, dict):

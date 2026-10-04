@@ -34,7 +34,7 @@ test('film scene cards follow EN/TR without changing the saved scene text', () =
   workspace.render();
   assert.match(host.innerHTML, /Shot 1/);
   assert.match(host.innerHTML, /Draft/);
-  assert.match(host.innerHTML, /Section 1/);
+  assert.match(host.innerHTML, /Chapter 1/);
   assert.match(host.innerHTML, /A woman opens the door/);
   assert.doesNotMatch(host.innerHTML, /Çekim 1|Taslak|Bölümü üret/);
 

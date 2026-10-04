@@ -22,3 +22,9 @@ venv
 /studio/logs/
 /studio/__pycache__/
 /studio/lib/__pycache__/
+**/__pycache__/
+/patch*.py
+/patch*.js
+/docs/lora-inventory.json
+/docs/lora-roadmap.md
+/docs/singularity-comparison.json

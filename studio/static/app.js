@@ -32,9 +32,11 @@
     storyboardImages: [],
     cinema: { title: "", script: "", characters: [], locations: [], creatures: [], vehicles: [] },
     cinemaLibrary: { characters: [], locations: [], creatures: [], vehicles: [] },
+    cinemaLibraryView: false,
     cinemaSheetRefs: { character: null, location: null, creature: null, vehicle: null },
     selectedCharacter: null,
     galleryItems: [],
+    galleryLoaded: false,
     galleryKind: "video", // video | photo
     galleryVideoSelectMode: false,
     galleryVideoPickIds: [],
@@ -1329,8 +1331,11 @@
         tToast("toast.videoMax3");
         break;
       }
+      const range = await window.selectReferenceRange(file, "video");
+      if (range === null) continue;
       const fd = new FormData();
       fd.append("file", file);
+      if (range.start != null) { fd.append("start", String(range.start)); fd.append("end", String(range.end)); }
       tToast("toast.videoUploading", { name: file.name });
       try {
         const r = await fetch("/api/refs/upload-video", { method: "POST", body: fd });
@@ -1511,7 +1516,7 @@
           card.querySelectorAll("[data-field]").forEach((el) => {
             const field = el.dataset.field;
             if (!field) return;
-            item[field] = el.value;
+            item[field] = el.type === "checkbox" ? el.checked : el.value;
           });
         });
     };
@@ -1619,7 +1624,7 @@
 
   async function saveCinema(quiet) {
     if (!state.cinemaLoaded && !(state.cinema && (state.cinema.shots || []).length)) {
-      return;
+      return false;
     }
     const gen = ++cinemaSaveGen;
     const payload = cinemaPayload();
@@ -1649,10 +1654,10 @@
           cinemaSaveControllers.delete(gen);
         }
       }
-      if (gen !== cinemaSaveGen) return;
+      if (gen !== cinemaSaveGen) return false;
       const data = await r.json().catch(() => payload);
       if (!r.ok) throw new Error(errDetail(data));
-      if (gen !== cinemaSaveGen) return;
+      if (gen !== cinemaSaveGen) return false;
       const base = emptyCinema();
       // Prefer what we just sent for characters/locations so a racing DELETE/PATCH
       // cannot resurrect cards that the UI already removed.
@@ -1716,17 +1721,34 @@
         cinemaForceLocalChapters = false;
       }
       if (!quiet) toast(tt("cinema.saved"));
+      return true;
     } catch (e) {
-      if (controller.signal.aborted || gen !== cinemaSaveGen) return;
+      if (controller.signal.aborted || gen !== cinemaSaveGen) return false;
       if (!quiet) toast(String(e.message || e));
+      return false;
     }
   }
+
+  const LORA_CATEGORIES = ["speed", "character", "style", "motion", "other"];
+  function loraCategory(spec) {
+    let custom = {};
+    try { custom = JSON.parse(localStorage.getItem("h3-lora-categories") || "{}"); } catch {}
+    if (LORA_CATEGORIES.includes(custom[spec.file])) return custom[spec.file];
+    if (LORA_CATEGORIES.includes(spec.category)) return spec.category;
+    const name = (spec.id + " " + spec.file + " " + spec.label).toLowerCase();
+    if (/turbo|lightx|flashgen|fasth3|[468][-_ ]?step|pdd/.test(name)) return "speed";
+    if (/pinkfluffy|chr[_-]|character|albedo|masafy/.test(name)) return "character";
+    if (/combat|motion|physics|wushu/.test(name)) return "motion";
+    if (/cinematic|realism|photoreal|style|anime|animation/.test(name)) return "style";
+    return "other";
+  }
+  function loraCategoryLabel(category) { return tt("lora.category." + category); }
 
   function cinemaLoraOptions(selected) {
     const catalog = state.loraCatalog || [];
     const opts = ['<option value="">' + htmlEsc(tt("ayar.loraNoneOpt")) + "</option>"];
     catalog.forEach((spec) => {
-      if (!spec.id || !spec.file) return;
+      if (!spec.id || !spec.file || loraCategory(spec) !== "character") return;
       if (spec.ready === false) return;
       const graphs = spec.graphs || ["fl2va", "ref2va"];
       if (!graphs.includes("ref2va")) return;
@@ -1809,7 +1831,7 @@
     if (img) img.removeAttribute("src");
   }
 
-  function cinemaFolderHtml(item) {
+  function cinemaFolderHtml(item, kind) {
     const imgs = cinemaAssetImages(item);
     const slug = cinemaCallSlug(item?.name);
     const n = imgs.length;
@@ -1829,6 +1851,10 @@
             const call = im.name || slug + (i + 1);
             const src = htmlEsc(im.url || "/api/refs/" + im.file);
             const file = htmlEsc(im.file || "");
+            const vehicleAngle = kind === "vehicle" && /_(front|rear|right|left)\.png$/i.exec(im.file || "");
+            const angleLabels = document.documentElement.lang === "tr"
+              ? {front: "Ön", rear: "Arka", right: "Sağ yan", left: "Sol yan"}
+              : {front: "Front", rear: "Rear", right: "Right side", left: "Left side"};
             return (
               '<figure class="cinema-asset">' +
               '<img src="' +
@@ -1846,6 +1872,7 @@
               htmlEsc(tt("cinema.copyCallHint")) +
               '">' +
               htmlEsc(call) +
+              (vehicleAngle ? ' · ' + htmlEsc(angleLabels[vehicleAngle[1].toLowerCase()]) : '') +
               "</figcaption>" +
               '<a class="cinema-img-dl" href="' +
               src +
@@ -1878,11 +1905,12 @@
 
   function cinemaCardHtml(item, kind) {
     const isChar = kind === "character";
+    const useLora = isChar && (item.use_lora ?? !!item.lora_id);
     const nameLabel = isChar ? tt("cinema.charName") : tt("cinema.locName");
     const descLabel = tt("cinema.desc");
     const namePh = isChar ? "Ada" : "Rooftop";
     const descPh = isChar ? tt("cinema.charDescPh") : tt("cinema.locDescPh");
-    const lora = isChar
+    const lora = useLora
       ? '<label class="cinema-field-label">' +
         htmlEsc(tt("cinema.charLora")) +
         '</label><select data-field="lora_id">' +
@@ -1895,8 +1923,8 @@
       '" data-kind="' +
       kind +
       '">' +
-      cinemaFolderHtml(item) +
-      '<div class="fields">' +
+      (useLora ? "" : cinemaFolderHtml(item, kind)) +
+      '<div class="fields"' + (useLora ? ' style="grid-column: 1 / -1"' : '') + '>' +
       '<label class="cinema-field-label">' +
       nameLabel +
       "</label>" +
@@ -1905,6 +1933,7 @@
       '" value="' +
       htmlEsc(item.name) +
       '" />' +
+      (isChar ? '<label class="cinema-character-rebuild-toggle"><span>' + htmlEsc(tt("cinema.useLora")) + '</span><input type="checkbox" data-field="use_lora"' + (useLora ? ' checked' : '') + ' /><span class="cinema-ios-track" aria-hidden="true"><span></span></span></label>' : '') +
       '<label class="cinema-field-label">' +
       descLabel +
       "</label>" +
@@ -1924,7 +1953,7 @@
           "</textarea>"
         : "") +
       lora +
-      '<div class="row-btns"><label class="file-pick file-pick-inline">' +
+      (useLora ? '<div class="row-btns">' : '<div class="row-btns"><label class="file-pick file-pick-inline">' +
       '<input type="file" class="file-pick-input cinema-img" accept="image/*" multiple' +
       (cinemaAssetImages(item).length >= 5 ? " disabled" : "") +
       " />" +
@@ -1934,7 +1963,7 @@
       '<span class="muted cinema-img-cap">' +
       htmlEsc(tf("cinema.imgMax", { slug: cinemaCallSlug(item.name) })) +
       "</span>" +
-      '<button type="button" class="btn-secondary cinema-asset-regen">' + htmlEsc(tt("cinema.regenEntity")) + "</button>" +
+      '<button type="button" class="btn-secondary cinema-asset-regen">' + htmlEsc(tt("cinema.regenEntity")) + "</button>") +
       '<button type="button" class="btn-ghost cinema-del">' +
       htmlEsc(tt("cinema.deleteAsset")) +
       "</button></div></div></div>"
@@ -1963,8 +1992,11 @@
     const item = state.selectedCharacter;
     if (!item || !file) return;
     try {
+      const range = await window.selectReferenceRange(file, "audio");
+      if (range === null) return;
       const fd = new FormData();
       fd.append("file", file);
+      if (range.start != null) { fd.append("start", String(range.start)); fd.append("end", String(range.end)); }
       const r = await fetch("/api/refs/upload-audio", { method: "POST", body: fd });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
@@ -2120,6 +2152,18 @@
       audio: "",
       music: "",
       important: "",
+      reference_subjects: "",
+      reference_environment: "",
+      opening_frame: "",
+      ending_frame: "",
+      camera_framing: "",
+      camera_angle: "",
+      camera_movement: "",
+      camera_amplitude: "",
+      camera_speed: "",
+      camera_target: "",
+      transition: "",
+      beats: "",
     };
   }
 
@@ -2311,10 +2355,7 @@
     const blob = String((shot && shot.text) || s.action || "").trim();
     const onlyBlob =
       /integrated[_\s]+multimodal[_\s]+description/i.test(blob) &&
-      !s.title &&
-      !s.location &&
-      !s.character &&
-      !s.camera;
+      !Object.keys(s).some((k) => k !== "action" && k !== "dialogue_lang" && s[k]);
     if (cinemaHasAuthorFields(s) && !onlyBlob) return s;
     const parsed = parseH3Prompt(blob);
     return cinemaHasAuthorFields(parsed) ? parsed : s;
@@ -2328,8 +2369,7 @@
       const rawS = cleanCinemaStructured(shot.structured);
       const dumped =
         /integrated[_\s]+multimodal[_\s]+description/i.test(rawS.action || shot.text || "") &&
-        !rawS.title &&
-        !rawS.location;
+        !Object.keys(rawS).some((k) => k !== "action" && k !== "dialogue_lang" && rawS[k]);
       if (!cinemaHasAuthorFields(rawS) || dumped) shot.structured = recovered;
     });
     return film;
@@ -2367,8 +2407,20 @@
     const parts = ["[Shot 1] " + style];
     if (s.location) parts.push("Location: " + s.location);
     if (s.character) parts.push("Main character: " + s.character);
+    if (s.reference_subjects) parts.push("Subject references: " + s.reference_subjects + ". Keep each subject's identity and costume separate.");
+    if (s.reference_environment) parts.push("Environment reference: " + s.reference_environment + ". Preserve its layout and lighting.");
+    if (s.opening_frame) parts.push("Opening composition: " + s.opening_frame);
+    if (s.transition) parts.push("Transition from previous clip: " + s.transition + ".");
     if (s.action) parts.push("Action: " + s.action);
+    if (s.beats) parts.push("Chronological action beats: " + s.beats.split(/\r?\n/).map((v) => v.trim()).filter(Boolean).join("; ") + ".");
+    if (s.camera_framing) parts.push("Framing: " + s.camera_framing + ".");
+    if (s.camera_angle) parts.push("Viewpoint: " + s.camera_angle + ".");
+    if (s.camera_movement) {
+      const motion = s.camera_movement === "static" ? "The camera holds a static shot" : "The camera " + ({"push in":"pushes in","pull out":"pulls out","zoom in":"zooms in","zoom out":"zooms out","pan left":"pans left","pan right":"pans right","tilt up":"tilts up","tilt down":"tilts down","truck left":"trucks left","truck right":"trucks right","pedestal up":"pedestals up","pedestal down":"pedestals down","arc":"arcs","tracking":"tracks"}[s.camera_movement] || s.camera_movement);
+      parts.push(motion + (s.camera_amplitude ? " with " + s.camera_amplitude + " amplitude" : "") + (s.camera_speed ? " at " + s.camera_speed + " speed" : "") + (s.camera_target ? " toward " + s.camera_target : "") + ".");
+    }
     if (s.camera) parts.push("Camera: " + s.camera);
+    if (s.ending_frame) parts.push("End composition: " + s.ending_frame);
     if (s.dialogue) {
       const lang = cinemaDialogueLangLabel(s);
       const who = s.character || "The speaker (S1)";
@@ -2542,6 +2594,11 @@
     );
   }
 
+  function cinemaChapterDisplayName(name) {
+    const match = /^(?:Bölüm|Chapter) (\d+)$/.exec(name);
+    return match ? tf("film.ws.chapterDefault", {n:match[1]}) : name;
+  }
+
   function cinemaChapterHtml(chapterName, shots, globalIndexStart) {
     const open = cinemaChapterOpen(chapterName);
     const n = shots.length;
@@ -2553,9 +2610,6 @@
         : '<p class="muted cinema-chapter-empty">' + htmlEsc(tt("cinema.chapterEmpty")) + "</p>";
     const tools =
       '<div class="cinema-chapter-tools">' +
-      '<button type="button" class="btn-ghost cinema-chapter-draft">' +
-      htmlEsc(tt("cinema.addDraft")) +
-      "</button>" +
       '<button type="button" class="cta cinema-chapter-produce" title="' +
       htmlEsc(tt("film.ws.produceChapter")) +
       '">' +
@@ -2571,7 +2625,7 @@
       htmlEsc(chapterName) +
       '"><summary class="cinema-chapter-sum">' +
       '<span class="cinema-chapter-title">' +
-      htmlEsc(chapterName) +
+      htmlEsc(cinemaChapterDisplayName(chapterName)) +
       "</span>" +
       '<span class="cinema-chapter-meta muted">' +
       htmlEsc(tf("cinema.chapterSceneCount", { n: String(n) })) +
@@ -2615,8 +2669,8 @@
   }
 
   function refreshCinemaScenePreview() {
-    // Kept as a no-op for older event bindings.  The editor now intentionally
-    // shows the JSON fields directly instead of a second, compiled prompt.
+    const preview = $("cinema-scene-preview");
+    if (preview) preview.textContent = composeH3Prompt(readCinemaSceneForm());
   }
 
   function openCinemaSceneModal(shotId, mode) {
@@ -2641,8 +2695,7 @@
         const rawS = cleanCinemaStructured(shot.structured);
         const dumped =
           /integrated[_\s]+multimodal[_\s]+description/i.test(rawS.action || shot.text || "") &&
-          !rawS.title &&
-          !rawS.location;
+          !Object.keys(rawS).some((k) => k !== "action" && k !== "dialogue_lang" && rawS[k]);
         if (!cinemaHasAuthorFields(rawS) || dumped) shot.structured = structured;
       } else if (shot.text) {
         const seeded = emptyCinemaStructured();
@@ -2691,7 +2744,7 @@
     const c = ensureCinema();
     const type = $("cinema-scene-type")?.value;
     cinemaSceneEditMode = type === "continue" ? "continue" : "t2v";
-    const durationSec = Math.max(1, Math.min(15, Number($("cinema-scene-duration")?.value || c.duration || 5)));
+    const durationSec = Math.max(4, Math.min(15, Number($("cinema-scene-duration")?.value || c.duration || 5)));
     cinemaForceLocalShots = true;
     const text = composed || structured.action || "";
     if (cinemaSceneEditId) {
@@ -2809,29 +2862,6 @@
     c.chapters = (c.chapters || []).filter((ch) => ch !== name);
     if (state.cinemaChapterOpen) delete state.cinemaChapterOpen[name];
     cinemaChapterList();
-    renderCinemaShots();
-    renderCinema();
-    void saveCinema(true);
-  }
-
-  function addCinemaDraftShot(chapterName) {
-    const draft = $("cinema-shot-draft");
-    const text = (draft?.value || "").trim();
-    if (!text) {
-      toast(tt("cinema.needShotText"));
-      return;
-    }
-    const c = ensureCinema();
-    cinemaForceLocalShots = true;
-    const chapter = String(chapterName || "").trim() || cinemaActiveChapter();
-    c.shots.push({
-      id: cinemaId(),
-      text,
-      mode: cinemaStudioMode() === "seamless" ? "t2v" : "t2v",
-      chapter,
-    });
-    setCinemaChapterOpen(chapter, true);
-    if (draft) draft.value = "";
     renderCinemaShots();
     renderCinema();
     void saveCinema(true);
@@ -3019,10 +3049,27 @@
     if (filmWorkspace) renderFilmWorkspace();
   }
 
+  const sceneAssetReferences = window.createSceneAssetReferences?.({
+    toast,
+    context: () => ({prompt: $("prompt")?.value || "", continuation: state.mode === "continue",
+      first_frame_name: state.mode === "t2v" && state.newVideoInput === "i2v" ? state.firstFrameName : null,
+      ref_images: (state.mode === "ref" ? state.refImages : state.mode === "face" ? state.faceImages :
+        state.mode === "v2v" ? state.v2vImages : state.mode === "continue" && $("face-lock-chain")?.checked ? state.faceImages : []).map(x => x.name)})
+  });
   let filmWorkspace = null;
+  let planReview = null;
   let filmSaveStatus = "Kaydedildi";
   let filmNavList = [];
   function renderFilmWorkspace() {
+    if (!planReview && window.createPlanReview) {
+      planReview = window.createPlanReview({
+        get: () => ({...ensureCinema(), active_lora_names: (collectLoraPayload().lora_name || '').split('|').filter(Boolean)}), toast,
+        save: async () => { if ((await saveCinema(true)) === false) throw Error(tt('review.saveFailed')); },
+        replace: data => { abortCinemaSaves(); cinemaSaveGen++; state.cinema = data; renderCinema(); },
+        lock: locked => { const view=$('view-cinema'); if(view)view.inert=locked; },
+      });
+    }
+    planReview?.render();
     if (!window.createFilmWorkspace) return;
     if (!filmWorkspace) {
       filmWorkspace = window.createFilmWorkspace({
@@ -3046,7 +3093,7 @@
         save: async () => {
           renderCinemaShots();
           if ((await saveCinema(true)) === false) {
-            throw new Error("Kayıt başarısız; değişiklikler henüz diske yazılmadı.");
+            throw new Error(tt("ui.saveFailed"));
           }
         },
         select: (id) => {
@@ -3068,10 +3115,10 @@
           }
         },
         approve: async () => {
-          throw new Error("Onay API bu sürümde yok — klasik shot listesinden devam et.");
+          throw new Error(tt("ui.reviewUnavailable"));
         },
         importFilm: async () => {
-          throw new Error("MD içe aktarma API bu sürümde yok.");
+          throw new Error(tt("ui.markdownUnavailable"));
         },
       });
     }
@@ -3096,7 +3143,7 @@
     shots.forEach((shot, index) => {
       const left = (offset / scale) * 100;
       const width = (shotDuration / scale) * 100;
-      const block = `<button type="button" class="timeline-clip" data-shot-id="${htmlEsc(shot.id)}" style="left:${left}%;width:${width}%" title="Shot ${index + 1} · ${shotDuration} sn"><b>${index + 1}</b><span>${htmlEsc(shot.text.slice(0, 32))}</span></button>`;
+      const block = `<button type="button" class="timeline-clip" data-shot-id="${htmlEsc(shot.id)}" style="left:${left}%;width:${width}%" title="Shot ${index + 1} · ${shotDuration} ${tt("sec")}"><b>${index + 1}</b><span>${htmlEsc(shot.text.slice(0, 32))}</span></button>`;
       if (lanes.video) lanes.video.insertAdjacentHTML("beforeend", block);
       if (lanes.dialogue && cinemaAudio().mode === "film") lanes.dialogue.insertAdjacentHTML("beforeend", block);
       offset += shotDuration;
@@ -3362,34 +3409,38 @@
   function syncCinemaFold() {
     const fold = cinemaFoldState();
     const c = ensureCinema();
-    const nC = (c.characters || []).length;
-    const nCr = (c.creatures || []).length;
-    const nV = (c.vehicles || []).length;
-    const nL = (c.locations || []).length;
+    const characters = state.cinemaLibraryView ? cinemaLibraryEntries("character") : (c.characters || []);
+    const creatures = state.cinemaLibraryView ? cinemaLibraryEntries("creature") : (c.creatures || []);
+    const vehicles = state.cinemaLibraryView ? cinemaLibraryEntries("vehicle") : (c.vehicles || []);
+    const locations = state.cinemaLibraryView ? cinemaLibraryEntries("location") : (c.locations || []);
+    const nC = characters.length;
+    const nCr = creatures.length;
+    const nV = vehicles.length;
+    const nL = locations.length;
     if ($("cinema-char-count")) $("cinema-char-count").textContent = String(nC);
     if ($("cinema-creature-count")) $("cinema-creature-count").textContent = String(nCr);
     if ($("cinema-vehicle-count")) $("cinema-vehicle-count").textContent = String(nV);
     if ($("cinema-loc-count")) $("cinema-loc-count").textContent = String(nL);
     if ($("cinema-char-summary")) {
       $("cinema-char-summary").innerHTML = cinemaFoldSummaryHtml(
-        c.characters,
+        characters,
         tt("cinema.noChars")
       );
     }
     if ($("cinema-creature-summary")) {
       $("cinema-creature-summary").innerHTML = cinemaFoldSummaryHtml(
-        c.creatures,
+        creatures,
         tt("cinema.noCreatures") || "Varlık yok"
       );
     }
     if ($("cinema-vehicle-summary")) {
       $("cinema-vehicle-summary").innerHTML = cinemaFoldSummaryHtml(
-        c.vehicles,
+        vehicles,
         tt("cinema.noVehicles") || "Araç yok"
       );
     }
     if ($("cinema-loc-summary")) {
-      $("cinema-loc-summary").innerHTML = cinemaFoldSummaryHtml(c.locations, tt("cinema.noLocs"));
+      $("cinema-loc-summary").innerHTML = cinemaFoldSummaryHtml(locations, tt("cinema.noLocs"));
     }
     document.querySelectorAll(".cinema-stack[data-fold]").forEach((stack) => {
       const key = stack.dataset.fold;
@@ -3522,14 +3573,70 @@
   }
   window.syncCinemaStudioMode = syncCinemaStudioMode;
 
+  let cinemaAiBusy = false;
+  function syncCinemaAiCount() {
+    const clip = Number($("cinema-duration")?.value || ensureCinema().duration || 5);
+    const total = Number($("cinema-ai-total")?.value || 60);
+    const count = Math.ceil(total / clip);
+    $("cinema-ai-total").min = String(clip);
+    $("cinema-ai-total").max = String(40 * clip);
+    $("cinema-ai-count").textContent = tf("aiDirector.count", {count, clip, total:count * clip});
+  }
   async function planCinemaWithDirector() {
-    await saveCinema(true);
-    state.cinemaDirector = true;
-    setDirectorModal(true);
-    setDirectorTab("chat");
-    appendDirectorMsg("assistant", tt("cinema.planOpen"));
-    toast(tt("cinema.planToast"));
-    $("director-msg")?.focus();
+    const modal = $("cinema-ai-modal");
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    const story = $("cinema-ai-story");
+    if (!story.value.trim()) story.value = ensureCinema().role_script || "";
+    $("cinema-ai-status").textContent = "";
+    syncCinemaAiCount();
+    story.focus();
+  }
+  function closeCinemaAiDirector() {
+    if (cinemaAiBusy) return;
+    $("cinema-ai-modal").classList.add("hidden");
+    $("cinema-ai-modal").setAttribute("aria-hidden", "true");
+    $("btn-cinema-plan")?.focus();
+  }
+  async function generateCinemaAiPlan() {
+    if (cinemaAiBusy) return;
+    const story = $("cinema-ai-story").value.trim();
+    const status = $("cinema-ai-status");
+    if (!story) { status.textContent = tt("aiDirector.needStory"); return; }
+    const clip = Number($("cinema-duration")?.value || ensureCinema().duration || 5);
+    const total = Number($("cinema-ai-total").value);
+    const count = Math.ceil(total / clip);
+    if (!Number.isFinite(total) || total < clip || count < 1 || count > 40) {
+      status.textContent = tt("aiDirector.invalidDuration"); return;
+    }
+    cinemaAiBusy = true;
+    const controls = ["btn-cinema-ai-generate", "btn-cinema-ai-close", "cinema-ai-story", "cinema-ai-total"];
+    controls.forEach(id => $(id).disabled = true);
+    status.textContent = tt("aiDirector.planning");
+    try {
+      if (!await saveCinema(true)) throw Error(tt("ui.saveFailed"));
+      const filmId = ensureCinema().film_id;
+      const response = await fetch("/api/cinema/ai-plan", {method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({story, shot_count:count, film_id:filmId, ui_lang:window.h3Lang?.() || "tr", model:$("director-model")?.value || null})});
+      const plan = await response.json();
+      if (!response.ok) throw Error(tt(errDetail(plan)));
+      if (ensureCinema().film_id !== filmId) throw Error(tt("aiDirector.filmChanged"));
+      status.textContent = tt("aiDirector.applying");
+      const applied = await fetch("/api/cinema/import-json", {method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({payload:plan.payload, mode:"merge", chapter:plan.chapter, expected_film_id:filmId,
+          new_film:false, save_to_library:false, generate_sheets:false, keep_stills:true, redo_characters:false})});
+      const result = await applied.json();
+      if (!applied.ok) throw Error(tt(errDetail(result)));
+      await applyCinemaJsonResult(result);
+      cinemaAiBusy = false;
+      closeCinemaAiDirector();
+      const hint = $("cinema-prod-hint");
+      if (hint) hint.textContent = tf("aiDirector.ready", {count:plan.shot_count});
+    } catch (error) { status.textContent = error.message; }
+    finally {
+      cinemaAiBusy = false;
+      controls.forEach(id => $(id).disabled = false);
+    }
   }
 
 function cinemaKindMeta(kind) {
@@ -3581,16 +3688,34 @@ function filmHasStillCards() {
     );
   }
 
-function setCinemaAssetTab(kind, tab) {
+function setCinemaAssetTab(kind, tab, skipLibraryLoad = false) {
     const k = cinemaKindMeta(kind).kind;
-    const t = tab === "create" ? "create" : tab === "library" ? "library" : "list";
+    const t = tab === "lora" && k === "character" ? "lora" : tab === "create" ? "create" : tab === "library" ? "library" : "list";
     document.querySelectorAll(`.cinema-asset-tabs[data-asset-kind="${k}"] .chip`).forEach((btn) => {
       btn.classList.toggle("on", btn.dataset.assetTab === t);
     });
     document.querySelectorAll(`.cinema-asset-tab-panel[data-asset-kind="${k}"]`).forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.assetPanel !== t);
     });
-    if (t === "library") void loadCinemaLibrary();
+    if (t === "library" && !skipLibraryLoad) void loadCinemaLibrary();
+    if (t === "lora") void loadCinemaActorLoras();
+  }
+
+function setCinemaLibraryView(open) {
+    state.cinemaLibraryView = !!open;
+    document.querySelector("#view-cinema .cinema-panel")?.classList.toggle("is-library-view", !!open);
+    const btn = $("btn-cinema-library-toggle");
+    const label = $("cinema-library-toggle-label");
+    btn?.setAttribute("aria-pressed", open ? "true" : "false");
+    btn?.classList.toggle("is-open", !!open);
+    if (label) label.textContent = tt(open ? "cinema.backToFilmCards" : "cinema.tabLibrary");
+    for (const kind of ["character", "creature", "vehicle", "location"]) {
+      const meta = cinemaKindMeta(kind);
+      setCinemaAssetTab(kind, open ? "library" : "list", true);
+      setCinemaFold(meta.fold, true);
+    }
+    syncCinemaFold();
+    if (open) void loadCinemaLibrary();
   }
 
 function cinemaSheetRefUi(kind) {
@@ -3821,6 +3946,7 @@ async function loadCinemaLibrary() {
     renderCinemaLibrary("creature");
     renderCinemaLibrary("vehicle");
     renderCinemaLibrary("location");
+    if (state.cinemaLibraryView) syncCinemaFold();
   }
 
 function cinemaLibraryCardHtml(item, kind) {
@@ -3854,36 +3980,50 @@ function cinemaLibraryCardHtml(item, kind) {
       htmlEsc((item.notes || "").slice(0, 80)) +
       "</span>" +
       '<div class="row-btns">' +
-      '<button type="button" class="cta cinema-lib-pull">' +
-      htmlEsc(tt("cinema.pullLib")) +
-      "</button>" +
-      (item._inFilm
-        ? '<span class="muted">' + htmlEsc(tt("cinema.libInFilm") || "Filmde") + "</span>"
-        : "") +
-      '<button type="button" class="btn-ghost cinema-lib-del">' +
-      htmlEsc(tt("cinema.del")) +
-      "</button>" +
+      (item._fromFilmOnly
+        ? '<span class="muted">' + htmlEsc(tt("cinema.tabList")) + "</span>" +
+          '<button type="button" class="btn-secondary cinema-lib-save">' + htmlEsc(tt("cinema.saveToLibrary")) + "</button>"
+        : '<button type="button" class="cta cinema-lib-pull">' + htmlEsc(tt("cinema.pullLib")) + "</button>" +
+          (item._inFilm ? '<span class="muted">' + htmlEsc(tt("cinema.libInFilm") || "Filmde") + "</span>" : "") +
+          '<button type="button" class="btn-ghost cinema-lib-del">' + htmlEsc(tt("cinema.del")) + "</button>") +
       "</div></div></div>"
     );
   }
 
-function renderCinemaLibrary(kind) {
+function cinemaLibraryEntries(kind) {
     const meta = cinemaKindMeta(kind);
-    const root = $(meta.libHost);
-    if (!root) return;
     const filmItems = ensureCinema()[meta.key] || [];
     const inFilm = new Set(
       filmItems.flatMap((x) =>
         [String(x.library_id || ""), String(x.id || ""), String(x.name || "").toLowerCase()].filter(Boolean)
       )
     );
-    const items = ((state.cinemaLibrary && state.cinemaLibrary[meta.key]) || []).map((x) => ({
+    const savedItems = (state.cinemaLibrary && state.cinemaLibrary[meta.key]) || [];
+    const items = savedItems.map((x) => ({
       ...x,
       _inFilm:
         inFilm.has(String(x.id || "")) ||
         inFilm.has(String(x.library_id || "")) ||
         inFilm.has(String(x.name || "").toLowerCase()),
     }));
+    const savedKeys = new Set(savedItems.flatMap((x) =>
+      [String(x.id || ""), String(x.library_id || ""), String(x.name || "").toLowerCase()].filter(Boolean)
+    ));
+    for (const asset of filmItems) {
+      if (!asset?.id) continue;
+      if (savedKeys.has(String(asset.library_id || "")) ||
+          savedKeys.has(String(asset.id || "")) ||
+          savedKeys.has(String(asset.name || "").toLowerCase())) continue;
+      items.push({ ...asset, _fromFilmOnly: true, _inFilm: true });
+    }
+    return items;
+  }
+
+function renderCinemaLibrary(kind) {
+    const meta = cinemaKindMeta(kind);
+    const root = $(meta.libHost);
+    if (!root) return;
+    const items = cinemaLibraryEntries(kind);
     if (!items.length) {
       root.innerHTML =
         '<p class="muted cinema-lib-empty">' + htmlEsc(tt("cinema.libEmpty")) + "</p>";
@@ -3915,15 +4055,7 @@ async function saveAllCinemaAssetsToLibrary() {
 function openCinemaAssetLibrary() {
     const grid = document.querySelector("#view-cinema .cinema-grid");
     if (grid) grid.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    setCinemaAssetTab("character", "list");
-    setCinemaAssetTab("creature", "list");
-    setCinemaAssetTab("vehicle", "list");
-    setCinemaAssetTab("location", "list");
-    setCinemaFold("characters", true);
-    setCinemaFold("creatures", true);
-    setCinemaFold("vehicles", true);
-    setCinemaFold("locations", true);
-    void loadCinemaLibrary();
+    setCinemaLibraryView(true);
   }
 
 async function saveCinemaAssetToLibrary(kind, assetId, opts) {
@@ -3954,6 +4086,7 @@ async function saveCinemaAssetToLibrary(kind, assetId, opts) {
       await loadCinemaLibrary();
     }
     renderCinemaLibrary(meta.kind);
+    if (state.cinemaLibraryView) syncCinemaFold();
     if (!opts?.quiet) toast(tf("cinema.savedLib", { name: data.asset?.name || "" }));
     return data.asset;
   }
@@ -4041,7 +4174,65 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void saveCinema(true);
   }
 
-  async function addCinemaAsset(kind) {
+  let cinemaActorLoraRequest = 0;
+  async function loadCinemaActorLoras() {
+    await loadLoras();
+    const select = $("cinema-actor-lora");
+    if (!select) return;
+    const previous = select.value;
+    select.innerHTML = cinemaLoraOptions(previous);
+    if (select.value) await selectCinemaActorLora();
+  }
+  async function selectCinemaActorLora() {
+    const request = ++cinemaActorLoraRequest;
+    const id = $("cinema-actor-lora")?.value;
+    const spec = (state.loraCatalog || []).find(x => x.id === id);
+    $("cinema-actor-lora-name").value = spec?.label || "";
+    $("cinema-actor-lora-trigger").value = "";
+    $("cinema-actor-lora-notes").value = "";
+    $("cinema-actor-lora-guide").textContent = "";
+    $("cinema-actor-lora-status").textContent = "";
+    $("cinema-actor-lora-strength").value = "0.7";
+    if (!spec) return;
+    try {
+      const response = await fetch("/api/loras/guidance?file=" + encodeURIComponent(spec.file));
+      const row = await response.json();
+      if (!response.ok) throw new Error(errDetail(row));
+      if (request !== cinemaActorLoraRequest) return;
+      $("cinema-actor-lora-trigger").value = row.triggers || spec.trigger || "";
+      $("cinema-actor-lora-guide").textContent = row.guide || "";
+    } catch (e) {
+      if (request === cinemaActorLoraRequest) $("cinema-actor-lora-status").textContent = String(e.message || e);
+    }
+  }
+  async function addCinemaLoraActor() {
+    const button = $("cinema-actor-lora-add");
+    const spec = (state.loraCatalog || []).find(x => x.id === $("cinema-actor-lora")?.value);
+    const name = $("cinema-actor-lora-name").value.trim();
+    const trigger = $("cinema-actor-lora-trigger").value.trim();
+    const appearance = $("cinema-actor-lora-notes").value.trim();
+    const strength = Number($("cinema-actor-lora-strength").value);
+    if (!spec?.ready || !name || !trigger || !Number.isFinite(strength) || strength < 0 || strength > 2) {
+      $("cinema-actor-lora-status").textContent = tt("cinema.loraActorNeed");
+      return;
+    }
+    button.disabled = true;
+    try {
+      const asset = await addCinemaAsset("character", {
+        name, trigger, notes: [trigger, appearance].filter(Boolean).join(", "),
+        lora_id: spec.id, lora_strength: strength, use_lora: true,
+      });
+      if (asset?.id) {
+        setCinemaAssetTab("character", "list");
+        if (filmWorkspace) filmWorkspace.render();
+      }
+    } finally { button.disabled = false; }
+  }
+  $("cinema-actor-lora")?.addEventListener("change", () => void selectCinemaActorLora());
+  $("cinema-actor-lora-refresh")?.addEventListener("click", () => void loadCinemaActorLoras());
+  $("cinema-actor-lora-add")?.addEventListener("click", () => void addCinemaLoraActor());
+
+  async function addCinemaAsset(kind, fields = {}) {
     const meta = typeof cinemaKindMeta === "function" ? cinemaKindMeta(kind) : null;
     const path = meta?.api || "/api/cinema/character";
     const key = meta?.key || "characters";
@@ -4060,7 +4251,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const r = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "", trigger: "" }),
+        body: JSON.stringify({ name: "", trigger: "", ...fields }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
@@ -4082,6 +4273,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const name = card?.querySelector("[data-field=name]");
       card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
       name?.focus();
+      return data;
     } catch (e) {
       toast(String(e.message || e));
       await loadCinema();
@@ -4225,13 +4417,37 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   async function removeCinemaImage(kind, id, file) {
     const item = cinemaItem(kind, id);
     if (!item || !file) return;
+    const filmId = ensureCinema().film_id;
+    clearTimeout(cinemaPreviewTimer);
+    cinemaSaveGen += 1;
+    abortCinemaSaves();
+    const version = nextCinemaAssetVersion(kind, id);
     const r = await fetch(`/api/cinema/asset-image/${encodeURIComponent(kind)}/${encodeURIComponent(id)}/${encodeURIComponent(file)}`, { method: "DELETE" });
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(errDetail(data) || tt("err.imageDeleteFailed"));
     const key = cinemaKindMeta(kind).key;
+    if (r.status === 404) {
+      // A reset or another window may already have removed this image/card.
+      const fresh = await fetch("/api/cinema");
+      if (!fresh.ok) throw new Error(errDetail(data) || tt("err.imageDeleteFailed"));
+      const cinema = await fresh.json();
+      if (cinema.film_id !== filmId || ensureCinema().film_id !== filmId ||
+          cinemaAssetVersions.get(`${kind}:${id}`) !== version) return;
+      const asset = (cinema[key] || []).find(x => String(x.id || "") === String(id));
+      if (asset && cinemaAssetImages(asset).some(x => x.file === file)) {
+        throw new Error(errDetail(data) || tt("err.imageDeleteFailed"));
+      }
+      ensureCinema()[key] = (ensureCinema()[key] || []).flatMap(x =>
+        String(x.id || "") === String(id) ? (asset ? [asset] : []) : [x]);
+      renderCinemaAssetCards(kind, { force: true });
+      renderCinema();
+      return;
+    }
+    if (!r.ok) throw new Error(errDetail(data) || tt("err.imageDeleteFailed"));
+    if (ensureCinema().film_id !== filmId || cinemaAssetVersions.get(`${kind}:${id}`) !== version) return;
     const index = (ensureCinema()[key] || []).findIndex((x) => String(x.id || "") === String(id));
     if (index >= 0 && data.asset) ensureCinema()[key][index] = data.asset;
     renderCinemaAssetCards(kind, { force: true });
+    renderCinema();
     toast(tt("cinema.deleteImage"));
   }
 
@@ -4324,6 +4540,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body: JSON.stringify({
           stream: true,
           duration: clip,
+          lora_names: (collectLoraPayload().lora_name || "").split("|").filter(Boolean),
           logline: (c.title || "").trim() || null,
           prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
         }),
@@ -4353,7 +4570,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             continue;
           }
           if (ev.type === "status" && ev.text) {
-            toast(String(ev.text));
+            toast(localizeSystemLabel(ev.text));
           } else if (ev.type === "error") {
             throw new Error(ev.detail || tt("err.directorStream"));
           } else if (ev.type === "result" && ev.data) {
@@ -5274,6 +5491,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       dl.removeAttribute("aria-disabled");
     }
     syncPlayerNavigation();
+    if (!state.galleryLoaded || !(state.galleryItems || []).some((item) => item.id === jobId)) {
+      void refreshPlayerNavigation(jobId);
+    }
   }
 
   function playerVideoItems() {
@@ -5286,13 +5506,36 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       byId.set(item.id, { ...item, url });
     };
     (state.galleryItems || []).forEach(add);
-    (state.jobs || []).forEach(add);
+    if (!state.galleryLoaded) (state.jobs || []).forEach(add);
     return [...byId.values()].sort((a, b) => {
       const ta = Number(a.done_at || a.created_at || 0);
       const tb = Number(b.done_at || b.created_at || 0);
       if (tb !== ta) return tb - ta;
       return (Number(b.batch_index) || 0) - (Number(a.batch_index) || 0);
     });
+  }
+
+  async function refreshPlayerNavigation(selectedId) {
+    try {
+      const response = await fetch("/api/gallery");
+      if (!response.ok) throw new Error("gallery unavailable");
+      const data = await response.json();
+      state.galleryItems = Array.isArray(data.items) ? data.items : [];
+      state.galleryLoaded = true;
+    } catch {
+      // Keep in-memory jobs as a fallback while the gallery is unavailable.
+    }
+    if (!selectedId || state.selectedJobId === selectedId) syncPlayerNavigation();
+    return playerVideoItems();
+  }
+
+  function adjacentVideoAfterDeletion(items, selectedId, deletedIds) {
+    const removed = new Set(deletedIds);
+    const index = items.findIndex((item) => item.id === selectedId);
+    if (index < 0) return null;
+    // The list is newest first: prefer the previous (older) video.
+    return items.slice(index + 1).find((item) => !removed.has(item.id)) ||
+      items.slice(0, index).reverse().find((item) => !removed.has(item.id)) || null;
   }
 
   function syncPlayerNavigation(items) {
@@ -5309,16 +5552,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function navigatePlayerVideo(direction) {
-    let list = playerVideoItems();
-    try {
-      const data = await fetch("/api/gallery").then((r) => r.json());
-      if (Array.isArray(data.items)) {
-        state.galleryItems = data.items;
-        list = playerVideoItems();
-      }
-    } catch {
-      /* In-memory finished jobs are still usable if gallery is unavailable. */
-    }
+    const list = await refreshPlayerNavigation(state.selectedJobId);
     const index = list.findIndex((item) => item.id === state.selectedJobId);
     if (index < 0) return;
     const target = direction === "previous" ? list[index + 1] : list[index - 1];
@@ -5421,7 +5655,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const dots = el.querySelector(".think-dots");
       if (dots) dots.textContent = tt("dir.writing");
     } else if (type === "status" && ev.text) {
-      if (!_dirThinkFull) body.textContent = ev.text;
+      if (!_dirThinkFull) body.textContent = localizeSystemLabel(ev.text);
     }
     $("director-log").scrollTop = $("director-log").scrollHeight;
   }
@@ -6469,6 +6703,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
+  function localizeSystemLabel(value) {
+    const text = String(value || "");
+    const labels = {"sırada": "ui.progress0", "tekrar sırada": "ui.progress1", "sırada (yeniden)": "ui.progress2", "iptal": "ui.progress3", "hata": "ui.progress4", "bitti": "ui.progress5", "Qwen görseli üretiliyor": "ui.progress6", "Comfy örnekliyor": "ui.progress7", "Comfy kuyruğunda": "ui.progress8", "çıktı bekleniyor": "ui.progress9", "Comfy’nin işi alması bekleniyor": "ui.progress10", "Yönetmen düşünüyor…": "ui.progress11", "Yeniden deniyor…": "ui.progress12", "kesildi — yeniden sırada": "ui.progress13", "Comfy’de sürüyor — yeniden bağlanılacak": "ui.progress14", "Comfy çıktısı bulundu — galeriye alınıyor": "ui.progress15", "bitti (Comfy çıktısı kurtarıldı)": "ui.progress16"};
+    const parts = text.split(" · ");
+    const sampling = /^örnekleme (\d+)\/(\d+)$/.exec(parts[0]);
+    if (sampling) parts[0] = tf("ui.samplingCount", {step:sampling[1], max:sampling[2]});
+    else if (labels[parts[0]]) parts[0] = tt(labels[parts[0]]);
+    return parts.join(" · ");
+  }
+
   function errDetail(data) {
     if (data == null) return "hata";
     const d = data.detail;
@@ -6624,6 +6868,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   async function directorChatRequest(message, onProgress) {
     const payload = {
+      lora_names: (collectLoraPayload().lora_name || "").split("|").filter(Boolean),
       session_id: state.directorSessionId,
       message,
       model: $("director-model").value || null,
@@ -6914,7 +7159,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const duration = Number(state.musicMeta?.durationSec || 0);
     const lines = lyricLines(state.musicLyrics);
     if (!duration || !lines.length) {
-      toast("Önce şarkıyı ve en az bir söz satırını ekle");
+      toast(tt("ui.musicNeedsLyrics"));
       return;
     }
     const weights = lines.map((line) => Math.max(1, line.split(/\s+/).filter(Boolean).length));
@@ -6943,14 +7188,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       return;
     }
     host.innerHTML =
-      '<div class="music-lyric-timeline-head">Söz zamanlaması — saniyeleri düzelt; sahne planı her satırı ilgili shot’a bağlar.</div>' +
+      '<div class="music-lyric-timeline-head">' + htmlEsc(tt("ui.lyricsTimingHint")) + '</div>' +
       rows
         .map(
           (row, index) =>
             '<div class="music-lyric-row" data-index="' + index + '">' +
-            '<input type="number" min="0" step="0.1" data-lyric-field="start" value="' + htmlEsc(row.start) + '" aria-label="Başlangıç saniyesi" />' +
-            '<input type="number" min="0" step="0.1" data-lyric-field="end" value="' + htmlEsc(row.end) + '" aria-label="Bitiş saniyesi" />' +
-            '<textarea data-lyric-field="text" rows="1" aria-label="Söz satırı">' + htmlEsc(row.text) + '</textarea>' +
+            '<input type="number" min="0" step="0.1" data-lyric-field="start" value="' + htmlEsc(row.start) + '" aria-label="' + htmlEsc(tt("ui.lyricStartAria")) + '" />' +
+            '<input type="number" min="0" step="0.1" data-lyric-field="end" value="' + htmlEsc(row.end) + '" aria-label="' + htmlEsc(tt("ui.lyricEndAria")) + '" />' +
+            '<textarea data-lyric-field="text" rows="1" aria-label="' + htmlEsc(tt("ui.lyricTextAria")) + '">' + htmlEsc(row.text) + '</textarea>' +
             "</div>"
         )
         .join("");
@@ -7603,12 +7848,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   /** When a job flips to done, put that clip in the player (latest finish wins). */
   function autoPlayNewestFinished(prevStatus) {
+    const filmId = String(ensureCinema().film_id || "");
     const newly = [];
     for (const j of state.jobs || []) {
       const was = prevStatus[j.id];
-      if (j.status === "done" && j.output?.url && was && was !== "done") {
-        newly.push(j);
-      }
+      if (!(j.status === "done" && j.output?.url && was && was !== "done")) continue;
+      if (jobLane(j) === "director" && filmId && String(j.film_id || "") !== filmId) continue;
+      newly.push(j);
     }
     if (!newly.length) return;
     newly.sort((a, b) => {
@@ -7688,7 +7934,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (ra !== rb) return ra - rb;
       return (Number(b.created_at) || 0) - (Number(a.created_at) || 0);
     };
-    const laneJobs = state.jobs.filter((j) => jobLane(j) === state.prodLane);
+    const filmId = String(ensureCinema().film_id || "");
+    const laneJobs = state.jobs.filter((j) => {
+      if (jobLane(j) !== state.prodLane) return false;
+      if (state.prodLane !== "director") return true;
+      return filmId && String(j.film_id || "") === filmId;
+    });
     const active = laneJobs
       .filter((j) => j.status === "running" || j.status === "queued")
       .sort(productionOrderCmp);
@@ -7741,7 +7992,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         left.appendChild(track);
         const label = document.createElement("small");
         label.className = "job-inline-label";
-        label.textContent = j.progress_label || "Qwen görseli üretiliyor";
+        label.textContent = localizeSystemLabel(j.progress_label) || tt("ui.qwenGenerating");
         left.appendChild(label);
       }
       left.title = j.error || j.prompt || "";
@@ -7866,7 +8117,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (progressSource !== "queue" && step != null && stepMax > 0) {
         clipPct = Math.max(0, Math.min(100, Math.round((100 * Number(step)) / Number(stepMax))));
       }
-      let clipLabel = job.progress_label || tt("prod.comfyProgress");
+      let clipLabel = localizeSystemLabel(job.progress_label) || tt("prod.comfyProgress");
       if (progressSource !== "queue" && step != null && stepMax > 0 && !/örnekleme\s+\d+\/\d+/i.test(clipLabel)) {
         clipLabel = tf("job.sampling", { step: String(step), max: String(stepMax) });
       }
@@ -8075,17 +8326,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   function syncGalleryPhotoToolbar() {
     const select = $("btn-gallery-photo-select");
     const remove = $("btn-gallery-photo-delete");
-    if (select) select.textContent = state.galleryPhotoSelectMode ? "Seçimi bitir" : "Fotoğraf seç";
+    if (select) select.textContent = state.galleryPhotoSelectMode ? tt("ui.finishSelection") : tt("ui.selectPhotos");
     if (remove) {
       remove.classList.toggle("hidden", state.galleryKind !== "photo" || !state.galleryPhotoSelectMode);
-      remove.textContent = `Seçilenleri sil (${state.galleryPhotoPickNames.length})`;
+      remove.textContent = tf("ui.deleteSelected", { n: state.galleryPhotoPickNames.length });
       remove.disabled = !state.galleryPhotoPickNames.length;
     }
   }
 
   async function deletePickedGalleryPhotos() {
     const names = [...state.galleryPhotoPickNames];
-    if (!names.length || !confirm(`Seçili ${names.length} fotoğraf silinsin mi?`)) return;
+    if (!names.length || !confirm(tf("ui.deletePhotosConfirm", { n: names.length }))) return;
     try {
       await Promise.all(names.map(async (name) => {
         const response = await fetch(`/api/refs/${encodeURIComponent(name)}`, { method: "DELETE" });
@@ -8108,6 +8359,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await fetch("/api/gallery").then((r) => r.json());
       done = (data.items || []).slice();
       state.galleryItems = done;
+      state.galleryLoaded = true;
     } catch {
       grid.innerHTML = `<p class="muted">${tt("gallery.fail")}</p>`;
       return;
@@ -8280,23 +8532,33 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   function syncGalleryVideoToolbar() {
     const select = $("btn-gallery-video-select");
     const remove = $("btn-gallery-video-delete");
-    if (select) select.textContent = state.galleryVideoSelectMode ? "Seçimi bitir" : "Video seç";
+    if (select) select.textContent = state.galleryVideoSelectMode ? tt("ui.finishSelection") : tt("ui.selectVideos");
     if (remove) {
       remove.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryVideoSelectMode);
-      remove.textContent = `Seçilenleri sil (${state.galleryVideoPickIds.length})`;
+      remove.textContent = tf("ui.deleteSelected", { n: state.galleryVideoPickIds.length });
       remove.disabled = !state.galleryVideoPickIds.length;
     }
   }
 
   async function deletePickedGalleryVideos() {
     const ids = [...state.galleryVideoPickIds];
-    if (!ids.length || !confirm(`Seçili ${ids.length} video silinsin mi?`)) return;
+    if (!ids.length || !confirm(tf("ui.deleteVideosConfirm", { n: ids.length }))) return;
     try {
-      if (ids.includes(state.selectedJobId)) clearPlayer();
+      const before = await refreshPlayerNavigation(state.selectedJobId);
+      const selectedId = state.selectedJobId;
+      const replacement = ids.includes(selectedId)
+        ? adjacentVideoAfterDeletion(before, selectedId, ids)
+        : null;
       await Promise.all(ids.map(async (id) => {
         const response = await fetch(`/api/gallery/${encodeURIComponent(id)}`, { method: "DELETE" });
         if (!response.ok) throw new Error(id);
       }));
+      await refreshPlayerNavigation(selectedId);
+      if (ids.includes(selectedId)) {
+        const target = replacement && playerVideoItems().find((item) => item.id === replacement.id);
+        if (target) showPlayerVideo(target.url, target.id, target.prompt || "", target.download_name || "");
+        else clearPlayer({ quiet: true });
+      }
       state.galleryVideoPickIds = [];
       state.galleryVideoSelectMode = false;
       syncGalleryVideoToolbar();
@@ -8308,7 +8570,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   async function deleteGalleryItem(itemId) {
     if (!itemId) return;
     if (!tConfirm("confirm.deleteGalleryVideo")) return;
-    if (state.selectedJobId === itemId) clearPlayer();
+    const before = await refreshPlayerNavigation(state.selectedJobId);
+    const selectedId = state.selectedJobId;
+    const replacement = selectedId === itemId
+      ? adjacentVideoAfterDeletion(before, selectedId, [itemId])
+      : null;
     document.querySelectorAll("#gallery-grid video").forEach((v) => {
       const src = v.getAttribute("src") || v.src || "";
       if (!src.includes(itemId)) return;
@@ -8327,6 +8593,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       tToast("toast.galleryDeleted");
+      await refreshPlayerNavigation(selectedId);
+      if (selectedId === itemId) {
+        const target = replacement && playerVideoItems().find((item) => item.id === replacement.id);
+        if (target) showPlayerVideo(target.url, target.id, target.prompt || "", target.download_name || "");
+        else clearPlayer({ quiet: true });
+      }
       await renderGallery();
     } catch (e) {
       toast(String(e.message || e));
@@ -8337,8 +8609,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const c = ensureCinema();
     if (!c) return false;
     let changed = false;
+    const filmId = String(c.film_id || "");
     (state.jobs || []).forEach((j) => {
       if (!j?.sheet_attached || !j.sheet_asset_id) return;
+      if (filmId && String(j.film_id || "") && String(j.film_id) !== filmId) return;
       const urls = Array.isArray(j.sheet_still_urls) && j.sheet_still_urls.length
         ? j.sheet_still_urls
         : (j.sheet_still_url ? [j.sheet_still_url] : []);
@@ -8580,11 +8854,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         return false;
       }
     }
-    if (isRef && !state.refImages.length) {
+    if (isRef && !state.refImages.length && !sceneAssetReferences?.payload().asset_bindings?.length) {
       tToast("toast.refNeedImage");
       return false;
     }
-    if (isFace && !state.faceImages.length) {
+    if (isFace && !state.faceImages.length && !sceneAssetReferences?.payload().asset_bindings?.length) {
       tToast("toast.faceNeedPortrait");
       return false;
     }
@@ -8607,6 +8881,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const faceLockOn = !!$("face-lock-chain")?.checked && state.faceImages.length > 0;
       const body = {
         prompt: withStyleLock(prompt),
+        ...sceneAssetReferences?.payload(),
         duration: state.duration,
         aspect: state.aspect || "16:9",
         quality: state.quality,
@@ -8738,6 +9013,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     updateLoraHint();
   }
 
+  window.createLoraGuidanceEditor?.(() => state.loraCatalog || [], toast);
+  function loraWeight(spec) {
+    let weights = {};
+    try { weights = JSON.parse(localStorage.getItem("h3-lora-weights") || "{}"); } catch {}
+    const value = Number(weights[spec.file] ?? spec.strength ?? 0.8);
+    return Number.isFinite(value) ? value : 0.8;
+  }
+
   function selectedLoraIds(selectId = "lora-select") {
     return [...($(selectId)?.selectedOptions || [])].map((opt) => opt.value).filter(Boolean).slice(0, 3);
   }
@@ -8769,7 +9052,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     return {
       lora_id: spec.id,
       lora_name: picked.length ? picked.map((item) => item.file).join("|") : spec.file,
-      lora_strength: spec.strength,
+      lora_strength: loraWeight(spec),
+      lora_strengths: Object.fromEntries((picked.length ? picked : [spec]).map(item => [item.file, loraWeight(item)])),
     };
   }
 
@@ -8819,10 +9103,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const checks = $(hostId);
       if (!checks) return;
       const selected = new Set(previousIds.length ? previousIds : prev ? [prev] : []);
-      checks.innerHTML = catalog
-        .filter((spec) => spec.id && spec.file && spec.ready)
-        .map((spec) => `<label><input type="checkbox" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label>`)
-        .join("");
+      checks.innerHTML = LORA_CATEGORIES.map(category => {
+        const items = catalog.filter(spec => spec.id && spec.file && spec.ready && loraCategory(spec) === category);
+        if (!items.length) return "";
+        return `<fieldset class="lora-category"><legend>${htmlEsc(loraCategoryLabel(category))}</legend>` +
+          items.map(spec => `<div class="lora-pick-row"><label><input type="checkbox" aria-label="${htmlEsc(spec.label)}" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label><input type="number" data-lora-weight="${htmlEsc(spec.file)}" aria-label="${htmlEsc(spec.label)} ${window.h3Lang?.() === "en" ? "weight" : "ağırlık"}" min="-6" max="6" step="0.05" value="${loraWeight(spec)}" style="width:75px" /></div>`).join("") + "</fieldset>";
+      }).join("");
       const syncLoraChecks = () => {
         const boxes = [...checks.querySelectorAll('input[type="checkbox"]')];
         const ids = boxes.filter((box) => box.checked).map((box) => box.value);
@@ -8830,6 +9116,18 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       };
       checks.onchange = (event) => {
         const box = event.target;
+        if (box.dataset.loraWeight) {
+          const value = Number(box.value);
+          if (!Number.isFinite(value) || value < -6 || value > 6) return;
+          let weights = {};
+          try { weights = JSON.parse(localStorage.getItem("h3-lora-weights") || "{}"); } catch {}
+          weights[box.dataset.loraWeight] = value;
+          localStorage.setItem("h3-lora-weights", JSON.stringify(weights));
+          document.querySelectorAll('[data-lora-weight]').forEach(input => {
+            if (input.dataset.loraWeight === box.dataset.loraWeight) input.value = value;
+          });
+          return;
+        }
         if (box.matches('input[type="checkbox"]') && box.checked && checks.querySelectorAll('input:checked').length > 3) {
           box.checked = false;
         }
@@ -8855,7 +9153,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const catalog = visibleLoraCatalog().filter((spec) => spec && spec.file);
     const busyId = state.loraDownload?.busy ? state.loraDownload.id : "";
     box.innerHTML = "";
+    let lastCategory = "";
+    catalog.sort((a,b) => LORA_CATEGORIES.indexOf(loraCategory(a)) - LORA_CATEGORIES.indexOf(loraCategory(b)));
     catalog.forEach((spec) => {
+      const category = loraCategory(spec);
+      if (category !== lastCategory) {
+        const heading = document.createElement("h4");
+        heading.className = "lora-category-heading";
+        heading.textContent = loraCategoryLabel(category);
+        box.appendChild(heading);
+        lastCategory = category;
+      }
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "lora-shop-item";
@@ -8882,7 +9190,28 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       btn.appendChild(name);
       btn.appendChild(st);
       btn.appendChild(meta);
-      box.appendChild(btn);
+      const card = document.createElement("div");
+      card.className = "lora-library-card";
+      card.appendChild(btn);
+      const categorySelect = document.createElement("select");
+      categorySelect.className = "lora-category-select";
+      categorySelect.setAttribute("aria-label", tt("lora.category.change") + ": " + (spec.label || spec.file));
+      LORA_CATEGORIES.forEach(key => {
+        const option = document.createElement("option");
+        option.value = key; option.textContent = loraCategoryLabel(key);
+        categorySelect.appendChild(option);
+      });
+      categorySelect.value = category;
+      categorySelect.onchange = () => {
+        let saved = {};
+        try { saved = JSON.parse(localStorage.getItem("h3-lora-categories") || "{}"); } catch {}
+        saved[spec.file] = categorySelect.value;
+        localStorage.setItem("h3-lora-categories", JSON.stringify(saved));
+        fillLoraSelect();
+        renderCinemaAssetCards("character", { force: true });
+      };
+      card.appendChild(categorySelect);
+      box.appendChild(card);
     });
   }
 
@@ -8922,11 +9251,59 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
   }
 
+  function renderH3Engine(engine) {
+    const host = $("h3-engine-control");
+    if (!host) return;
+    const en = window.h3Lang?.() === "en";
+    host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${id === "singularity" && !engine.singularity_ready ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
+    host.onclick = async event => {
+      const button = event.target.closest("button[data-engine]");
+      if (!button || button.disabled) return;
+      host.querySelectorAll("button").forEach(b => b.disabled = true);
+      try {
+        const response = await fetch("/api/h3-models/engine", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({engine:button.dataset.engine})});
+        const data = await response.json();
+        if (!response.ok) throw Error(errDetail(data));
+        await loadH3Models();
+      } catch(error) { toast(error.message); await loadH3Models(); }
+    };
+  }
+
+  let optionalModelTimer;
+  async function loadOptionalH3Models() {
+    const host = $("optional-h3-models");
+    if (!host) return;
+    clearTimeout(optionalModelTimer);
+    const english = window.h3Lang?.() === "en";
+    try {
+      const response = await fetch("/api/h3-models/optional");
+      if (!response.ok) return;
+      const data = await response.json();
+      host.innerHTML = `<h4>${english ? "Optional base models" : "İsteğe bağlı ana modeller"}</h4>` + data.models.map(model =>
+        `<div class="film-asset"><strong>${htmlEsc(model.label)}</strong><p>${model.ready ? (english ? "Installed. Select H3 Singularity using the engine switch above. Experimental." : "Yüklü. Üstteki motor seçicisinden H3 Singularity’yi seç. Deneysel.") : (english ? "21 GB download. Experimental. Installing does not change the active engine." : "21 GB indirme. Deneysel. İndirme aktif motoru değiştirmez.")}</p><a href="${htmlEsc(model.source)}" target="_blank" rel="noopener">${english ? "Model page" : "Model sayfası"}</a><p>${model.ready ? (english ? "Installed" : "Yüklü") : model.phase === "verifying" ? (english ? "Checking SHA256…" : "SHA256 doğrulanıyor…") : `${model.progress}%`}</p>${model.error ? `<p>${htmlEsc(model.error)}</p>` : ""}<button type="button" class="btn-secondary" data-optional-download="${htmlEsc(model.id)}" ${model.ready || model.busy ? "disabled" : ""}>${model.ready ? (english ? "Installed" : "Yüklü") : model.busy ? (english ? "Downloading…" : "İndiriliyor…") : (english ? "Download optional model" : "İsteğe bağlı modeli indir")}</button></div>`).join("");
+      host.onclick = async event => {
+        const download = event.target.dataset.optionalDownload;
+        if (download) {
+          event.target.disabled = true;
+          try {
+            const result = await fetch("/api/h3-models/optional/download", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:download})});
+            if (!result.ok) throw Error(errDetail(await result.json()));
+            await loadOptionalH3Models();
+          } catch(error) { toast(error.message); event.target.disabled = false; }
+        }
+      };
+      if (data.models.some(model => model.busy)) optionalModelTimer = setTimeout(async () => {
+        await loadH3Models();
+      }, 3000);
+    } catch(error) { host.textContent = error.message; }
+  }
+
   async function loadH3Models() {
     const status = $("h3-models-status");
     try {
       const data = await fetch("/api/h3-models").then((r) => r.json());
       if (!data || !data.ok) throw new Error(data?.detail || "fail");
+      renderH3Engine(data.engine);
       const selected = data.selected || {};
       const defaults = data.defaults || {};
       const options = data.options || {};
@@ -8953,13 +9330,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         files.forEach((name) => {
           const opt = document.createElement("option");
           opt.value = name;
-          opt.textContent = name === def ? `${name} ★` : name;
+          opt.textContent = name === "__auto_int8__" ? tt("settings.h3AutoInt8") : name === def ? `${name} ★` : name;
           sel.appendChild(opt);
         });
         if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
         else sel.value = "";
       });
       if (status) status.textContent = "";
+      await loadOptionalH3Models();
     } catch (e) {
       if (status) status.textContent = String(e.message || e);
     }
@@ -8997,9 +9375,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const checks = $("lora-check-list");
     try {
       const response = await fetch("/api/loras", { cache: "no-store" });
-      if (!response.ok) throw new Error(`LoRA listesi alınamadı (${response.status})`);
+      if (!response.ok) throw new Error(tf("ui.loraFetchFailed", { status: response.status }));
       const data = await response.json();
-      if (!Array.isArray(data.loras)) throw new Error("LoRA listesi geçersiz yanıt verdi");
+      if (!Array.isArray(data.loras)) throw new Error(tt("ui.loraInvalid"));
       state.loraCatalog = data.loras || [];
       state.loraDownload = data.download || {};
       fillLoraSelect();
@@ -9301,6 +9679,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body: JSON.stringify({
           prompt,
           prompt_rewriter_enabled: true,
+          lora_names: (collectLoraPayload().lora_name || "").split("|").filter(Boolean),
           context: `mode=${state.produceMode || "t2v"}`,
         }),
       });
@@ -9488,6 +9867,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             ? "location"
             : "character";
       const pull = e.target.closest(".cinema-lib-pull");
+      const save = e.target.closest(".cinema-lib-save");
+      if (save) {
+        e.preventDefault();
+        const card = save.closest(".cinema-lib-card");
+        if (!card) return;
+        void saveCinemaAssetToLibrary(kind, card.dataset.id || "").catch((err) =>
+          toast(String(err.message || err))
+        );
+        return;
+      }
       if (pull) {
         e.preventDefault();
         const card = pull.closest(".cinema-lib-card");
@@ -9591,8 +9980,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     setStudioWorkspace("director");
     void openCinemaStudio();
   });
+  $("btn-cinema-library-toggle")?.addEventListener("click", () => {
+    setCinemaLibraryView(!state.cinemaLibraryView);
+  });
   $("btn-cinema-close")?.addEventListener("click", () => closeCinemaStudio());
   $("btn-cinema-plan")?.addEventListener("click", () => void planCinemaWithDirector());
+  $("btn-cinema-ai-close")?.addEventListener("click", closeCinemaAiDirector);
+  $("btn-cinema-ai-generate")?.addEventListener("click", () => void generateCinemaAiPlan());
+  $("cinema-ai-total")?.addEventListener("input", syncCinemaAiCount);
+  $("cinema-ai-modal")?.addEventListener("click", event => { if (event.target.id === "cinema-ai-modal") closeCinemaAiDirector(); });
+  document.addEventListener("keydown", event => { if (event.key === "Escape" && !$("cinema-ai-modal")?.classList.contains("hidden")) closeCinemaAiDirector(); });
   $("cinema-seamless-toggle")?.addEventListener("change", () => {
     setCinemaStudioMode($("cinema-seamless-toggle").checked ? "seamless" : "assets");
   });
@@ -9614,7 +10011,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("btn-cinema-add-t2v")?.addEventListener("click", () => addEmptyCinemaChapter());
   $("btn-cinema-add-cont")?.addEventListener("click", () => addEmptyCinemaScene("continue"));
-  $("btn-cinema-add-draft")?.addEventListener("click", () => addCinemaDraftShot());
   $("btn-cinema-save")?.addEventListener("click", () => void saveCinema(false));
   $("btn-cinema-produce")?.addEventListener("click", () => void produceCinema());
   $("cinema-duration")?.addEventListener("change", () => {
@@ -9695,7 +10091,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-cinema-film-delete")?.addEventListener("click", async () => {
     const id = ($("cinema-film-select")?.value || ensureCinema().film_id || "").trim();
     if (!id) return;
-    if (!confirm("Bu filmi silmek istediğine emin misin?")) return;
+    if (!confirm(tt("ui.deleteFilm"))) return;
     try {
       const r = await fetch("/api/cinema/films", {
         method: "POST",
@@ -9782,7 +10178,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     await fillCinemaFilms();
     const c = data && data.counts ? data.counts : null;
     const extra = c
-      ? ` · ${c.characters || 0} char / ${c.locations || 0} loc / ${c.creatures || 0} varlık / ${c.vehicles || 0} araç / ${c.takes || 0} take / ${c.sections || 0} shot`
+      ? ` · ${c.characters || 0} char / ${c.locations || 0} loc / ${c.creatures || 0} ${tt("cinema.creatures")} / ${c.vehicles || 0} ${tt("cinema.vehicles")} / ${c.takes || 0} take / ${c.sections || 0} shot`
       : "";
     const kept = data && data.stills_kept ? data.stills_kept : {};
     const keptN =
@@ -10053,14 +10449,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   });
   $("cinema-shots")?.addEventListener("click", (e) => {
-    const chapterDraft = e.target.closest(".cinema-chapter-draft");
-    if (chapterDraft) {
-      e.preventDefault();
-      e.stopPropagation();
-      const chapter = chapterDraft.closest(".cinema-chapter")?.dataset.chapter;
-      addCinemaDraftShot(chapter);
-      return;
-    }
     const chapterProduce = e.target.closest(".cinema-chapter-produce");
     if (chapterProduce) {
       e.preventDefault();
@@ -10172,8 +10560,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       }
       const field = e.target.dataset.field;
       if (!field) return;
-      void patchCinemaAsset(kind, id, { [field]: e.target.value }).then(() => {
-        if (field === "name") renderCinema();
+      void patchCinemaAsset(kind, id, { [field]: e.target.type === "checkbox" ? e.target.checked : e.target.value }).then(() => {
+        if (field === "use_lora") renderCinemaAssetCards(kind, { force: true });
+        if (field === "name" || field === "use_lora") renderCinema();
       });
     });
     $(rootId)?.addEventListener("click", (e) => {
@@ -10348,6 +10737,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     try {
       const payload = {
         prompts: prompts.map(withStyleLock),
+        ...sceneAssetReferences?.payload(),
         duration: state.duration,
         aspect: state.aspect || "16:9",
         quality: state.quality,
@@ -10519,7 +10909,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (e.target === $("view-error-logs")) closeErrorLogs();
   });
   $("btn-copy-error-logs")?.addEventListener("click", () =>
-    void copyText($("error-logs-text")?.textContent, "Hata logları kopyalandı")
+    void copyText($("error-logs-text")?.textContent, tt("ui.logsCopied"))
   );
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !$("view-error-logs")?.classList.contains("hidden")) {
@@ -10771,7 +11161,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       tToast("toast.testSent");
       if ($("notify-settings-hint")) {
         $("notify-settings-hint").textContent =
-          "Test gitti — gelmediyse bota /start yazıp chat id kontrol et";
+          tt("ui.notificationTestHint");
       }
     } catch (e) {
       toast(String(e.message || e));
@@ -11148,7 +11538,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     if (
       !confirm(
-        "Bu sohbeti sıfırlayıp yeni oturum açmak istiyor musun? Mesajlar ve brief silinir."
+        tt("ui.resetChat")
       )
     ) {
       return;
@@ -11224,6 +11614,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-director-reset")?.addEventListener("click", () => void resetDirectorSession());
 
   document.addEventListener("h3-lang", () => {
+    syncGalleryPhotoToolbar();
+    syncGalleryVideoToolbar();
+    if (!$("view-settings")?.classList.contains("hidden")) { void loadH3Models(); void refreshNotifySettings(); }
+    if (state.musicMeta) renderMusicLyricTimeline();
     ensureCinema();
     refreshStudioWorkspaceChrome();
     syncProjectChips();

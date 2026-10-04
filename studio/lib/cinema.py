@@ -449,12 +449,15 @@ def build_vehicle_sheet_prompt(
         "This must look like THIS named craft alone — different from any other vehicle sheet. "
         "Do not copy a previous ship design. Do not add thrusters, wings, or markings absent from "
         "the authority text. "
-        "A single wide photographic frame divided into three equal vertical panels on a seamless "
+        "A single photographic frame divided into a strict 2-by-2 grid of four equal panels on a seamless "
         "medium-grey studio backdrop, soft even light, no text, no logos, no watermark, no people. "
-        f"Left: readable close detail / marking of '{who}'. "
-        f"Center: three-quarter hero view of '{who}'. "
-        f"Right: alternate angle of the same '{who}'. "
-        "All three panels show the identical unique craft. "
+        f"Top-left: straight-on FRONT view of '{who}'. "
+        f"Top-right: straight-on REAR view of '{who}'. "
+        f"Bottom-left: exact RIGHT SIDE profile of '{who}', showing its right flank. "
+        f"Bottom-right: exact LEFT SIDE profile of '{who}', showing its left flank. "
+        "Left and right refer to the vehicle's own sides. No three-quarter angles or detail close-ups. "
+        "Show the entire vehicle in each panel without cropping, with equal scale and generous margins. "
+        "All four panels show the identical unique craft, including its asymmetric details. "
         f"Visual craft: {style}. Clean production reference, empty set, no crew."
     )
 
@@ -619,6 +622,25 @@ def is_tripanel_still(path: Path) -> bool:
     return bool(w and h and w >= int(h * 1.55))
 
 
+def split_vehicle_still(src: Path, dest_dir: Path, stem: str) -> list[Path]:
+    """Split the requested vehicle grid: front, rear, right side, left side."""
+    from PIL import Image
+
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with Image.open(src) as im:
+        rgb = im.convert("RGB")
+        w, h = rgb.size
+        boxes = ((0, 0, w // 2, h // 2), (w // 2, 0, w, h // 2),
+                 (0, h // 2, w // 2, h), (w // 2, h // 2, w, h))
+        paths = []
+        for label, box in zip(("front", "rear", "right", "left"), boxes):
+            dest = dest_dir / f"{stem}_{label}.png"
+            rgb.crop(box).save(dest, "PNG")
+            paths.append(dest)
+        return paths
+
+
 def split_tripanel_still(src: Path, dest_dir: Path, stem: str) -> list[Path]:
     """Crop a 3-panel sheet into portrait / front / back PNGs. Location stills stay 1 frame."""
     from PIL import Image
@@ -683,6 +705,18 @@ _STRUCTURED_KEYS = (
     "audio",
     "music",
     "important",
+    "reference_subjects",
+    "reference_environment",
+    "opening_frame",
+    "ending_frame",
+    "camera_framing",
+    "camera_angle",
+    "camera_movement",
+    "camera_amplitude",
+    "camera_speed",
+    "camera_target",
+    "transition",
+    "beats",
 )
 
 
@@ -731,6 +765,8 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
         from . import skills as skill_lib
 
         s = skill_lib.enrich_structured_from_look(structured, look_id)
+        # Genre defaults cover legacy fields; keep newer shot-direction fields.
+        s.update({k: v for k, v in _clean_structured(structured).items() if k not in s})
     except Exception:
         s = _clean_structured(structured)
     if not any(s.get(k) for k in _STRUCTURED_KEYS if k != "dialogue_lang"):
@@ -742,10 +778,45 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
         parts.append(f"Location: {s['location']}")
     if s.get("character"):
         parts.append(f"Main character: {s['character']}")
+    if s.get("reference_subjects"):
+        parts.append(f"Subject references: {s['reference_subjects']}. Keep each subject's identity and costume separate.")
+    if s.get("reference_environment"):
+        parts.append(f"Environment reference: {s['reference_environment']}. Preserve its layout and lighting.")
+    if s.get("opening_frame"):
+        parts.append(f"Opening composition: {s['opening_frame']}")
+    if s.get("transition"):
+        parts.append(f"Transition from previous clip: {s['transition']}.")
     if s.get("action"):
         parts.append(f"Action: {s['action']}")
+    if s.get("beats"):
+        beats = "; ".join(line.strip() for line in s["beats"].splitlines() if line.strip())
+        parts.append(f"Chronological action beats: {beats}.")
+    if s.get("camera_framing"):
+        parts.append(f"Framing: {s['camera_framing']}.")
+    if s.get("camera_angle"):
+        parts.append(f"Viewpoint: {s['camera_angle']}.")
+    if s.get("camera_movement"):
+        motion = {
+            "static": "The camera holds a static shot", "push in": "The camera pushes in",
+            "pull out": "The camera pulls out", "zoom in": "The camera zooms in",
+            "zoom out": "The camera zooms out", "pan left": "The camera pans left",
+            "pan right": "The camera pans right", "tilt up": "The camera tilts up",
+            "tilt down": "The camera tilts down", "truck left": "The camera trucks left",
+            "truck right": "The camera trucks right", "pedestal up": "The camera pedestals up",
+            "pedestal down": "The camera pedestals down", "arc": "The camera arcs",
+            "tracking": "The camera tracks",
+        }.get(s["camera_movement"], f"The camera {s['camera_movement']}")
+        if s.get("camera_amplitude"):
+            motion += f" with {s['camera_amplitude']} amplitude"
+        if s.get("camera_speed"):
+            motion += f" at {s['camera_speed']} speed"
+        if s.get("camera_target"):
+            motion += f" toward {s['camera_target']}"
+        parts.append(motion + ".")
     if s.get("camera"):
         parts.append(f"Camera: {s['camera']}")
+    if s.get("ending_frame"):
+        parts.append(f"End composition: {s['ending_frame']}")
     if s.get("dialogue"):
         lang = _dialogue_lang_label(s)
         who = s.get("character") or "The speaker (S1)"
@@ -872,7 +943,7 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     text = str(item.get("text") or item.get("prompt") or item.get("h3Prompt") or "").strip()
     blob = text or structured.get("action") or ""
     only_blob = _looks_like_h3_prompt(blob) and not any(
-        structured.get(k) for k in ("title", "location", "character", "camera")
+        structured.get(k) for k in _STRUCTURED_KEYS if k not in ("action", "dialogue_lang")
     )
     if (not _has_author_fields(structured) or only_blob) and blob:
         parsed = parse_h3_prompt(blob)
@@ -924,6 +995,11 @@ def _clean_shot(item: Any, index: int = 0, look_id: str = "") -> dict[str, Any]:
     scene = str(item.get("scene") or "").strip()
     if scene:
         out["scene"] = scene
+    # Keep review/explicit-reference state portable through every save/load.
+    from .film_project import clean_shot as clean_film_shot
+    out.update(clean_film_shot(item))
+    if item.get("audit_intent"):
+        out["audit_intent"] = str(item["audit_intent"])[:4000]
     return out
 
 
@@ -1034,7 +1110,8 @@ def load() -> dict[str, Any]:
     return data
 
 
-def save(data: dict[str, Any], *, preserve_stills: bool = True) -> dict[str, Any]:
+def save(data: dict[str, Any], *, preserve_stills: bool = True,
+         replace_text_ids: set[str] | None = None) -> dict[str, Any]:
     prev: dict[str, Any] = {}
     if CINEMA_FILE.is_file():
         try:
@@ -1064,7 +1141,7 @@ def save(data: dict[str, Any], *, preserve_stills: bool = True) -> dict[str, Any
     for i, x in enumerate(data.get("shots") or []):
         row = dict(x) if isinstance(x, dict) else {"text": x}
         incoming = _clean_structured(row.get("structured"))
-        if not _has_author_fields(incoming):
+        if not _has_author_fields(incoming) and str(row.get("id") or "") not in (replace_text_ids or set()):
             older = prev_by_id.get(str(row.get("id") or ""))
             if isinstance(older, dict):
                 prev_s = _clean_structured(older.get("structured"))
@@ -1373,11 +1450,16 @@ def _clean_asset(item: Any, kind: str) -> dict[str, Any]:
         out["voice_audio"] = Path(voice_audio).name
     if kind == "character":
         out["lora_id"] = str(item.get("lora_id") or "").strip()
+        out["use_lora"] = bool(item.get("use_lora", bool(out["lora_id"])))
         try:
-            out["lora_strength"] = float(item.get("lora_strength") or 0.8)
+            out["lora_strength"] = float(item.get("lora_strength") if item.get("lora_strength") is not None else 0.8)
         except (TypeError, ValueError):
             out["lora_strength"] = 0.8
     return out
+
+
+def uses_lora(asset: dict) -> bool:
+    return bool(asset.get("use_lora", bool(asset.get("lora_id")))) and asset.get("kind", "character") == "character"
 
 
 def new_asset(kind: str, **fields: Any) -> dict[str, Any]:
@@ -1454,7 +1536,7 @@ def delete_asset(kind: str, asset_id: str) -> bool:
             if not filename:
                 continue
             name = Path(str(filename)).name
-            match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back)\.png", name)
+            match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back|rear|right|left)\.png", name)
             if match and (match.group(1) + ".png") not in keep_files:
                 _unlink_retry(REFS_DIR / (match.group(1) + ".png"))
             if name in keep_files:
@@ -1517,12 +1599,12 @@ def match_prompt(text: str, lib: Optional[dict[str, Any]] = None) -> list[dict[s
     return hits[:9]
 
 
-def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optional[list[dict[str, Any]]] = None) -> str:
+def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optional[list[dict[str, Any]]] = None, *, start_index: int = 0) -> str:
     prompt = (text or "").strip()
     if not hits and not bound_images:
         return prompt
     lines = []
-    pic_i = 0
+    pic_i = start_index
     used_files: set[str] = set()
     image_rows = list(bound_images or [])
     if not image_rows:
@@ -1556,6 +1638,9 @@ def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optiona
             role = "vehicle / craft appearance lock"
         else:
             role = "location / set lock"
+        if not h:
+            role = "user visual reference"
+        role = row.get("reference_role") or role
         lines.append(
             f"<Picture {pic_i}> is {call} — {role} for {label}.{note_bit}{voice_bit} "
             f"Call this still as {call}. Keep this look consistent whenever {label} appears."
@@ -1583,6 +1668,37 @@ def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optiona
     if preamble and preamble[:40] in prompt:
         return prompt
     return f"{preamble}\n\n{prompt}".strip()
+
+
+def mentioned_character_lock(text: str, lib: Optional[dict[str, Any]] = None) -> str:
+    """Card text written when the character was created.
+
+    Continue shots cannot take the portrait and the last frame together, so the
+    written identity still has to travel with the prompt when the name is called.
+    """
+    lines: list[str] = []
+    seen: set[str] = set()
+    for hit in match_prompt(text, lib):
+        if hit.get("kind") != "character":
+            continue
+        name = str(hit.get("name") or "").strip()
+        notes = str(hit.get("notes") or "").strip()
+        key = name.lower()
+        if not name or not notes or key in seen:
+            continue
+        seen.add(key)
+        voice = str(hit.get("voice") or "").strip()
+        line = f"- {name}: {notes}."
+        if voice:
+            line += f" Voice: {voice}."
+        line += " Same person every shot; do not recast."
+        lines.append(line)
+    if not lines:
+        return ""
+    return (
+        "CHARACTERS — use each card as that person's identity. "
+        "Do not invent a new face:\n" + "\n".join(lines)
+    )
 
 
 def cast_voice_bible(lib: Optional[dict[str, Any]] = None) -> str:
@@ -1840,7 +1956,7 @@ def bound_character_portraits(text: str, lib: Optional[dict[str, Any]] = None) -
     files: list[str] = []
     seen: set[str] = set()
     for hit in match_prompt(text, lib):
-        if hit.get("kind") != "character":
+        if hit.get("kind") != "character" or uses_lora(hit):
             continue
         for file in character_portrait_files(hit):
             if file not in seen:
@@ -2591,7 +2707,7 @@ def _section_from_shot(shot: Any) -> dict[str, Any]:
         if structured.get("action"):
             row["prompt"] = structured["action"]
         # Preserve optional advanced values when an older project has them.
-        for key in ("dialogue", "dialogue_lang", "camera", "visual_style", "audio", "music", "important"):
+        for key in ("dialogue", "dialogue_lang", "camera", "visual_style", "audio", "music", "important", "reference_subjects", "reference_environment", "opening_frame", "ending_frame", "camera_framing", "camera_angle", "camera_movement", "camera_amplitude", "camera_speed", "camera_target", "transition", "beats"):
             val = structured.get(key) or ""
             if val and not (key == "dialogue_lang" and val.lower() == "auto"):
                 row[key] = val
@@ -2735,9 +2851,9 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
         )
     if not isinstance(item, dict):
         return _clean_shot({"text": "", "mode": "t2v"}, index, look_id=look_id)
-    structured_raw = item.get("structured")
-    if not isinstance(structured_raw, dict):
-        structured_raw = {k: item.get(k) for k in _STRUCTURED_KEYS if item.get(k) not in (None, "")}
+    structured_raw = {k: item.get(k) for k in _STRUCTURED_KEYS if item.get(k) not in (None, "")}
+    if isinstance(item.get("structured"), dict):
+        structured_raw.update({k: v for k, v in item["structured"].items() if v not in (None, "")})
     structured = _clean_structured(structured_raw)
     # Portable section JSON uses simple, readable keys. Map them to the
     # internal fields without compiling away the supplied prompt or scene.
@@ -2975,27 +3091,22 @@ def import_project_json(
 
     stills_kept = {"characters": 0, "locations": 0, "creatures": 0, "vehicles": 0}
     if keep_stills:
-        lib_assets = load_library()
         data["locations"], stills_kept["locations"] = _adopt_stills_by_name(
             data.get("locations") or [],
             cur.get("locations") or [],
-            lib_assets.get("locations") or [],
         )
         data["creatures"], stills_kept["creatures"] = _adopt_stills_by_name(
             data.get("creatures") or [],
             cur.get("creatures") or [],
-            lib_assets.get("creatures") or [],
         )
         data["vehicles"], stills_kept["vehicles"] = _adopt_stills_by_name(
             data.get("vehicles") or [],
             cur.get("vehicles") or [],
-            lib_assets.get("vehicles") or [],
         )
         if not redo_characters and selected_mode != "seamless":
             data["characters"], stills_kept["characters"] = _adopt_stills_by_name(
                 data.get("characters") or [],
                 cur.get("characters") or [],
-                lib_assets.get("characters") or [],
             )
 
     out = save(data)

@@ -1220,7 +1220,9 @@ class LlmRouter:
         for cand in data.get("candidates") or []:
             parts = ((cand.get("content") or {}).get("parts")) or []
             for p in parts:
-                t = (p.get("text") or "").strip()
+                # Stream deltas may begin/end with whitespace or be a single space.
+                # Stripping each delta merges words and can break exact asset names in JSON.
+                t = p.get("text") or ""
                 if not t:
                     continue
                 if p.get("thought"):

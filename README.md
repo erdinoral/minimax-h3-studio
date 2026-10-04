@@ -1,5 +1,19 @@
 # MiniMax H3 Studio
 
+## v9.0.0 — Film & AI Director update
+
+- **AI Director:** describe your story and target duration inside Director. Your configured LLM creates character/location cards and detailed, editable scenes directly in the film. Existing cast, voice settings and LoRA assignments are preserved. Review the plan, then start production; JSON import/export remains available.
+- **Shared asset references:** explicitly select characters, locations, creatures and vehicles in Scene or Director. Continuations combine the previous final frame with the selected asset references. Standalone Scene no longer silently borrows Director characters by name.
+- **Character LoRA mode:** keep the character name and voice, use a compatible character adapter, and skip automatic character image generation. Previously generated card images are ignored while this mode is enabled.
+- **Organized LoRAs:** categorized selectors, automatic trigger words from available metadata, and up to three adapters with independent weights. Installed catalog files are reused when downloading.
+- **Optional H3 Singularity:** an actual main-model selector in Settings, with a separate approximately 21 GB download. Experimental; improved quality and character identity are not guaranteed. Standard installation keeps MiniMax H3.
+- **Production tools:** four vehicle views, individual asset-image deletion, shot review and previewed repairs, and trimmed video/audio reference uploads.
+- **Interface polish:** wider Settings forms, responsive LoRA cards, and expanded English/Turkish translations.
+
+**Update:** stop Studio, choose **Update** in Pinokio, then start it again and refresh the browser with **Ctrl+F5**. No reset or model re-download is needed for this app update. AI Director requires a configured, reachable LLM provider. Character likeness and continuation quality still depend on the selected model, adapter and inputs.
+
+See [AI Director](docs/ai-director.md), [optional models](docs/optional-models.md), and [release notes](docs/releases/v9.0.0.md).
+
 <p align="center">
   <img src="github-preview.png" alt="MiniMax H3 Studio" width="640" />
 </p>
@@ -74,6 +88,50 @@ Studio never replaces Comfy. If Studio fails, use **Open ComfyUI** as before.
 - **Gallery:** separate Video / Photo view, larger previews, prompt details, individual and bulk deletion, plus player previous/next navigation.
 - **Director / Cinema:** production types for Film/Trailer, Music Video, Commercial, Intro and Outro; simplified content-first JSON import; character, location and scene bindings; continuous shot chains.
 - **Music video planning:** upload a song, add a visual concept and lyrics, create editable lyric timing notes, then prepare a visual clip plan. This assists visual planning; it is not automatic beat-sync or lip-sync.
+
+### Shot review, reference excerpts and LoRA guidance
+
+Vehicle sheets use four full-vehicle views in a 2×2 grid: front, rear, right side and left side. Both MiniMax and Qwen split these into four separately named reference images. Existing vehicle images stay unchanged until the card is regenerated.
+
+**Scene → Asset references** selects individual stills from the active film's character, vehicle, creature and location cards. Refresh after switching films or changing cards. **Preview references** shows the exact ordered asset files and Picture numbers without generating a video. No selection uses names mentioned in the prompt; **No assets** explicitly disables that fallback. Scene selections are saved in this browser for the active film.
+
+Director's shot reference selections now feed the same resolver. Explicit selections take priority over name matching, and **Preview references** is available in the shot inspector. New clips use Ref2VA when assets are present. Continue uses the previous final frame as Picture 1 and asset references from Picture 2 onward, with the final frame also connected as the H3 first-frame guide. Missing files, stale film selection and reference overflow fail before queuing; the image limit is 9, or 8 with an opening frame. Asset references guide appearance rather than replacing the opening composition. This verifies the inputs, not the model's ability to preserve every detail in rendered output.
+
+
+- Open **Cinema → Shot review** (TR: **Sahne denetimi**). **Basic check** detects empty/identical prompts, malformed dialogue tags and invalid continuation boundaries. **Review with Director** uses your configured LLM to suggest event, dialogue and state-consistency warnings. This reviews written plans, not rendered video quality.
+- Select flagged shots → **Repair selected shots** → inspect current/proposed prompts → **Apply preview**. Drafting never saves or queues videos. Only selected shots are changed; approved shots stay intact. Queued/running shots cannot be repaired. Editing the plan, settings, references or active LoRA guidance invalidates the old checkpoint. Checkpoints expire after one hour or a server restart.
+- Video references and character voice uploads now offer a preview with exact start/end seconds, 3/5/10-second shortcuts, video filmstrip or audio waveform where supported. **Use selection** creates a separate excerpt (0.1–15 seconds); **Use full file** retains the existing upload behavior. Originals are not overwritten. FFmpeg must be available in the launcher environment.
+- Choose LoRAs, then **LoRA guidance** beside the selector. Edit usage recommendations and comma-separated triggers. Guides are saved locally in `studio/data/lora_guidance.json`; a `<filename>.guide.txt` beside a LoRA can also supply initial guidance. Only selected adapters' bounded guides reach Director, scene rewriting and repair; cast/action/dialogue instructions take priority.
+- Under **Settings → Advanced H3 models → Video VAE**, the optional **Automatic INT8 ConvRot VAE** profile uses `minimax_h3_video_vae_int8_convrot.safetensors` only when installed and the selected transformer is INT8 ConvRot. Otherwise it falls back to FP16. Manual VAE selections take priority. No weights are downloaded and the default remains FP16; performance gains have not been benchmarked.
+
+API additions (replace `BASE_URL` with the Studio URL reported by Pinokio):
+
+```javascript
+const report = await fetch(`${BASE_URL}/api/cinema/review`, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({film_id: 'YOUR_FILM_ID', semantic: false, lang: 'en'})
+}).then(r => r.json());
+// POST /api/cinema/review/draft then /apply:
+// {checkpoint: report.checkpoint, shot_ids: ['FLAGGED_SHOT_ID']}
+// /draft returns read-only patches; /apply saves only selected previewed patches.
+```
+
+```python
+import httpx
+with open('reference.mp4', 'rb') as media:
+    response = httpx.post(f'{BASE_URL}/api/refs/upload-video',
+        files={'file': ('reference.mp4', media, 'video/mp4')},
+        data={'start': '2', 'end': '7'}, timeout=150)
+    response.raise_for_status()
+    excerpt = response.json()
+# /api/refs/upload-audio accepts the same optional start/end fields.
+```
+
+```bash
+curl "$BASE_URL/api/loras/guidance?file=YOUR_LORA.safetensors"
+curl -X POST "$BASE_URL/api/loras/guidance" -H "Content-Type: application/json" \
+  -d '{"file":"YOUR_LORA.safetensors","triggers":"trigger","guide":"Creator usage notes"}'
+```
 
 ### Support
 
@@ -609,3 +667,9 @@ Your feedback on video continuation, file selection, queue control, LoRAs, scene
 ## License
 
 The model is covered by the [MiniMax H3 Community License](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE). Review it before commercial use. ComfyUI is GPL-3.0.
+
+### LoRA actors
+
+Director → Characters → LoRA adds an installed character LoRA as a film actor with its name, trigger, appearance notes and strength. The actor is added in Use LoRA mode and used directly in video generation without generating character visuals. Style and acceleration LoRAs are not character identities.
+
+Character cards have a **Use LoRA** switch. When enabled, only the actor name, voice and LoRA selector are shown. No character sheet is generated (including forced rebuild); existing character images and appearance notes are not sent as visual references. The selected installed LoRA and its trigger supply identity directly to video generation. Disable the switch to restore the ordinary description/image workflow.

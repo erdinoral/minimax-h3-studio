@@ -6,7 +6,7 @@ import json
 import re
 import uuid
 
-KINDS = ("characters", "creatures", "locations")
+KINDS = ("characters", "creatures", "vehicles", "locations")
 
 
 def clean_shot(raw):
@@ -29,6 +29,9 @@ def resolve(shot, lib, exists):
     identities = set()
     owners = {}
     for binding in shot.get("bindings", []):
+        if not isinstance(binding, dict):
+            errors.append("Geçersiz asset seçimi")
+            continue
         aid = str(binding.get("asset_id") or "")
         asset = assets.get(aid)
         if not asset:
@@ -37,13 +40,24 @@ def resolve(shot, lib, exists):
         snap = binding.get("snapshot")
         frozen = isinstance(snap, dict) and snap.get("id") == aid
         asset = copy.deepcopy(snap if frozen else asset)
+        from .cinema import uses_lora
+        # Live actor mode governs routing even when a shot has frozen visual refs.
+        if uses_lora(assets[aid]):
+            hits.append(copy.deepcopy(assets[aid]))
+            continue
         identity = str(asset.get("identity_id") or aid)
         if identity in identities:
             errors.append("Aynı kimliğin iki görünümü seçili: " + asset.get("name", aid))
         identities.add(identity)
         images = asset.get("images") or ([{"file": asset["image"]}] if asset.get("image") else [])
         files = binding.get("files")
+        if files is not None and (not isinstance(files, list) or any(not isinstance(f, str) for f in files)):
+            errors.append(asset.get("name", aid) + ": geçersiz görsel seçimi")
+            continue
         if files is not None:
+            missing = set(files) - {im.get("file") for im in images}
+            if missing:
+                errors.append(asset.get("name", aid) + ": seçili görsel kartta yok — " + ", ".join(sorted(missing)))
             images = [im for im in images if im.get("file") in files]
         if not images:
             errors.append(asset.get("name", aid) + ": referans görseli seçilmeli")

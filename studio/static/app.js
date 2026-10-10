@@ -10088,6 +10088,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     e.preventDefault();
     setCinemaFold(key, cinemaFoldState()[key] === false);
   });
+  $("btn-cinema-add-scene")?.addEventListener("click", () => addCinemaShot("t2v"));
   $("btn-cinema-add-t2v")?.addEventListener("click", () => addEmptyCinemaChapter());
   $("btn-cinema-add-cont")?.addEventListener("click", () => addEmptyCinemaScene("continue"));
   $("btn-cinema-save")?.addEventListener("click", () => void saveCinema(false));

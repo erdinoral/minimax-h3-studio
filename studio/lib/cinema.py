@@ -790,7 +790,7 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
         parts.append(f"Action: {s['action']}")
     if s.get("beats"):
         beats = "; ".join(line.strip() for line in s["beats"].splitlines() if line.strip())
-        parts.append(f"Chronological action beats: {beats}.")
+        parts.append(f"Chronological action beats: {beats}" + ("" if beats.endswith((".", "!", "?")) else "."))
     if s.get("camera_framing"):
         parts.append(f"Framing: {s['camera_framing']}.")
     if s.get("camera_angle"):
@@ -851,8 +851,16 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
 _H3_MARKERS = (
     ("location", re.compile(r"\bLocation:\s*", re.I)),
     ("character", re.compile(r"\bMain character:\s*", re.I)),
+    ("reference_subjects", re.compile(r"\bSubject references:\s*", re.I)),
+    ("reference_environment", re.compile(r"\bEnvironment reference:\s*", re.I)),
+    ("opening_frame", re.compile(r"\bOpening composition:\s*", re.I)),
+    ("transition", re.compile(r"\bTransition from previous clip:\s*", re.I)),
     ("action", re.compile(r"\bAction:\s*", re.I)),
+    ("beats", re.compile(r"\bChronological action beats:\s*", re.I)),
+    ("camera_framing", re.compile(r"\bFraming:\s*", re.I)),
+    ("camera_angle", re.compile(r"\bViewpoint:\s*", re.I)),
     ("camera", re.compile(r"\bCamera:\s*", re.I)),
+    ("ending_frame", re.compile(r"\bEnd composition:\s*", re.I)),
     ("important", re.compile(r"\bConstraints:\s*", re.I)),
 )
 _H3_HEAD = re.compile(
@@ -908,21 +916,23 @@ def parse_h3_prompt(text: Any) -> dict[str, str]:
     for i, (_start, end, key) in enumerate(hits):
         stop = hits[i + 1][0] if i + 1 < len(hits) else len(body)
         out[key] = body[end:stop].strip()
-    cam = out.get("camera") or ""
+    dialogue_field = next((key for key in ("ending_frame", "camera", "action", "important")
+                           if _H3_SAYS.search(out.get(key) or "")), "camera")
+    cam = out.get(dialogue_field) or ""
     dm = _H3_SAYS.search(cam)
     if dm:
         before = cam[: dm.start()].strip()
         who = (out.get("character") or "").strip()
         if who and before.endswith(who):
-            out["camera"] = before[: -len(who)].strip()
+            out[dialogue_field] = before[: -len(who)].strip()
         else:
             wm = _H3_WHO.match(before)
             if wm:
-                out["camera"] = (wm.group("camera") or "").strip()
+                out[dialogue_field] = (wm.group("camera") or "").strip()
                 if not who:
                     out["character"] = (wm.group("who") or "").strip()
             else:
-                out["camera"] = before
+                out[dialogue_field] = before
         line = (dm.group("line") or "").strip()
         if line:
             out["dialogue"] = line
@@ -1443,6 +1453,11 @@ def _clean_asset(item: Any, kind: str) -> dict[str, Any]:
         "notes": notes,
         "voice": str(item.get("voice") or "").strip(),
     }
+    for field in ("source_ref", "sheet_overview"):
+        if item.get(field):
+            out[field] = Path(str(item[field])).name
+    if item.get("sheet_method") in ("standard", "look_sheets"):
+        out["sheet_method"] = item["sheet_method"]
     if item.get("library_id"):
         out["library_id"] = str(item["library_id"]).strip()
     voice_audio = str(item.get("voice_audio") or "").strip()
@@ -1477,6 +1492,11 @@ def upsert_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     if idx >= 0:
         items[idx] = cleaned
     else:
+        if not _asset_has_still(asset) and not asset.get("lora_id"):
+            donor = _library_asset(kind, cleaned["name"])
+            if donor:
+                cleaned = _clean_asset({**donor, "id": cleaned["id"], "name": cleaned["name"],
+                                        "voice": cleaned.get("voice") or donor.get("voice") or ""}, kind)
         items.append(cleaned)
     data[key] = items
     save(data, preserve_stills="images" not in asset)
@@ -1525,6 +1545,8 @@ def delete_asset(kind: str, asset_id: str) -> bool:
         if isinstance(image, dict) and image.get("file")
     }
     keep_files.update(Path(str(item["image"])).name for item in owners if item.get("image"))
+    keep_files.update(Path(str(item[field])).name for item in owners
+                      for field in ("source_ref", "sheet_overview") if item.get(field))
     for item in removed:
         images = list(item.get("images") or [])
         if item.get("image"):
@@ -1536,7 +1558,7 @@ def delete_asset(kind: str, asset_id: str) -> bool:
             if not filename:
                 continue
             name = Path(str(filename)).name
-            match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back|rear|right|left)\.png", name)
+            match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back|rear|right|left|view[1-5])\.png", name)
             if match and (match.group(1) + ".png") not in keep_files:
                 _unlink_retry(REFS_DIR / (match.group(1) + ".png"))
             if name in keep_files:
@@ -1557,6 +1579,16 @@ def _hit_token(text: str, value: str) -> bool:
 
 
 def asset_mentioned(text: str, asset: dict[str, Any]) -> bool:
+    if asset.get("kind") == "character":
+        # Generated scene prompts contain a film-wide voice bible and dialogue
+        # addressing off-screen actors. Those are not visual cast selections.
+        cast = re.search(r"\bMain characters?\s*:\s*(.*?)(?=\s+Opening composition\s*:|\n|$)", text or "", re.I)
+        if cast:
+            text = cast.group(1)
+        else:
+            text = re.sub(r"CAST VOICE BIBLE[^\n]*\n(?:[^\n]+\n)*", "", text or "", flags=re.I)
+            text = re.sub(r"^Character .+ uses the learned identity:.*$", "", text, flags=re.M)
+            text = re.sub(r"<d>.*?</d>", "", text, flags=re.S | re.I)
     if _hit_token(text, asset.get("trigger") or "") or _hit_token(text, asset.get("name") or ""):
         return True
     for im in asset.get("images") or []:
@@ -1885,7 +1917,21 @@ def normalize_produce_shots(
     return [_clean_shot({"text": t, "mode": "t2v"}, i) for i, t in enumerate(texts)]
 
 
-def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: list[Any]) -> list[dict[str, Any]]:
+def _library_asset(kind: str, name: str) -> dict[str, Any] | None:
+    """Exact normalized name match; never infer identity from a partial name."""
+    key = " ".join(str(name or "").split()).casefold()
+    if not key:
+        return None
+    _, group = asset_kind_key(kind)
+    for card in load_library().get(group) or []:
+        if " ".join(str(card.get("name") or "").split()).casefold() == key:
+            if _asset_has_still(card) or (kind == "character" and uses_lora(card) and card.get("lora_id")):
+                return {**card, "library_id": card.get("library_id") or card.get("id")}
+    return None
+
+
+def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: list[Any],
+                        *, reuse_library: bool = True) -> list[dict[str, Any]]:
     by_key: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for raw in existing:
@@ -1905,18 +1951,28 @@ def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: lis
             continue
         key = name.lower()
         prev = by_key.get(key) or {}
+        # A new cast member inherits the saved actor, not an AI-invented face.
+        # Existing film cards remain authoritative, including deliberately removed images.
+        donor = (_library_asset(kind, name) if reuse_library
+                 and not prev and not _asset_has_still(raw) and not raw.get("lora_id") else None)
+        if donor:
+            prev = {**donor, "id": str(uuid.uuid4())}
         merged = {
             **prev,
             "name": name,
-            "notes": str(raw.get("notes") or raw.get("description") or raw.get("card") or prev.get("notes") or ""),
+            "notes": str((prev.get("notes") if donor else "") or raw.get("notes") or raw.get("description") or raw.get("card") or prev.get("notes") or ""),
             "voice": str(raw.get("voice") or prev.get("voice") or ""),
             "images": prev.get("images") or [],
             "image": prev.get("image") or "",
             "id": prev.get("id") or str(uuid.uuid4()),
         }
+        for field in ("library_id", "source_ref", "sheet_overview", "sheet_method", "voice_audio", "trigger", "url"):
+            if prev.get(field):
+                merged[field] = prev[field]
         if kind == "character":
-            merged["lora_id"] = prev.get("lora_id") or ""
-            merged["lora_strength"] = prev.get("lora_strength") or 0.8
+            merged["lora_id"] = raw.get("lora_id") or prev.get("lora_id") or ""
+            merged["use_lora"] = raw.get("use_lora", prev.get("use_lora", bool(merged["lora_id"])))
+            merged["lora_strength"] = raw.get("lora_strength", prev.get("lora_strength", 0.8))
         by_key[key] = _clean_asset(merged, kind)
         if key not in order:
             order.append(key)
@@ -3044,7 +3100,7 @@ def import_project_json(
     prev_vehicles = list(data.get("vehicles") or [])
 
     if mode_l == "replace":
-        data["characters"] = _merge_named_assets("character", [], chars_in)
+        data["characters"] = _merge_named_assets("character", [], chars_in, reuse_library=not redo_characters)
         data["locations"] = _merge_named_assets("location", [], locs_in)
         data["creatures"] = _merge_named_assets("creature", [], creatures_in)
         data["vehicles"] = _merge_named_assets("vehicle", [], vehicles_in)
@@ -3059,7 +3115,7 @@ def import_project_json(
             imported_n = len(shots)
     else:
         data["characters"] = _merge_named_assets(
-            "character", data.get("characters") or [], chars_in
+            "character", data.get("characters") or [], chars_in, reuse_library=not redo_characters
         )
         data["locations"] = _merge_named_assets(
             "location", data.get("locations") or [], locs_in

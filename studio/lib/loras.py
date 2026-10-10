@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import json
+import hashlib
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
@@ -10,7 +12,61 @@ from urllib.parse import unquote, urlparse
 STUDIO_ROOT = Path(__file__).resolve().parent.parent
 LORAS_DIR = STUDIO_ROOT.parent / "app" / "models" / "loras"
 
-CATALOG: list[dict[str, Any]] = [
+CATALOG: list[dict[str, Any]] = [{'id': 'lightx2v-fl2v-4step-v12',
+  'label': 'LightX2V FL2V v1.2 (4 step)',
+  'file': 'minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors',
+  'steps': 4,
+  'sampler': 'er_sde',
+  'scheduler': 'simple',
+  'strength': 1.0,
+  'graphs': ['fl2va'],
+  'category': 'speed',
+  'hint': '4 steps · automatic preset · fl2va',
+  'size_hint': '~1.8 GB',
+  'url': 'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors',
+  'preset': True},
+ {'id': 'lightx2v-fl2v-8step',
+  'label': 'LightX2V FL2V (8 step)',
+  'file': 'minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors',
+  'steps': 8,
+  'sampler': 'er_sde',
+  'scheduler': 'simple',
+  'strength': 1.0,
+  'graphs': ['fl2va'],
+  'category': 'speed',
+  'hint': '8 steps · automatic preset · fl2va',
+  'size_hint': '~1.8 GB',
+  'url': 'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors',
+  'preset': True},
+ {'id': 'lightx2v-ref2v-4step',
+  'label': 'LightX2V Ref2V (4 step)',
+  'file': 'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+  'steps': 4,
+  'sampler': 'er_sde',
+  'scheduler': 'simple',
+  'strength': 1.0,
+  'graphs': ['ref2va'],
+  'category': 'speed',
+  'hint': '4 steps · automatic preset · ref2va',
+  'size_hint': '~1.8 GB',
+  'url': 'https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors',
+  'preset': True},
+ {'id': 'hyperflow-8step',
+  'label': 'HyperFlow (8 step · experimental)',
+  'file': 'custom_node_hyperflow_8step_v1.0_comfyui_pruned.safetensors',
+  'steps': 8,
+  'sampler': 'euler',
+  'scheduler': 'simple',
+  'strength': 1.0,
+  'graphs': ['fl2va', 'ref2va'],
+  'category': 'speed',
+  'hint': '8 steps · Euler + trained sigma grid · pruned model curve fit · experimental',
+  'size_hint': '~3.9 GB',
+  'url': 'https://huggingface.co/drbaph/Hyperflow-Comfyui/resolve/main/custom_node_hyperflow_8step_v1.0_comfyui_pruned.safetensors',
+  'preset': True,
+  'storage_folder': 'hyperflow',
+  'engine_patch': 'hyperflow',
+  'experimental': True}] + [
     {
         "id": "",
         "label": "Yok (varsayılan)",
@@ -209,6 +265,44 @@ CATALOG: list[dict[str, Any]] = [
     },
 ]
 
+CATALOG.extend(json.loads((Path(__file__).with_name("film_lora_catalog.json")).read_text(encoding="utf-8")))
+
+
+def valid_safetensors(path: Path) -> bool:
+    """Check the container and tensor bounds, including legitimate tiny sliders."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as stream:
+            raw = stream.read(8)
+            if len(raw) != 8:
+                return False
+            length = int.from_bytes(raw, "little")
+            if not 2 <= length <= min(size - 8, 16 * 1024 * 1024):
+                return False
+            header = json.loads(stream.read(length))
+        tensors = [v for k, v in header.items() if k != "__metadata__"]
+        return bool(tensors) and all(isinstance(v, dict) and v.get("dtype") and
+            isinstance(v.get("shape"), list) and isinstance(v.get("data_offsets"), list) and
+            len(v["data_offsets"]) == 2 and 0 <= v["data_offsets"][0] <= v["data_offsets"][1] <= size - length - 8
+            for v in tensors)
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+
+
+def verify_download(path: Path, spec: dict) -> None:
+    if not valid_safetensors(path):
+        raise ValueError("Invalid safetensors file")
+    if spec.get("expected_bytes") and path.stat().st_size != spec["expected_bytes"]:
+        raise ValueError("LoRA download size mismatch")
+    if spec.get("sha256"):
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest().lower() != spec["sha256"].lower():
+            raise ValueError("LoRA SHA256 mismatch")
+
+
 # Shared Comfy loras/ often has SDXL/Pony/Wan/Flux files. H3 cannot use them.
 # ClipProj is a text-encoder MLP, not a video LoRA — LoraLoader would break.
 _SKIP_LORA = re.compile(
@@ -279,8 +373,9 @@ def file_ready(filename: str) -> bool:
     name = Path(filename or "").name
     if not name:
         return True
-    path = LORAS_DIR / name
-    return path.is_file() and path.stat().st_size > 1024 * 1024
+    folder = next((row.get("storage_folder") for row in CATALOG if name in candidates(row)), None)
+    path = (LORAS_DIR.parent / folder if folder else LORAS_DIR) / name
+    return path.is_file() and (path.stat().st_size > 1024 * 1024 or valid_safetensors(path))
 
 
 def spec_ready(spec: dict[str, Any]) -> bool:
@@ -328,6 +423,8 @@ def apply_trigger(text: str, spec: Optional[dict[str, Any]] = None) -> str:
     body = text or ""
     if not trig:
         return body
+    if (spec or {}).get("trigger_position") == "start" and not body.lstrip().lower().startswith(trig.lower()):
+        return f"{trig}, {body}".strip()
     missing = [word.strip() for word in re.split(r"[,\n]+", trig)
                if word.strip() and word.strip().lower() not in body.lower()]
     return f"{', '.join(missing)}, {body}".strip() if missing else body
@@ -364,7 +461,7 @@ def public_list() -> list[dict[str, Any]]:
         on_disk = resolved_file(spec) if spec.get("file") else ""
         if on_disk:
             item["file"] = on_disk
-            p = LORAS_DIR / on_disk
+            p = (LORAS_DIR.parent / spec["storage_folder"] if spec.get("storage_folder") else LORAS_DIR) / on_disk
             if p.is_file():
                 item["bytes"] = p.stat().st_size
         # Local-only entries (no download URL) stay hidden until the file exists.
@@ -377,19 +474,20 @@ def public_list() -> list[dict[str, Any]]:
                 continue
             if not is_h3_lora_name(p.name):
                 continue
-            if p.stat().st_size < 1024 * 1024:
+            if not file_ready(p.name):
                 continue
             out.append(disk_spec(p.name, p.stat().st_size))
     return out
 
 
 def dest_for(spec: dict[str, Any]) -> Path:
-    LORAS_DIR.mkdir(parents=True, exist_ok=True)
+    folder = LORAS_DIR.parent / spec["storage_folder"] if spec.get("storage_folder") else LORAS_DIR
+    folder.mkdir(parents=True, exist_ok=True)
     lid = spec.get("id") or ""
     for row in CATALOG:
         if lid and row.get("id") == lid and row.get("file"):
-            return LORAS_DIR / row["file"]
-    return LORAS_DIR / Path(spec.get("file") or "lora.safetensors").name
+            return folder / row["file"]
+    return folder / Path(spec.get("file") or "lora.safetensors").name
 
 
 def filename_from_url(url: str, fallback: str = "") -> str:
@@ -408,6 +506,7 @@ def apply_selected_triggers(text: str, lora_id: str = "", file: str = "") -> str
     """Apply every loaded adapter's trigger, including secondary character adapters."""
     names = [name.strip() for name in (file or "").split("|") if name.strip()]
     specs = [find_spec(file=name) for name in names] if names else [find_spec(lora_id=lora_id)]
+    specs.sort(key=lambda spec: bool((spec or {}).get("trigger_position") == "start"))
     for spec in specs:
         text = apply_trigger(text, spec)
     return text

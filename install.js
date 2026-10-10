@@ -151,6 +151,7 @@ module.exports = {
           "uv pip install -r ../studio/requirements.txt"
         ]
       }
-    }
+    },
+    { method: "script.start", params: { uri: "film-tools.js" } }
   ]
 }

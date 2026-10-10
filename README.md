@@ -1,5 +1,13 @@
 # MiniMax H3 Studio
 
+## v9.1.0 — Appearance, Scene audio and creator tools
+
+Appearance settings are now available in the public build under **Settings → Appearance**: choose Orange, Blue or Graphite independently from Modern, Old School or Studio styles. Your choices persist in this browser.
+
+This update also adds single-clip audio input in Scene, categorized film LoRAs, automatic compatible speed presets, an optional shared RefMod switch, managed model storage, H3/Qwen reference asset generation and library reuse fixes. Optional adapter weights are downloaded on demand; HyperFlow remains experimental. See the [9.1 release notes](docs/releases/v9.1.0.md) and [Scene audio guide](docs/scene-audio.md).
+
+After updating in Pinokio, stop and start Studio, then reload the browser to load the new backend, tools and interface.
+
 ## v9.0.0 — Film & AI Director update
 
 - **AI Director:** describe your story and target duration inside Director. Your configured LLM creates character/location cards and detailed, editable scenes directly in the film. Existing cast, voice settings and LoRA assignments are preserved. Review the plan, then start production; JSON import/export remains available.
@@ -673,3 +681,19 @@ The model is covered by the [MiniMax H3 Community License](https://huggingface.c
 Director → Characters → LoRA adds an installed character LoRA as a film actor with its name, trigger, appearance notes and strength. The actor is added in Use LoRA mode and used directly in video generation without generating character visuals. Style and acceleration LoRAs are not character identities.
 
 Character cards have a **Use LoRA** switch. When enabled, only the actor name, voice and LoRA selector are shown. No character sheet is generated (including forced rebuild); existing character images and appearance notes are not sent as visual references. The selected installed LoRA and its trigger supply identity directly to video generation. Disable the switch to restore the ordinary description/image workflow.
+
+### Reusing library assets
+
+When JSON, AI Director, or a new asset card introduces a name matching a saved library asset of the same kind (character, creature, location, or vehicle), Studio links the saved images and, for characters, the character LoRA to the film instead of generating it again. Matching ignores capitalization and surrounding/repeated whitespace; partial names do not match. Existing film cards remain authoritative. Use **Regenerate characters** or the card regeneration action to create fresh images when wanted. Removing a film image does not automatically restore it from the library.
+
+### RefMod and automatic speed presets
+
+The **RefMod** switch in Settings, Scene, and Director is shared and saved on this machine. It applies to newly queued reference videos. Off keeps the ordinary native encoder. On uses the SKEBA cached reference encoder, preserves reference order and keyframe guides, and saves full visual RefMods under `app/models/refmods/h3-studio`. Audio references keep their existing routing. Text-only clips and asset-image generation do not use RefMod. This is reference encoding, not LoRA training or an identity guarantee.
+
+Speed LoRAs apply their compatible step/sampler presets automatically in both Scene and Director. Select one speed adapter at a time; character and style adapters may accompany it within the existing three-adapter limit. LightX2V FL2V/Ref2V companion adapters are selected according to the actual generation graph. A missing companion produces an explicit download error. Existing speed files are reused.
+
+HyperFlow is shown with the speed LoRAs, but uses its dedicated `ApplyHyperFlowH3` patch, Euler sampler and trained sigma grid. Its pruned-base curve fit is experimental and checkpoint-dependent; this is not the full unpruned release. Converted weights live in `app/models/hyperflow` and can be removed through model storage.
+
+Install the optional nodes with **Film tools**; Install/Update also provisions them. Restart Studio after installation. No ComfyUI core files are modified by these patches.
+
+API: `GET /api/h3-enhancements` returns `refmod_enabled`, `refmod_ready`, `hyperflow_ready`; `POST /api/h3-enhancements` accepts `{"refmod_enabled": true}` (or false). Queueing snapshots the switch, so later toggles do not alter jobs already queued.

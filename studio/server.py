@@ -1,6 +1,7 @@
 """H3 Studio — FastAPI front for MiniMax H3 ComfyUI (does not modify Comfy)."""
 from __future__ import annotations
 
+import ssl
 import asyncio
 import atexit
 import contextvars
@@ -27,6 +28,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
     "director_progress", default=None
 )
 
+from lib import h3_enhancements
 from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
@@ -41,7 +43,10 @@ from lib.comfy import (
     enhance_video_ref_prompt,
     MULTISHOT_MAX_SHOTS,
 )
+from lib import look_sheets
 from lib import h3_models, optional_models
+from lib import lora_access
+from lib import model_storage
 from lib.lora_guidance import guidance, guidance_block, save_guidance
 from lib import qwen_still
 from lib.loras import (
@@ -49,6 +54,8 @@ from lib.loras import (
     apply_selected_triggers,
     dest_for,
     file_ready,
+    valid_safetensors,
+    verify_download,
     filename_from_url,
     find_spec,
     is_h3_lora_name,
@@ -114,6 +121,7 @@ from lib import slog
 from lib import cinema
 from lib import cinema_planner
 from lib import asset_references
+from lib import director_identity
 from lib import donors as donor_roll
 
 ROOT = Path(__file__).resolve().parent
@@ -555,8 +563,14 @@ def _with_lora_preset(
     scheduler: str,
     graph: str = "fl2va",
 ) -> tuple[int, str, str]:
-    """Steps / sampler / scheduler come from the request. LoRA does not override them."""
-    return steps, sampler, scheduler
+    """Apply the compatible speed adapter's trained recipe automatically."""
+    names = getattr(body, "lora_name", None) or ""
+    if not names and getattr(body, "lora_id", None):
+        names = (find_spec(lora_id=body.lora_id) or {}).get("file") or ""
+    try:
+        return h3_enhancements.preset(names, steps, sampler, scheduler, graph)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _graph_for_mode(mode: str) -> str:
@@ -590,45 +604,88 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
             return True
         return graph in graphs
 
-    char_id = ""
-    char_strength = None
-    for h in (bound or {}).get("hits") or []:
-        if h.get("kind") == "character" and cinema.uses_lora(h) and h.get("lora_id"):
-            char_id = str(h["lora_id"]).strip()
-            char_strength = h.get("lora_strength")
-            break
-    char_spec = find_spec(lora_id=char_id) if char_id else None
-    if char_id and (not _ok(char_spec) or not spec_ready(char_spec)):
-        raise HTTPException(400, "Seçili karakter LoRA bu çekimin modeliyle uyumlu değil veya hazır değil")
-    glob_spec = find_spec(
-        lora_id=getattr(body, "lora_id", None) or "",
-        file=getattr(body, "lora_name", None) or "",
-    )
     src = LoraSrc()
-    src.lora_strengths = dict(getattr(body, "lora_strengths", {}) or {})
-    requested_names = str(getattr(body, "lora_name", None) or "").split("|")
-    if len(requested_names) > 1:
-        usable = []
-        for name in requested_names[:3]:
-            selected_spec = find_spec(file=name)
-            if _ok(selected_spec):
-                usable.append(selected_spec)
-        if usable:
-            src.lora_id = usable[0].get("id") or ""
-            src.lora_name = "|".join(spec["file"] for spec in usable)
-            src.lora_strength = getattr(body, "lora_strength", None)
-            for selected_spec in usable:
-                src.lora_strengths.setdefault(selected_spec["file"], selected_spec.get("strength", 0.8))
-        return src, graph
-    if _ok(char_spec):
-        src.lora_id = char_id
-        src.lora_name = char_spec.get("file")
-        src.lora_strength = char_strength if char_strength is not None else char_spec.get("strength")
-        src.lora_strengths[char_spec["file"]] = src.lora_strength
-    elif _ok(glob_spec):
-        src.lora_id = getattr(body, "lora_id", None) or glob_spec.get("id") or ""
-        src.lora_name = getattr(body, "lora_name", None) or glob_spec.get("file")
-        src.lora_strength = getattr(body, "lora_strength", None)
+    chosen = {}
+    weights = getattr(body, "lora_strengths", {}) or {}
+
+    def _add(spec, strength=None, *, actor=False):
+        if not _ok(spec) or not spec_ready(spec):
+            code = "lora.actorUnavailable" if actor else "lora.selectionUnavailable"
+            raise HTTPException(400, {"code": code})
+        name = spec["file"]
+        if strength is None:
+            strength = spec.get("strength")
+        if strength is None:
+            strength = 0.8
+        # A character card owns its adapter's weight, even when also selected globally.
+        if name not in chosen:
+            chosen[name] = spec
+            src.lora_strengths[name] = float(strength)
+
+    for actor in (bound or {}).get("hits") or []:
+        if actor.get("kind") == "character" and cinema.uses_lora(actor):
+            actor_id = str(actor.get("lora_id") or "").strip()
+            _add(find_spec(lora_id=actor_id) if actor_id else None,
+                 actor.get("lora_strength"), actor=True)
+
+    requested = list(dict.fromkeys(name.strip() for name in
+        str(getattr(body, "lora_name", None) or "").split("|") if name.strip()))
+    if not requested and getattr(body, "lora_id", None):
+        selected = find_spec(lora_id=body.lora_id)
+        if not selected:
+            raise HTTPException(400, {"code": "lora.selectionUnavailable"})
+        if selected.get("file"):
+            requested = [selected["file"]]
+    excluded_characters = 0
+    for name in requested:
+        spec = find_spec(file=name)
+        if not spec or not spec_ready(spec):
+            raise HTTPException(400, {"code": "lora.selectionUnavailable"})
+        shot_prompt = (bound or {}).get("prompt") or ""
+        if (spec.get("category") == "character" and spec["file"] not in chosen
+                and re.search(r"\bMain characters?\s*:", shot_prompt, re.I)):
+            actor_label = re.sub(r"\s*\(.*", "", spec.get("label") or "").strip()
+            if not cinema.asset_mentioned(shot_prompt, {
+                "kind":"character", "name":actor_label, "trigger":spec.get("trigger") or ""
+            }):
+                excluded_characters += 1
+                slog.info("offscreen character lora skipped", lora=name)
+                continue
+        if not _ok(spec) and spec.get("preset"):
+            companion = {("lightx2v-fl2v-4step-v12", "ref2va"): "lightx2v-ref2v-4step",
+                         ("lightx2v-turbo", "ref2va"): "lightx2v-ref2v-4step",
+                         ("lightx2v-fl2v-8step", "ref2va"): "ref2v-turbo-8step",
+                         ("lightx2v-ref2v-4step", "fl2va"): "lightx2v-fl2v-4step-v12",
+                         ("ref2v-turbo-8step", "fl2va"): "lightx2v-fl2v-8step"}.get((spec.get("id"), graph))
+            if companion:
+                adapted = find_spec(lora_id=companion)
+                if not adapted or not spec_ready(adapted):
+                    raise HTTPException(400, "Download the compatible speed adapter: " + companion)
+                spec = adapted
+                name = spec["file"]
+                weights = {**weights, name: spec.get("strength", 1.0)}
+        if not _ok(spec):
+            # For example, an FL2VA-only turbo cannot run on a Ref2VA shot.
+            slog.info("lora skipped", lora=name, graph=graph)
+            continue
+        _add(spec, weights.get(spec["file"], getattr(body, "lora_strength", None)))
+    try:
+        h3_enhancements.selected_presets("|".join(chosen), graph)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if len(chosen) > 3:
+        raise HTTPException(400, {"code": "lora.stackLimit"})
+    if requested and not chosen and excluded_characters != len(requested):
+        raise HTTPException(400, {"code": "lora.noCompatibleSelection"})
+    if chosen:
+        if any(spec.get("required_inputs") for spec in chosen.values()):
+            images = list(getattr(body, "ref_images", None) or []) + list((bound or {}).get("ref_images") or [])
+            if not getattr(body, "ref_videos", None) or not images:
+                raise HTTPException(400, {"code": "lora.swapInputs"})
+        primary = next(iter(chosen.values()))
+        src.lora_id = primary.get("id") or ""
+        src.lora_name = "|".join(chosen)
+        src.lora_strength = src.lora_strengths[primary["file"]]
     return src, graph
 
 
@@ -638,6 +695,8 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]
         return None, 1.0
     mode = (job.get("mode") or "t2v").lower()
     graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue", "audio_continue") else "fl2va"
+    if job.get("scene_audio_file") and job.get("scene_audio_mode") == "reference":
+        graph = "ref2va"
     usable = []
     for item in name.split("|")[:3]:
         spec = find_spec(file=item)
@@ -1010,6 +1069,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "seed": job.get("seed"),
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
+        **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "character_manifest")},
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
@@ -1178,6 +1238,8 @@ def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
 
 
 class GenerateBody(BaseModel):
+    scene_audio_file: Optional[str] = None
+    scene_audio_mode: str = "reference"
     asset_auto_match: bool = False
     asset_bindings: Optional[list[dict[str, Any]]] = None
     asset_film_id: Optional[str] = None
@@ -2389,6 +2451,16 @@ async def generate(body: GenerateBody):
     last_frame = body.last_frame_name
     ref_images = list(reference_plan["ref_images"] if reference_plan else (body.ref_images or []))
     ref_videos = list(body.ref_videos or [])
+    if body.scene_audio_file:
+        from lib.scene_audio import validate_source
+        try:
+            validate_source(body.scene_audio_file, body.scene_audio_mode, REF_AUDIOS)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if body.sheet_job or body.mode == "multishot":
+            raise HTTPException(400, "Scene audio requires a single video clip")
+        if body.scene_audio_mode == "reference" and len(ref_images) > 8 and (first_frame or continue_from):
+            raise HTTPException(400, "The first frame and asset references exceed the image limit")
     ref_image_size = (body.ref_image_size or "").strip().lower() or None
     continue_aspect = None
 
@@ -2432,7 +2504,7 @@ async def generate(body: GenerateBody):
         continue_from = None
         first_frame = None
         last_frame = None
-        if not ref_images and not ref_videos:
+        if not ref_images and not ref_videos and not (body.scene_audio_file and body.scene_audio_mode == "reference"):
             raise HTTPException(400, "Referans için en az 1 görsel veya video yükle")
         if len(ref_images) > 9:
             raise HTTPException(400, "En fazla 9 referans görsel")
@@ -2539,12 +2611,15 @@ async def generate(body: GenerateBody):
     steps = body.steps if body.steps and body.steps > 0 else 20
     sampler = body.sampler or "res_multistep"
     scheduler = body.scheduler or "simple"
-    lora_src, graph = _lora_src_for_shot(body, cinema_bound, mode)
+    audio_reference = bool(body.scene_audio_file and body.scene_audio_mode == "reference")
+    lora_src, graph = _lora_src_for_shot(body, cinema_bound, "ref" if audio_reference else mode)
     steps, sampler, scheduler = _with_lora_preset(
         lora_src, steps, sampler, scheduler, graph=graph
     )
     purpose = (body.purpose or "").strip() or None
     silent = bool(body.silent_audio)
+    if body.scene_audio_file:
+        silent = body.scene_audio_mode == "original"
     prompt_txt = cinema_bound["prompt"] if cinema_bound.get("hits") else body.prompt
     lora_applied = _lora_fields(lora_src)
     if mode == "face":
@@ -2555,7 +2630,8 @@ async def generate(body: GenerateBody):
         prompt_txt = enhance_ref_prompt(
             prompt_txt,
             n_images=len(ref_images),
-            role="face" if mode == "v2v" and ref_images and not (reference_plan and reference_plan["hits"]) else "general",
+            role=("asset_new" if mode == "ref" and reference_plan and reference_plan["hits"] else
+                  "face" if mode == "v2v" and ref_images and not (reference_plan and reference_plan["hits"]) else "general"),
         )
         if ref_videos:
             prompt_txt = enhance_video_ref_prompt(
@@ -2566,7 +2642,7 @@ async def generate(body: GenerateBody):
     prompt_txt = apply_audio_policy(
         prompt_txt,
         {
-            "purpose": purpose or ("music_video" if silent else "short_film"),
+            "purpose": "short_film" if audio_reference else purpose or ("music_video" if silent else "short_film"),
             "silentAudio": silent,
         },
     )
@@ -2587,12 +2663,15 @@ async def generate(body: GenerateBody):
         "steps": steps,
         "sampler": sampler,
         "scheduler": scheduler,
+        "refmod_enabled": h3_enhancements.settings()["refmod_enabled"],
         "continue_from": continue_from,
         "first_frame_name": first_frame,
         "last_frame_name": last_frame,
         "ref_images": ref_images,
         "reference_manifest": reference_plan["rows"] if reference_plan else None,
         "ref_videos": ref_videos,
+        "scene_audio_file": body.scene_audio_file,
+        "scene_audio_mode": body.scene_audio_mode if body.scene_audio_file else None,
         "include_video_audio": bool(body.include_video_audio),
         "audio_continuity": bool(body.audio_continuity),
         "ref_image_size": ref_image_size,
@@ -2608,7 +2687,7 @@ async def generate(body: GenerateBody):
         "sage_attention": _sage_mode(body),
         "lane": "director" if (body.lane or "").strip().lower() == "director" else "scene",
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
-        "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
+        "h3_models": h3_models.resolve("ref2va" if audio_reference else h3_models.graph_for_mode(mode)),
         "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
         "fast_preview": bool(body.fast_preview),
         "sheet_job": bool(getattr(body, "sheet_job", False)),
@@ -2820,6 +2899,7 @@ async def batch(body: BatchBody):
                 shot_text, lora_id=shot_lora.get("lora_id") or "",
                 file=shot_lora.get("lora_name") or "",
             )
+            from lib.director_identity import manifest as character_manifest
             job = {
                 "id": str(uuid.uuid4()),
                 "status": "queued",
@@ -2833,11 +2913,13 @@ async def batch(body: BatchBody):
                 "steps": shot_steps,
                 "sampler": shot_sampler,
                 "scheduler": shot_scheduler,
+                "refmod_enabled": h3_enhancements.settings()["refmod_enabled"],
                 "progress_label": "sırada",
                 "continue_from": cont_from,
                 "first_frame_name": frame_names[i] if not cont_from else None,
                 "ref_images": shot_refs,
                 "reference_manifest": bound["rows"],
+                "character_manifest": character_manifest(bound),
                 "ref_image_size": (
                     "match"
                     if mode in ("continue", "face_continue")
@@ -2872,7 +2954,7 @@ async def batch(body: BatchBody):
                 **shot_lora,
             }
             if cont_from:
-                source = _clip_record(cont_from)
+                source = _clip_record(cont_from) or next((j for j in created if j["id"] == cont_from), None)
                 if source:
                     for field in ("width", "height", "aspect"):
                         if source.get(field): job[field] = source[field]
@@ -2883,7 +2965,7 @@ async def batch(body: BatchBody):
                 job["prompt"] = apply_audio_policy(job["prompt"], policy)
             elif mode == "ref" and shot_refs:
                 job["prompt"] = enhance_ref_prompt(
-                    shot_text, n_images=len(shot_refs), role="general"
+                    shot_text, n_images=len(shot_refs), role="asset_new" if bound["hits"] else "general"
                 )
                 job["prompt"] = apply_audio_policy(job["prompt"], policy)
             if body.music_id:
@@ -2893,10 +2975,10 @@ async def batch(body: BatchBody):
                 job["batch_id"] = body.cinema_batch
             if body.score_id:
                 job["score_id"] = body.score_id
-            _jobs.append(job)
             created.append(job)
             if chain_next or use_per_shot:
                 parent = job["id"]
+        _jobs.extend(created)
         _save_jobs()
     slog.info(
         "batch queued",
@@ -4481,6 +4563,8 @@ class CinemaSheetBody(BaseModel):
     ref_image: Optional[str] = None
     ref_images: Optional[list[str]] = None
     image_provider: str = "minimax"
+    sheet_method: str = "standard"
+    production_method: Optional[str] = None
 
     @field_validator("ref_images", mode="before")
     @classmethod
@@ -4495,6 +4579,47 @@ class CinemaSheetBody(BaseModel):
         return None
 
 
+async def _attach_look_sheet_views(job: dict, kind: str, aid: str) -> None:
+    _, key = cinema.asset_kind_key(kind)
+    lib = cinema.load()
+    if job.get("film_id") and str(job["film_id"]) != str(lib.get("film_id") or ""):
+        raise ValueError("The film changed; Look Sheets was not attached to another film")
+    found = next((x for x in lib.get(key, []) if str(x.get("id")) == aid), None)
+    if not found:
+        raise ValueError("Look Sheets asset was deleted")
+    if kind == "character" and cinema.uses_lora(found):
+        raise ValueError("LoRA mode was enabled; generated images were not attached")
+    views = job.get("sheet_view_outputs") or []
+    if len(views) != look_sheets.view_count(kind):
+        raise ValueError("Look Sheets did not return all requested views")
+    old = list(found.get("images") or [])
+    auto_only = not old or all(str(im.get("file") or "").startswith("h3_sheet_") for im in old)
+    if not auto_only and len(old) + len(views) > cinema.MAX_ASSET_IMAGES:
+        raise ValueError("Not enough image slots to attach Look Sheets")
+    rid = str(uuid.uuid4())[:12]
+    uploaded = []
+    REFS.mkdir(parents=True, exist_ok=True)
+    for index, meta in enumerate(views):
+        dest = REFS / f"h3_sheet_{rid}_view{index + 1}.png"
+        await comfy.download_view(meta["filename"], meta.get("subfolder") or "", meta.get("type") or "output", dest)
+        filename = await comfy.upload_image(dest, dest.name)
+        uploaded.append({"file": filename, "url": f"/api/refs/{filename}"})
+    overview = job.get("sheet_overview_outputs") or []
+    if overview:
+        meta = overview[0]
+        dest = REFS / f"h3_sheet_{rid}.png"
+        await comfy.download_view(meta["filename"], meta.get("subfolder") or "", meta.get("type") or "output", dest)
+        found["sheet_overview"] = dest.name
+        job["sheet_overview_url"] = f"/api/refs/{dest.name}"
+    found["images"] = uploaded if auto_only else uploaded + old
+    # Update only an existing card; a deleted card must never be resurrected.
+    if not cinema.update_asset(kind, aid, found):
+        raise ValueError("Look Sheets asset was deleted")
+    job["sheet_still_url"] = uploaded[0]["url"]
+    job["sheet_still_urls"] = [im["url"] for im in uploaded]
+    job["sheet_attached"] = True
+
+
 async def _maybe_attach_sheet_still(job: dict) -> None:
     """After a sheet generate job finishes, keep only the last-frame still; discard video."""
     aid = str(job.get("sheet_asset_id") or "").strip()
@@ -4505,58 +4630,61 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
             "vehicle" if str(job.get("sheet_kind") or "") == "vehicle" else "character"
         )
     )
-    try:
-        if not job.get("last_frame_path"):
-            await _prepare_last_frame(job, upload=True)
-    except Exception as e:
-        slog.warn_job(job, "sheet last frame prep", err=e)
-        return
-    src = Path(job.get("last_frame_path") or "")
-    if not src.is_file():
-        slog.warn_job(job, "sheet still missing frame file")
-        return
-    lib = cinema.load()
-    _, key = cinema.asset_kind_key(kind)
-    found = next((x for x in lib.get(key) or [] if str(x.get("id")) == aid), None)
-    if not found:
-        slog.warn_job(job, "sheet asset missing", asset=aid[:8])
-        return
-    images = list(found.get("images") or [])
-    auto_only = (not images) or all(
-        str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")
-        for im in images
-    )
-    if len(images) >= cinema.MAX_ASSET_IMAGES and not auto_only:
-        slog.warn_job(job, "sheet asset image cap")
-        return
-    rid = str(uuid.uuid4())[:12]
-    dest = REFS / f"h3_sheet_{rid}.png"
-    REFS.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
-    panel_paths = [dest]
-    if kind in ("character", "creature", "vehicle"):
+    if job.get("sheet_method") == "look_sheets":
+        await _attach_look_sheet_views(job, kind, aid)
+    else:
         try:
-            splitter = cinema.split_vehicle_still if kind == "vehicle" else cinema.split_tripanel_still
-            panel_paths = splitter(dest, REFS, f"h3_sheet_{rid}")
+            if not job.get("last_frame_path"):
+                await _prepare_last_frame(job, upload=True)
         except Exception as e:
-            slog.warn_job(job, "sheet still split", err=e)
-            panel_paths = [dest]
-    uploaded: list[dict] = []
-    for part in panel_paths:
-        try:
-            comfy_name = await comfy.upload_image(part, part.name)
-        except Exception as e:
-            slog.warn_job(job, "sheet still comfy upload", err=e)
+            slog.warn_job(job, "sheet last frame prep", err=e)
             return
-        uploaded.append({"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
-    if not uploaded:
-        return
-    images = uploaded if auto_only else (uploaded + images)
-    found["images"] = images[: cinema.MAX_ASSET_IMAGES]
-    cinema.upsert_asset(kind, found)
-    job["sheet_still_url"] = uploaded[0]["url"]
-    job["sheet_still_urls"] = [row["url"] for row in uploaded]
-    job["sheet_attached"] = True
+        src = Path(job.get("last_frame_path") or "")
+        if not src.is_file():
+            slog.warn_job(job, "sheet still missing frame file")
+            return
+        lib = cinema.load()
+        _, key = cinema.asset_kind_key(kind)
+        found = next((x for x in lib.get(key) or [] if str(x.get("id")) == aid), None)
+        if not found:
+            slog.warn_job(job, "sheet asset missing", asset=aid[:8])
+            return
+        images = list(found.get("images") or [])
+        auto_only = (not images) or all(
+            str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")
+            for im in images
+        )
+        if len(images) >= cinema.MAX_ASSET_IMAGES and not auto_only:
+            slog.warn_job(job, "sheet asset image cap")
+            return
+        rid = str(uuid.uuid4())[:12]
+        dest = REFS / f"h3_sheet_{rid}.png"
+        REFS.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        panel_paths = [dest]
+        if kind in ("character", "creature", "vehicle"):
+            try:
+                splitter = cinema.split_vehicle_still if kind == "vehicle" else cinema.split_tripanel_still
+                panel_paths = splitter(dest, REFS, f"h3_sheet_{rid}")
+            except Exception as e:
+                slog.warn_job(job, "sheet still split", err=e)
+                panel_paths = [dest]
+        uploaded: list[dict] = []
+        for part in panel_paths:
+            try:
+                comfy_name = await comfy.upload_image(part, part.name)
+            except Exception as e:
+                slog.warn_job(job, "sheet still comfy upload", err=e)
+                return
+            uploaded.append({"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
+        if not uploaded:
+            return
+        images = uploaded if auto_only else (uploaded + images)
+        found["images"] = images[: cinema.MAX_ASSET_IMAGES]
+        cinema.upsert_asset(kind, found)
+        job["sheet_still_url"] = uploaded[0]["url"]
+        job["sheet_still_urls"] = [row["url"] for row in uploaded]
+        job["sheet_attached"] = True
     # Ephemeral sheet: drop the video — only the still matters for refs
     if job.get("sheet_ephemeral") is not False:
         for key_path in ("local_path",):
@@ -4602,10 +4730,21 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI kapalı")
     try:
+        sheet_method = body.sheet_method
+        provider = body.image_provider
+        if body.production_method is not None:
+            if body.production_method not in ("h3", "qwen", "sheet"):
+                raise ValueError("Unknown asset production method")
+            sheet_method = "look_sheets" if body.production_method == "sheet" else "standard"
+            provider = "image_studio" if body.production_method == "qwen" else "minimax"
+        elif provider == "look_sheets":
+            sheet_method = "look_sheets"
         sheet_asset = next((x for x in cinema.load().get("characters", [])
                             if body.kind == "character" and body.asset_id and x.get("id") == body.asset_id), None)
         # H3 character weights cannot be applied to a Qwen image model.
-        if body.image_provider == "image_studio" and not (sheet_asset or {}).get("lora_id"):
+        if sheet_asset and cinema.uses_lora(sheet_asset):
+            raise ValueError("LoRA kullan açıkken karakter görseli üretilmez")
+        if sheet_method == "standard" and provider == "image_studio":
             return await _queue_cinema_qwen_sheet_job(
                 kind=body.kind or "character", name=body.name, notes=body.notes or "",
                 asset_id=body.asset_id, quality=body.quality, steps=body.steps,
@@ -4625,6 +4764,7 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
             seed=body.seed if body.seed is not None else -1,
             ref_image=body.ref_image,
             ref_images=body.ref_images,
+            sheet_method=sheet_method,
         )
     except ValueError as e:
         raise HTTPException(400, str(e)[:300]) from e
@@ -4635,12 +4775,22 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
     kind, key = cinema.asset_kind_key(kwargs.get("kind") or "character")
     actor = next((a for a in cinema.load().get(key, [])
                   if kwargs.get("asset_id") and a.get("id") == kwargs["asset_id"]), None)
-    if kind == "character" and (actor or {}).get("lora_id"):
-        return await _queue_cinema_sheet_job(**kwargs)
+    if kind == "character" and actor and cinema.uses_lora(actor):
+        raise HTTPException(400, "LoRA kullan açıkken karakter görseli üretilmez")
+    if kwargs.get("ref_image") and actor:
+        images = actor.get("images") or []
+        auto_only = not images or all(str(im.get("file") or "").startswith("h3_sheet_") for im in images)
+        if not auto_only and len(images) + look_sheets.view_count(kind) > cinema.MAX_ASSET_IMAGES:
+            raise HTTPException(400, "Not enough image slots for reference views; remove existing card images first")
     name = str(kwargs.get("name") or "").strip()
     if not name:
         raise HTTPException(400, "Kart adı gerekli")
-    missing = qwen_still.missing_models(COMFY_ROOT)
+    available = []
+    if kwargs.get("ref_image"):
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{comfy.base_url}/object_info/UNETLoader")
+            available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
+    missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(kwargs.get("ref_image")), available_models=available)
     if missing:
         raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
     job = {
@@ -4687,7 +4837,12 @@ async def _generate_cinema_image_studio_sheet(
     )
     negative = cinema.qwen_sheet_negative(kind, notes)
     image_steps = 20 if normalize_quality(quality) in ("352", "480") or steps <= 12 else 30
-    missing = qwen_still.missing_models(COMFY_ROOT)
+    available = []
+    if ref_image:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{comfy.base_url}/object_info/UNETLoader")
+            available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
+    missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(ref_image), available_models=available)
     if missing:
         raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
     if not await comfy.healthy():
@@ -4699,12 +4854,14 @@ async def _generate_cinema_image_studio_sheet(
         if not ref_path:
             raise HTTPException(400, "Kaynak referans görseli bulunamadı")
         source_name = await comfy.upload_image(ref_path, f"h3_qwen_source_{uuid.uuid4().hex[:12]}.png")
-    graph = qwen_still.build_graph(
-        prompt=prompt,
-        negative=negative,
-        aspect="16:9" if kind != "location" else aspect,
-        steps=image_steps, seed=uuid.uuid4().int % (2**32), source_image=source_name,
-    )
+    if source_name:
+        w, h = resolve_size("9:16" if kind in ("character", "creature") else aspect, normalize_quality(quality))
+        graph = qwen_still.build_reference_views(kind=kind, notes=notes, style_line=style_line,
+            source_image=source_name, steps=image_steps, seed=uuid.uuid4().int % (2**32), width=w, height=h)
+    else:
+        graph = qwen_still.build_graph(prompt=prompt, negative=negative,
+            aspect="16:9" if kind != "location" else aspect,
+            steps=image_steps, seed=uuid.uuid4().int % (2**32))
     try:
         prompt_id = str(job.get("prompt_id") or "") if job and job.get("_reattach") else ""
         if not prompt_id:
@@ -4717,11 +4874,23 @@ async def _generate_cinema_image_studio_sheet(
         deadline = time.monotonic() + 45 * 60
         source = None
         stop_ws = asyncio.Event()
+        view_progress = {"completed": 0, "last_step": 0}
         async def _on_progress(pct: int, label: str, meta: Optional[dict] = None):
             if not job or job.get("status") != "running":
                 return
-            job["progress"] = max(1, min(99, int(pct)))
-            job["progress_label"] = label
+            if source_name:
+                count = look_sheets.view_count(kind)
+                if meta and meta.get("comfy_step") is not None:
+                    step = meta["comfy_step"]
+                    if step < view_progress["last_step"]:
+                        view_progress["completed"] = min(count - 1, view_progress["completed"] + 1)
+                    view_progress["last_step"] = step
+                    pct = 100 * (view_progress["completed"] + step / max(1, meta.get("comfy_step_max", image_steps))) / count
+                    job["progress"] = max(1, min(99, int(pct)))
+                    job["progress_label"] = f"Qwen Edit · view {view_progress['completed'] + 1}/{count} · {label}"
+            else:
+                job["progress"] = max(1, min(99, int(pct)))
+                job["progress_label"] = label
             job["progress_source"] = "ws"
             if meta:
                 job.update({k: meta[k] for k in ("comfy_step", "comfy_step_max") if k in meta})
@@ -4738,6 +4907,10 @@ async def _generate_cinema_image_studio_sheet(
                     raise HTTPException(502, "Qwen görsel üretimi ComfyUI'de hata verdi")
                 outputs = history.get("outputs") or {}
                 images = (outputs.get("70") or {}).get("images") or []
+                if source_name:
+                    view_meta = [row for node_id in graph if node_id.startswith("70_")
+                                 for row in (outputs.get(node_id) or {}).get("images", [])]
+                    images = view_meta if len(view_meta) == look_sheets.view_count(kind) else []
                 if images:
                     info = images[0]
                     filename = Path(str(info.get("filename") or "")).name
@@ -4761,7 +4934,13 @@ async def _generate_cinema_image_studio_sheet(
     sheet_source = REFS / f"h3_sheet_{uuid.uuid4().hex[:12]}.png"
     shutil.copy2(source, sheet_source)
     paths = [sheet_source]
-    if kind != "location":
+    if source_name:
+        paths = []
+        for index, meta in enumerate(view_meta):
+            dest = REFS / f"{sheet_source.stem}_view{index + 1}.png"
+            await comfy.download_view(meta["filename"], meta.get("subfolder") or "", meta.get("type") or "output", dest)
+            paths.append(dest)
+    elif kind != "location":
         splitter = cinema.split_vehicle_still if kind == "vehicle" else cinema.split_tripanel_still
         paths = splitter(sheet_source, REFS, sheet_source.stem)
     uploaded = []
@@ -4770,11 +4949,21 @@ async def _generate_cinema_image_studio_sheet(
         uploaded.append({"file": comfy_name, "url": f"/api/refs/{path.name}"})
     if sheet_source not in paths:
         _unlink_retry(sheet_source)
+    if job and job.get("film_id") and str(job["film_id"]) != str(cinema.load().get("film_id") or ""):
+        raise HTTPException(409, "Film changed during Qwen generation")
+    if asset_id:
+        previous = next((a for a in cinema.load().get(key, []) if str(a.get("id")) == str(asset_id)), None)
+        if previous is None:
+            raise HTTPException(404, "Asset was deleted during Qwen generation")
     old_images = list((previous or {}).get("images") or [])
     auto_only = not old_images or all(
         str((x.get("file") if isinstance(x, dict) else x) or "").startswith("h3_sheet_")
         for x in old_images
     )
+    if source_name and not auto_only and len(old_images) + len(uploaded) > cinema.MAX_ASSET_IMAGES:
+        raise HTTPException(409, "Not enough image slots to attach reference views")
+    if previous and kind == "character" and cinema.uses_lora(previous):
+        raise HTTPException(409, "LoRA mode was enabled during generation; images were not attached")
     asset = cinema.upsert_asset(kind, {
         **(previous or {}), **({"id": asset_id} if asset_id else {}),
         "name": name, "notes": notes,
@@ -4798,6 +4987,7 @@ async def _queue_cinema_sheet_job(
     seed: int = -1,
     ref_image: Optional[str] = None,
     ref_images: Optional[list[str]] = None,
+    sheet_method: str = "standard",
 ) -> dict[str, Any]:
     """Shared sheet queue used by Generate visual + JSON import."""
     kind_raw = str(kind or "character").lower()
@@ -4823,6 +5013,22 @@ async def _queue_cinema_sheet_job(
         refs.insert(0, one)
     refs = refs[:3]
     has_ref = bool(refs)
+    if sheet_method not in ("standard", "look_sheets"):
+        raise ValueError("Unknown sheet method")
+    if sheet_method == "look_sheets":
+        if not refs:
+            raise ValueError("Look Sheets requires a source reference image")
+        if len(refs) > 2 or (len(refs) == 2 and kind != "character"):
+            raise ValueError("Use one source reference, plus an optional clothing reference for characters")
+        for filename in refs:
+            if Path(filename).name != filename or not any((root / filename).is_file() for root in (REFS, COMFY_INPUT)):
+                raise ValueError("Source reference image is missing")
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            for node in look_sheets.REQUIRED_NODES:
+                response = await client.get(f"{comfy.base_url}/object_info/{node}")
+                response.raise_for_status()
+                if node not in response.json():
+                    raise ValueError("Install Film Tools in Pinokio and restart ComfyUI to use H3 Look Sheets")
     prompt = cinema.sheet_prompt_for_kind(
         kind, name, notes, style_line=style_line, has_ref=has_ref,
     )
@@ -4831,6 +5037,12 @@ async def _queue_cinema_sheet_job(
          if asset_id and str(x.get("id") or "") == str(asset_id)),
         None,
     )
+    if sheet_method == "look_sheets":
+        old = list((previous_asset or {}).get("images") or [])
+        manual = [im for im in old if not str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")]
+        if manual and len(old) + look_sheets.view_count(kind) > cinema.MAX_ASSET_IMAGES:
+            raise ValueError("Not enough image slots for Look Sheets; remove existing card images first")
+        prompt = look_sheets.prompt(kind, notes, style_line, outfit=len(refs) == 2)
     character_lora = None
     if kind == "character" and previous_asset and cinema.uses_lora(previous_asset):
         character_lora = find_spec(lora_id=previous_asset["lora_id"])
@@ -4846,6 +5058,7 @@ async def _queue_cinema_sheet_job(
         **(previous_asset or {}),
         "name": name,
         "notes": notes,
+        "sheet_method": sheet_method,
     }
     if asset_id:
         asset_payload["id"] = asset_id
@@ -4874,12 +5087,12 @@ async def _queue_cinema_sheet_job(
         gen_kwargs["lora_id"] = character_lora["id"]
         gen_kwargs["lora_name"] = character_lora["file"]
         gen_kwargs["lora_strength"] = previous_asset.get("lora_strength", 0.7)
-    elif still and spec_ready(still):
+    elif sheet_method == "standard" and still and spec_ready(still):
         gen_kwargs["lora_id"] = still.get("id") or ""
         gen_kwargs["lora_name"] = still.get("file") or ""
         gen_kwargs["lora_strength"] = still.get("strength") or 1.0
     if has_ref:
-        if kind == "character":
+        if kind == "character" and sheet_method == "standard":
             gen_kwargs["mode"] = "face"
             gen_kwargs["ref_images"] = refs
             gen_kwargs["ref_image_size"] = "max"
@@ -4896,6 +5109,7 @@ async def _queue_cinema_sheet_job(
         if str(j.get("id")) == jid:
             j["sheet_asset_id"] = asset.get("id")
             j["sheet_kind"] = kind
+            j["sheet_method"] = sheet_method
             j["sheet_name"] = name
             j["sheet_ephemeral"] = True
             j["sheet_has_ref"] = has_ref
@@ -5062,7 +5276,7 @@ async def _queue_sheets_for_cinema(
             ):
                 continue
             try:
-                result = await _queue_cinema_sheet_job(
+                result = await cinema_generate_sheet(CinemaSheetBody(
                     kind=kind,
                     name=str(asset.get("name") or ""),
                     notes=str(asset.get("notes") or ""),
@@ -5071,7 +5285,10 @@ async def _queue_sheets_for_cinema(
                     quality=quality,
                     steps=steps,
                     style=style,
-                )
+                    ref_image=asset.get("source_ref") or None,
+                    production_method="sheet" if cine.get("image_provider") == "look_sheets" else (
+                        "qwen" if cine.get("image_provider") == "image_studio" else "h3"),
+                ))
                 queued.append(
                     {
                         "kind": kind,
@@ -5138,6 +5355,10 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
     if index < 0:
         raise HTTPException(404, "Sahne bulunamadı")
     shot = shots[index]
+    try:
+        shot = director_identity.prepare_shot(shot, lib)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if not str(shot.get("text") or "").strip():
         raise HTTPException(400, "Önce sahne metnini doldurun")
     if body.image_provider == "image_studio":
@@ -5172,7 +5393,7 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
         "" if silent else cinema.film_audio_preamble(audio),
         "" if silent else cinema.cast_voice_bible(lib),
     ) if x)
-    prompt = cinema.apply_look(str(shot["text"]), head)
+    prompt = director_identity.prompt_for_shot(shot, {**lib,"audio":audio},silent)
     refs = []
     batch_id = str(uuid.uuid4())[:8]
     queued = await batch(BatchBody(
@@ -5330,6 +5551,12 @@ def _merge_produce_shots_into_lib(
 @app.post("/api/cinema/produce")
 async def cinema_produce(body: CinemaProduceBody):
     """Queue cinema shots; each shot is New Video (t2v) or Continue (last-frame)."""
+    # Reject invalid scene requests before creating assets or deferred production.
+    parsed = cinema.normalize_produce_shots(body.shots, body.script or "", body.shot_modes)
+    if not parsed:
+        raise HTTPException(400, "Senaryo / shot yok")
+    if len(parsed) > 80:
+        raise HTTPException(400, "En fazla 80 shot")
     if body.prepare_sheets and not body.seamless:
         lib0 = cinema.load()
         already = lib0.get("pending_produce")
@@ -5398,14 +5625,13 @@ async def cinema_produce(body: CinemaProduceBody):
                 "count": 0,
                 "sheets_queued": sheets,
             }
-    parsed = cinema.normalize_produce_shots(body.shots, body.script or "", body.shot_modes)
-    if not parsed:
-        raise HTTPException(400, "Senaryo / shot yok")
-    if len(parsed) > 80:
-        raise HTTPException(400, "En fazla 80 shot")
     lib = cinema.load()
     if body.setup:
         lib["setup"] = cinema._clean_setup(body.setup)
+    try:
+        parsed = [director_identity.prepare_shot(shot,lib) for shot in parsed]
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     audio = cinema._clean_audio(body.audio if body.audio is not None else lib.get("audio"))
     lib["audio"] = audio
     # Keep empty / disabled scene cards; only refresh texts from produce payload
@@ -5469,7 +5695,7 @@ async def cinema_produce(body: CinemaProduceBody):
     if want_seamless and skipped_done:
         want_seamless = False
 
-    prompts = [cinema.apply_look(s["text"], head) for s in to_queue]
+    prompts = [director_identity.prompt_for_shot(s, lib, silent) for s in to_queue]
     modes = [s["mode"] for s in to_queue]
     parent_job_ids = []
     full_shots = lib.get("shots") or []
@@ -5494,8 +5720,13 @@ async def cinema_produce(body: CinemaProduceBody):
                 cast_refs.append(f)
     cast_refs = cast_refs[:9]
     still_lock = bool(cast_refs)
-    if any(shot.get("first_frame_name") or _asset_plan(p, shot.get("bindings"), lib)["ref_images"]
-           for p, shot in zip(prompts, to_queue)):
+    identity_plans = [_asset_plan(p, shot.get("bindings"), lib)
+                      for p, shot in zip(prompts, to_queue)]
+    # Multishot uses one adapter stack for the whole pack. Character identities
+    # need separate per-shot stacks, including when all actors are LoRA-only.
+    if any(shot.get("first_frame_name") or plan["ref_images"]
+           or any(cinema.uses_lora(a) for a in plan.get("hits", []))
+           for shot, plan in zip(to_queue, identity_plans)):
         want_seamless = False
     if want_seamless and still_lock:
         want_seamless = False
@@ -6462,6 +6693,44 @@ class LoraImportBody(BaseModel):
     filename: Optional[str] = None
 
 
+class LoraAccessBody(BaseModel):
+    civitai_api_key: str = Field(max_length=1000)
+
+
+@app.get("/api/h3-enhancements")
+async def h3_enhancements_get():
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            response = await client.get(f"{COMFY_URL}/object_info")
+            nodes = response.json() if response.is_success else {}
+        except Exception:
+            nodes = {}
+    return {**h3_enhancements.settings(),
+            "refmod_ready": all(n in nodes for n in ("H3StudioRefMods", "SkebaCachedMiniMaxH3ReferenceToVideo")),
+            "hyperflow_ready": "ApplyHyperFlowH3" in nodes}
+
+
+@app.post("/api/h3-enhancements")
+async def h3_enhancements_set(body: dict[str, Any]):
+    if not isinstance(body.get("refmod_enabled"), bool):
+        raise HTTPException(400, "refmod_enabled must be a boolean")
+    if body["refmod_enabled"] and not (await h3_enhancements_get())["refmod_ready"]:
+        raise HTTPException(400, "RefMod tools are not loaded; install Film tools and restart Studio")
+    h3_enhancements.save_settings(body["refmod_enabled"])
+    return await h3_enhancements_get()
+
+
+@app.get("/api/loras/access")
+async def loras_access_get():
+    return {"configured": bool(lora_access.key())}
+
+
+@app.post("/api/loras/access")
+async def loras_access_set(body: LoraAccessBody):
+    lora_access.save(body.civitai_api_key)
+    return {"configured": bool(lora_access.key())}
+
+
 @app.get("/api/loras")
 async def loras_get():
     return {
@@ -6469,6 +6738,14 @@ async def loras_get():
         "loras": public_list(),
         "download": dict(_lora_dl_status),
     }
+
+
+@app.get("/api/film-tools")
+async def film_tools_get():
+    return {"comfy_url": comfy.base_url,
+            "look_sheets": (COMFY_ROOT / "custom_nodes" / "ComfyUI-H3LookSheets").is_dir(),
+            "native_av": (COMFY_ROOT / "custom_nodes" / "Herrgotts-H3-Infinite-Continuation-Suite").is_dir(),
+            "workflows": [p.name for p in (COMFY_ROOT / "user" / "default" / "workflows").glob("H3 Studio *.json")]}
 
 
 class H3ModelsBody(BaseModel):
@@ -6503,6 +6780,51 @@ class OptionalModelDownloadBody(BaseModel):
 
 class H3EngineBody(BaseModel):
     engine: str
+
+
+class ModelDeleteBody(BaseModel):
+    folder: str
+    file: str
+
+
+def _protected_weight_files():
+    names=set(h3_models.defaults().values())
+    for graph in ("fl2va","ref2va"):
+        names.update(h3_models.resolve(graph).values())
+    for job in _jobs:
+        if job.get("status") in ("queued","running"):
+            names.update((job.get("h3_models") or {}).values())
+            names.update(str(job.get("lora_name") or "").split("|"))
+    return names
+
+
+@app.get("/api/models/storage")
+async def model_storage_get():
+    return {"files":model_storage.inventory(h3_models.MODELS_ROOT,_protected_weight_files())}
+
+
+@app.post("/api/models/storage/delete")
+async def model_storage_delete(body: ModelDeleteBody):
+    async with _lock:
+        if any(j.get("status") == "running" for j in _jobs) or _lora_dl_status.get("busy") or any(m.get("busy") for m in optional_models.catalog()):
+            raise HTTPException(409,{"code":"storage.busy"})
+        try:
+            queue=await comfy.queue_status()
+        except Exception:
+            raise HTTPException(409,{"code":"storage.queueUnknown"})
+        if queue.get("queue_running") or queue.get("queue_pending"):
+            raise HTTPException(409,{"code":"storage.busy"})
+        if _lora_dl_status.get("busy") or any(m.get("busy") for m in optional_models.catalog()):
+            raise HTTPException(409,{"code":"storage.busy"})
+        try:
+            size=model_storage.remove(h3_models.MODELS_ROOT,body.folder,body.file,_protected_weight_files())
+        except FileNotFoundError:
+            raise HTTPException(404,{"code":"storage.notFound"})
+        except ValueError as exc:
+            raise HTTPException(409,{"code":str(exc)})
+        except OSError:
+            raise HTTPException(409,{"code":"storage.fileBusy"})
+    return {"ok":True,"removed_bytes":size}
 
 
 @app.post("/api/h3-models/engine")
@@ -6605,7 +6927,7 @@ async def loras_upload(file: UploadFile = File(...)):
                 if size > 4 * 1024 * 1024 * 1024:
                     raise HTTPException(400, "LoRA çok büyük (max 4GB)")
                 f.write(chunk)
-        if size < 1024 * 1024:
+        if not valid_safetensors(tmp):
             raise HTTPException(400, "dosya çok küçük / boş")
         tmp.replace(dest)
     except HTTPException:
@@ -6664,12 +6986,13 @@ async def _download_lora_file(spec: dict) -> None:
         dest = dest_for(spec)
         tmp = dest.with_suffix(dest.suffix + ".part")
         try:
-            async with httpx.AsyncClient(timeout=None, follow_redirects=True) as c:
-                async with c.stream("GET", spec["url"]) as r:
+            async with httpx.AsyncClient(timeout=None, follow_redirects=True, verify=ssl.create_default_context()) as c:
+                async with c.stream("GET", spec["url"], headers=lora_access.request_headers(spec["url"])) as r:
                     r.raise_for_status()
                     with tmp.open("wb") as f:
                         async for chunk in r.aiter_bytes(1024 * 1024):
                             f.write(chunk)
+            await asyncio.to_thread(verify_download, tmp, spec)
             tmp.replace(dest)
             slog.info("lora downloaded", file=spec["file"], bytes=dest.stat().st_size)
         except Exception as e:
@@ -8246,6 +8569,8 @@ async def _run_job(job: dict):
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
         lora_name, lora_strength = _lora_for_graph(job)
+        job["effective_lora_name"] = lora_name or ""
+        job["effective_lora_strength"] = lora_strength
         models = job.get("h3_models") or h3_models.resolve(h3_models.graph_for_mode(mode))
         prompt_text = str(job.get("prompt") or "").strip()
         if job.get("continue_from") and first and "CONTINUATION LOCK" not in prompt_text:
@@ -8264,7 +8589,33 @@ async def _run_job(job: dict):
                     "instant; do not restart the scene or introduce a new establishing shot.\n\n"
                     + prompt_text
                 )
-        if mode == "multishot":
+        if job.get("scene_audio_file") and job.get("scene_audio_mode") == "reference":
+            from lib.scene_audio import validate_source
+            source = validate_source(job["scene_audio_file"], "reference", REF_AUDIOS)
+            audio_name = await comfy.upload_audio(source, source.name)
+            refs = list(job.get("ref_images") or [])
+            rows = list(job.get("reference_manifest") or [])
+            if first:
+                refs = [first, *[f for f in refs if f != first]]
+            text = asset_references.prompt(prompt_text, rows, start_index=1 if first else 0,
+                                           new_scene=not first) if rows else prompt_text
+            if first:
+                text = enhance_ref_prompt(text, n_images=len(refs), role="asset_continue")
+            text = "<Audio 1> is the reference for the requested voice, delivery and sound. " + text
+            prompt = build_ref2va_prompt(
+                text=text, ref_image_names=refs, ref_video_names=ref_videos,
+                ref_audio_names=[audio_name], width=w, height=h, length=length,
+                seed=int(job["seed"]), steps=int(job["steps"]),
+                sampler=job.get("sampler") or "res_multistep", scheduler=job.get("scheduler") or "simple",
+                ref_image_size=job.get("ref_image_size") or "match",
+                models=models, filename_prefix=f"video/H3_Studio/{job['id'][:8]}",
+                silent_audio=False, include_video_audio=bool(job.get("include_video_audio", True)),
+                lora_name=lora_name, lora_strength=lora_strength, sage_attention=_sage_mode(job),
+                post_pass=_normalize_post_pass(job.get("post_pass")),
+            )
+            if first:
+                prompt = add_h3_first_frame_guide(prompt, first)
+        elif mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
                 raise RuntimeError("Kesintisiz zincir için script yok")
@@ -8295,7 +8646,7 @@ async def _run_job(job: dict):
                 raise RuntimeError("Referans görsel/video eksik")
             size_mode = job.get("ref_image_size") or ("max" if mode == "face" else "match")
             prompt = build_ref2va_prompt(
-                text=asset_references.prompt(prompt_text, job["reference_manifest"]) if job.get("reference_manifest") else prompt_text,
+                text=asset_references.prompt(prompt_text, job["reference_manifest"], new_scene=mode == "ref") if job.get("reference_manifest") else prompt_text,
                 ref_image_names=refs,
                 ref_video_names=ref_videos,
                 width=w,
@@ -8422,6 +8773,15 @@ async def _run_job(job: dict):
         job["progress"] = 10
         job["progress_label"] = "Comfy kuyruğa"
         _save_jobs()
+        # Reference/continuation helpers can prepend text after queue creation.
+        # Reapply the final stack's trigger ordering at the actual model input.
+        for node in prompt.values():
+            inputs = node.get("inputs", {})
+            if isinstance(inputs.get("prompt"), str):
+                inputs["prompt"] = apply_selected_triggers(inputs["prompt"], file=lora_name or "")
+        if job.get("sheet_method") == "look_sheets":
+            look_sheets.add_nodes(prompt, job.get("sheet_kind") or "character", f"H3_Studio_Look/{job['id'][:8]}")
+        prompt = h3_enhancements.patch_graph(prompt, job)
         prompt_id = await comfy.queue_prompt(prompt)
         job["prompt_id"] = prompt_id
         job["progress"] = 12
@@ -8535,6 +8895,11 @@ async def _run_job(job: dict):
                     except Exception as e:
                         job["audio_strip_error"] = str(e)[-240:]
                         slog.warn_job(job, "strip audio failed", err=e)
+                if job.get("scene_audio_file") and job.get("scene_audio_mode") == "original":
+                    from lib.scene_audio import validate_source, replace_audio
+                    source = validate_source(job["scene_audio_file"], "original", REF_AUDIOS)
+                    await asyncio.to_thread(replace_audio, dest, source)
+                    job["original_audio_applied"] = True
                 job["output"] = {
                     "filename": video_meta["filename"],
                     "subfolder": video_meta.get("subfolder") or "",
@@ -8551,7 +8916,7 @@ async def _run_job(job: dict):
                 except Exception as e:
                     job["last_frame_error"] = str(e)[-300:]
                     slog.exception("last frame prep failed", e, job=job["id"][:8])
-                job["status"] = "done"
+                job["status"] = "running" if job.get("sheet_method") == "look_sheets" else "done"
                 job["progress"] = 100
                 job["progress_label"] = "bitti"
                 job["done_at"] = time.time()
@@ -8564,10 +8929,19 @@ async def _run_job(job: dict):
                 slog.info_job(job, "done", file=video_meta.get("filename"))
                 try:
                     if job.get("sheet_asset_id"):
+                        if job.get("sheet_method") == "look_sheets":
+                            job["sheet_view_outputs"] = (outputs.get("look_save_views") or {}).get("images") or []
+                            job["sheet_overview_outputs"] = (outputs.get("look_save_sheet") or {}).get("images") or []
                         await _maybe_attach_sheet_still(job)
+                        job["status"] = "done"
+                        _save_jobs()
                 except Exception as e:
+                    job["sheet_attach_error"] = str(e)[:300]
+                    job["status"] = "error"
+                    job["error"] = str(e)[:300]
+                    _save_jobs()
                     slog.warn_job(job, "sheet still attach failed", err=e)
-                await _notify_job(job, "done")
+                await _notify_job(job, "error" if job.get("status") == "error" else "done")
                 try:
                     await _maybe_auto_mux_cinema(job)
                 except Exception as e:

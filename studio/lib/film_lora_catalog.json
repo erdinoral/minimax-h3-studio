@@ -1,0 +1,235 @@
+[
+  {
+    "id": "mara-whitlock",
+    "label": "Mara Whitlock",
+    "file": "Mara_Whitlock_H3_v1_000000750.safetensors",
+    "aliases": [],
+    "category": "character",
+    "graphs": [
+      "fl2va",
+      "ref2va"
+    ],
+    "strength": 0.8,
+    "trigger": "marawhitlock",
+    "url": "https://civitai.com/api/download/models/3368628?fileId=3256695",
+    "sha256": "733dac0c321fec5f939e7eed381a8311156d1946cd4c2f5bb662a818fac4cb8b",
+    "expected_bytes": 155110368,
+    "source": "https://civitai.com/models/2968829?modelVersionId=3368628",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "147.9 MB"
+  },
+  {
+    "id": "albedo-h3",
+    "label": "Albedo (H3 English Dub)",
+    "file": "AlbedoOverlordEng_H3_v1.safetensors",
+    "aliases": [],
+    "category": "character",
+    "graphs": [
+      "fl2va",
+      "ref2va"
+    ],
+    "strength": 0.8,
+    "trigger": "lbd0c1tr0n",
+    "url": "https://civitai.com/api/download/models/3343083?fileId=3229876",
+    "sha256": "d9e0aec252e9b9b70a053031405d6115121a7bbae94cb8e4bc1457b274277bf5",
+    "expected_bytes": 279622904,
+    "source": "https://civitai.com/models/2809374?modelVersionId=3343083",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "266.7 MB"
+  },
+  {
+    "id": "natural-face-speech",
+    "label": "Natural Face & Speech v2",
+    "file": "nafasp_h3_lora_v2_500.safetensors",
+    "aliases": [
+      "natural_face_speech_h3_lora_v2_500.safetensors"
+    ],
+    "category": "motion",
+    "graphs": [
+      "fl2va"
+    ],
+    "strength": 0.7,
+    "trigger": "",
+    "url": "https://huggingface.co/vpakarinen/natural-face-speech-h3-lora/resolve/main/natural_face_speech_h3_lora_v2_500.safetensors",
+    "sha256": "40b1af6134ddf8597e6b9bfed1b97fc782bac6917e498f954effd34681ab881b",
+    "expected_bytes": 310168816,
+    "source": "https://civitai.com/models/2925394?modelVersionId=3339123",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "295.8 MB"
+  },
+  {
+    "id": "camera-motion",
+    "label": "Camera Motion",
+    "file": "camera_motion_h3_lora_v1_3000_pruned.safetensors",
+    "aliases": [],
+    "category": "motion",
+    "graphs": [
+      "fl2va",
+      "ref2va"
+    ],
+    "strength": 0.8,
+    "trigger": "camera motion",
+    "url": "https://huggingface.co/Jojocodex/minimax-h3-Camera-Motion-lora/resolve/main/camera_motion_h3_lora_v1_3000_pruned.safetensors",
+    "sha256": "9d7d98d7377f56efed3aa7d507f767936112d208906f49908ec9a8ae912be88b",
+    "expected_bytes": 155109680,
+    "source": "https://civitai.com/models/2914784?modelVersionId=3297480",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "147.9 MB",
+    "trigger_position": "start"
+  },
+  {
+    "id": "face-swap",
+    "label": "FaceSwap REF2VA",
+    "file": "SS_FaceSwap_MiniMax_H3_REF2VA.safetensors",
+    "aliases": [
+      "SS_FaceSwap_MiniMax_H3_REF2VA.safetensors"
+    ],
+    "category": "other",
+    "graphs": [
+      "ref2va"
+    ],
+    "strength": 1.0,
+    "trigger": "Faceswap",
+    "url": "https://huggingface.co/UntMods/FaceSwap_MiniMaxH3_REF2VA/resolve/main/SS_FaceSwap_MiniMax_H3_REF2VA.safetensors",
+    "sha256": "1e032cf519cc143f434e67516d8ad0aacf4c6e146315b2dcc3b1c2800470326d",
+    "expected_bytes": 65623904,
+    "source": "https://huggingface.co/UntMods/FaceSwap_MiniMaxH3_REF2VA",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "10.4 MB",
+    "required_inputs": [
+      "video",
+      "image"
+    ]
+  },
+  {
+    "id": "focus-slider",
+    "label": "Focus Slider",
+    "file": "MMH3-FocusSlider-V1.safetensors",
+    "aliases": [],
+    "category": "style",
+    "graphs": [
+      "fl2va"
+    ],
+    "strength": 0.0,
+    "trigger": "",
+    "url": "https://civitai.com/api/download/models/3343342?fileId=3230160",
+    "sha256": "6980ebdea60aa78cd05374c7e65590e7dfb177ed8965cdf18f66d841743e9e5b",
+    "expected_bytes": 649848,
+    "source": "https://civitai.com/models/2951898?modelVersionId=3343342",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "0.6 MB"
+  },
+  {
+    "id": "detail-slider",
+    "label": "Detail Slider",
+    "file": "DetailSlider-V1.safetensors",
+    "aliases": [],
+    "category": "style",
+    "graphs": [
+      "fl2va"
+    ],
+    "strength": 0.0,
+    "trigger": "",
+    "url": "https://civitai.com/api/download/models/3314964?fileId=3200403",
+    "sha256": "3a996f26959bd2e2599f68634fb35d050489bbb544bff28f181c2555ed4ad05c",
+    "expected_bytes": 5621792,
+    "source": "https://civitai.com/models/2929154?modelVersionId=3314964",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "5.4 MB"
+  },
+  {
+    "id": "fyre",
+    "label": "Fyre",
+    "file": "minimaxh3-fyre-v01.safetensors",
+    "category": "character",
+    "graphs": [
+      "fl2va"
+    ],
+    "strength": 0.8,
+    "trigger": "Fyre",
+    "url": "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/fyre-fictional-character/minimaxh3-fyre-v01.safetensors",
+    "sha256": "d128d0b5e7c07061dc5fe7f391f7d90c780894fb40dfda3b32294f1e7ec6c406",
+    "expected_bytes": 232639584,
+    "source": "https://civitai.com/models/2386526",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "221.9 MB"
+  },
+  {
+    "id": "ai30",
+    "label": "AI30",
+    "file": "MiniMax H3  AI Girl Fictional Women Series30.safetensors",
+    "category": "character",
+    "graphs": [
+      "fl2va"
+    ],
+    "strength": 0.8,
+    "trigger": "ai30",
+    "url": "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/ai-girl-fictional-women-series30-30-minimax-h3/MiniMax%20H3%20%20AI%20Girl%20Fictional%20Women%20Series30.safetensors",
+    "sha256": "5b02993e44cf59f874352d64751e5dc2806026402ecb879adc3133790d65e79d",
+    "expected_bytes": 298260352,
+    "source": "https://civitai.com/models/2845077",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "284.4 MB"
+  },
+  {
+    "id": "character-swap",
+    "label": "Character Swap (experimental)",
+    "file": "h3_character_swap_pro4500_1000.safetensors",
+    "category": "other",
+    "graphs": [
+      "ref2va"
+    ],
+    "strength": 1.0,
+    "trigger": "",
+    "url": "https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA/resolve/main/h3_character_swap_pro4500_1000.safetensors",
+    "sha256": "4b2a3f420ae804c0aa3422761ff84dbd1bf52eef6900ffab6d2e66df63cb4e79",
+    "expected_bytes": 155110320,
+    "source": "https://huggingface.co/akatz-ai/MiniMax-H3-Character-Swap-LoRA",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Creator guidance; compatibility and quality require local testing",
+    "size_hint": "147.9 MB",
+    "required_inputs": [
+      "video",
+      "image"
+    ]
+  }
+]

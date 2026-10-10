@@ -13,6 +13,8 @@ module.exports = {
     }
     let downloading = [
       "download/shared.js",
+      "download/film-loras.js",
+      "film-tools.js",
       "download/fl2va.js",
       "download/ref2va.js",
       "download/lora.js",
@@ -81,6 +83,14 @@ module.exports = {
             icon: "fa-solid fa-terminal",
             text: "Terminal / Stop",
             href: "start.js",
+          }, {
+            icon: "fa-solid fa-puzzle-piece",
+            text: "Optional Film Tools",
+            href: "film-tools.js",
+          }, {
+            icon: "fa-solid fa-download",
+            text: "Optional Film LoRAs",
+            href: "download/film-loras.js",
           }]
         } else {
           return [{
@@ -283,6 +293,14 @@ module.exports = {
       }
 
       return menu.concat([{
+        icon: "fa-solid fa-puzzle-piece",
+        text: "Optional Film Tools",
+        href: "film-tools.js",
+      }, {
+        icon: "fa-solid fa-download",
+        text: "Optional Film LoRAs",
+        href: "download/film-loras.js",
+      }, {
         icon: "fa-solid fa-diagram-project",
         text: "Reinstall Workflows",
         href: "workflows.js",

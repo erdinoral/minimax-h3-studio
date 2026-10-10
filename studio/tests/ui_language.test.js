@@ -15,3 +15,13 @@ test('system status labels translate while scene text and unknown labels remain 
  const scene='NEA boş metroda yürür.';assert.equal(context.localizeSystemLabel(scene),scene);
  lang='tr';assert.equal(context.localizeSystemLabel('sırada'),'sırada');
 });
+test('LoRA selection errors use the active UI language',()=>{
+ const dict=dictionary(), source=fs.readFileSync('studio/static/app.js','utf8');
+ const start=source.indexOf('  function errDetail('), end=source.indexOf('  function formatStreamError(',start);
+ for(const lang of ['en','tr']){
+  const context={tt:k=>dict[lang][k]||k};vm.createContext(context);vm.runInContext(source.slice(start,end),context);
+  for(const code of ['lora.actorUnavailable','lora.selectionUnavailable','lora.stackLimit','lora.noCompatibleSelection'])
+   assert.equal(context.errDetail({detail:{code}}),dict[lang][code]);
+  assert.equal(context.errDetail({detail:'A user-authored error'}),'A user-authored error');
+ }
+});

@@ -35,7 +35,25 @@ def enhance_ref_prompt(
     if n_images <= 0:
         return prompt
     has_tags = any(f"<Picture {i}>" in prompt for i in range(1, n_images + 1))
-    if role in ("face_continue", "asset_continue"):
+    if role == "asset_new":
+        # Older queued jobs may still contain the generic reference preamble.
+        prompt = re.sub(
+            r"^Use (?:<Picture \d+>\s*)+as visual reference\(s\) for style / subject / scene as described below\.\s*",
+            "", prompt,
+        )
+        marker = "SCENE FROM FRAME ZERO:"
+        if not prompt.startswith(marker):
+            prompt = (
+                marker + " At 0.00 seconds the video already shows the requested scene, "
+                "opening composition, setting and action below. This is a new camera shot. "
+                "The numbered pictures are appearance references for their assigned assets only. "
+                "Use facial identity, hair, wardrobe, animal markings and environment materials; "
+                "the scene description determines pose, blocking and camera framing. "
+                "Do not display, animate or transition out of the reference photographs. "
+                "No opening portrait, turntable, character sheet, studio backdrop, reference montage "
+                "or dissolve into the scene.\n\n" + prompt
+            )
+    elif role in ("face_continue", "asset_continue"):
         # Picture 1 is the previous final frame, not a portrait. Portraits
         # follow only as identity references; never ask H3 to animate them.
         face_pics = ", ".join(f"<Picture {i}>" for i in range(2, n_images + 1))
@@ -991,11 +1009,22 @@ def apply_lora(
         st = float(strength)
     except (TypeError, ValueError):
         st = 0.75
+    from lib.loras import find_spec
+    names.sort(key=lambda name: not bool((find_spec(file=name) or {}).get("engine_patch")))
     src = ["6", 0]
     for i, name in enumerate(names):
         weight = float(strength.get(name, 0.75)) if isinstance(strength, dict) else st
         nid = "7" if i == 0 else f"lora_stack_{i + 1}"
-        g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": src, "lora_name": name, "strength_model": weight}}
+        spec = find_spec(file=name) or {}
+        if spec.get("engine_patch") == "hyperflow":
+            g[nid] = {"class_type": "ApplyHyperFlowH3", "inputs": {
+                "model": src, "hyperflow_file": name, "strength": weight,
+                "lora_mode": "bypass", "variant": "pruned", "download_if_missing": False,
+                "verbose": False, "experimental_curve_refit": True}}
+            g["14"]["inputs"]["sigmas"] = [nid, 1]
+            g["17"]["inputs"]["sampler_name"] = "euler"
+        else:
+            g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": src, "lora_name": name, "strength_model": weight}}
         for other_id, node in g.items():
             if other_id == nid:
                 continue

@@ -22,7 +22,7 @@ def signature(shot):
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def resolve(shot, lib, exists):
+def resolve(shot, lib, exists, *, check_limit=True):
     """Resolve ONLY explicit selections; snapshots keep historical refs stable."""
     assets = {str(a.get("id")): {**a, "kind": k[:-1]} for k in KINDS for a in lib.get(k, [])}
     refs, rows, hits, errors = [], [], [], []
@@ -80,12 +80,12 @@ def resolve(shot, lib, exists):
             if file and file not in refs:
                 refs.append(file)
                 rows.append({**im, "asset": asset})
-    if len(refs) > 9:
+    if check_limit and len(refs) > 9:
         errors.append("Bu çekimde en fazla 9 referans kullanılabilir; seçimi azaltın.")
     first = str(shot.get("first_frame_name") or "")
     if first and not exists(first):
         errors.append("Onaylı başlangıç karesi bulunamadı; yeniden yükleyin.")
-    if first and len(refs) > 8:
+    if check_limit and first and len(refs) > 8:
         errors.append("Başlangıç karesiyle birlikte en fazla 8 varlık referansı kullanılabilir.")
     return {"ref_images": refs, "rows": rows, "hits": hits, "errors": errors,
             "first_frame_name": first,

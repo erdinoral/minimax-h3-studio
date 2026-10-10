@@ -20,7 +20,7 @@ class ContinuationTests(unittest.IsolatedAsyncioTestCase):
         fn = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'batch')
         fn.decorator_list = []
         jobs = [{'id':'source','status':'done','width':864,'height':480,'aspect':'16:9'}]
-        env = dict(BatchBody=object, HTTPException=RuntimeError, ALLOWED_DURATIONS=[5], QUALITY_SHORT_EDGE={'736':736},
+        env = dict(h3_enhancements=NS(settings=lambda:{"refmod_enabled":False}), BatchBody=object, HTTPException=RuntimeError, ALLOWED_DURATIONS=[5], QUALITY_SHORT_EDGE={'736':736},
             _asset_plan=lambda text, bindings, lib, *a, **kw: {'prompt':text,'rows':[{'file':'portrait.png'}],
                 'hits':[1],'ref_images':['portrait.png'],'has_character':True,'has_location':False},
             comfy=NS(healthy=AsyncMock(return_value=True)), _free_llm_for_production=AsyncMock(),
@@ -74,6 +74,19 @@ class ContinuationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(jobs[0]['ref_images'], ['portrait.png'])
         self.assertEqual(jobs[1]['ref_images'], ['portrait.png'])
         self.assertEqual(jobs[1]['continue_from'], jobs[0]['id'])
+
+    async def test_later_lora_error_does_not_leave_partial_batch(self):
+        env=self.env()
+        calls=[]
+        def select(body, bound, mode):
+            calls.append(mode)
+            if len(calls) == 2:
+                raise ValueError('LoRA stack exceeds limit')
+            return body, 'ref2va'
+        env['_lora_src_for_shot']=select
+        with self.assertRaisesRegex(ValueError,'LoRA stack'):
+            await env['batch'](self.body(prompts=['A','B'], modes=['t2v','continue'], continue_from_job_id=None))
+        self.assertEqual(len(env['_jobs']),1)
 
     async def test_skipped_completed_shot_can_be_explicit_parent(self):
         env=self.env();jobs=(await env['batch'](self.body(prompts=['A','B'],modes=['t2v','continue'],continue_from_job_id=None,parent_job_ids=[None,'source'])))['jobs']

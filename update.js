@@ -73,6 +73,7 @@ module.exports = {
       params: {
         uri: "workflows.js"
       }
-    }
+    },
+    { method: "script.start", params: { uri: "film-tools.js" } }
   ]
 }

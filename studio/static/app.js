@@ -34,6 +34,7 @@
     cinemaLibrary: { characters: [], locations: [], creatures: [], vehicles: [] },
     cinemaLibraryView: false,
     cinemaSheetRefs: { character: null, location: null, creature: null, vehicle: null },
+    cinemaLookRefs: {},
     selectedCharacter: null,
     galleryItems: [],
     galleryLoaded: false,
@@ -784,6 +785,22 @@
     return true;
   }
 
+  function jobProductionMeta(job) {
+    const en = window.h3Lang?.() === "en";
+    const bits = [`${job.duration || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`];
+    if (job.h3_models?.unet) bits.push(`Model: ${job.h3_models.unet}`);
+    if (job.steps != null) bits.push(`${en ? "Steps" : "Adım"}: ${job.steps} · ${job.sampler || ""}`);
+    const names = String(job.effective_lora_name ?? job.lora_name ?? "").split("|").filter(Boolean);
+    const strengths = job.effective_lora_strength;
+    if (names.length) bits.push("LoRA: " + names.map(name => {
+      const weight = typeof strengths === "object" && strengths ? strengths[name] : (strengths ?? job.lora_strengths?.[name] ?? job.lora_strength);
+      return name.replace(/\.safetensors$/i, "") + (weight != null ? ` (${weight})` : "");
+    }).join(" + "));
+    else if (job.effective_lora_name !== undefined) bits.push(en ? "LoRA: none" : "LoRA: yok");
+    if (job.character_manifest?.length) bits.push(`${en ? "Cast" : "Oyuncular"}: ` + job.character_manifest.map(actor => actor.name).join(", "));
+    return bits.join(" · ");
+  }
+
   function setClipPrompt(text, meta, seed) {
     state.clipPrompt = text == null ? "" : String(text);
     const has = !!state.clipPrompt.trim();
@@ -1479,7 +1496,7 @@
         steps: data.steps || 20,
         seed: data.seed != null ? data.seed : -1,
         seed_lock: !!data.seed_lock,
-        image_provider: data.image_provider === "image_studio" ? "image_studio" : "minimax",
+        image_provider: normalizeCinemaImageProvider(data.image_provider),
         characters: Array.isArray(data.characters) ? data.characters : [],
         locations: Array.isArray(data.locations) ? data.locations : [],
         creatures: Array.isArray(data.creatures) ? data.creatures : [],
@@ -1564,7 +1581,7 @@
       film_id: c.film_id || "",
       seed: Number.isFinite(Number(c.seed)) ? Number(c.seed) : -1,
       seed_lock: !!c.seed_lock,
-      image_provider: c.image_provider === "image_studio" ? "image_studio" : "minimax",
+      image_provider: normalizeCinemaImageProvider(c.image_provider),
       characters: c.characters || [],
       locations: c.locations || [],
       creatures: c.creatures || [],
@@ -1710,7 +1727,7 @@
         steps: data.steps || payload.steps,
         seed: data.seed != null ? data.seed : payload.seed,
         seed_lock: !!(data.seed_lock != null ? data.seed_lock : payload.seed_lock),
-        image_provider: data.image_provider === "image_studio" ? "image_studio" : "minimax",
+        image_provider: normalizeCinemaImageProvider(data.image_provider),
         characters: chars,
         locations: locs,
         creatures,
@@ -1729,13 +1746,16 @@
     }
   }
 
-  const LORA_CATEGORIES = ["speed", "character", "style", "motion", "other"];
+  const LORA_CATEGORIES = ["speed", "character", "style", "motion", "speech", "camera", "swap", "other"];
   function loraCategory(spec) {
     let custom = {};
     try { custom = JSON.parse(localStorage.getItem("h3-lora-categories") || "{}"); } catch {}
     if (LORA_CATEGORIES.includes(custom[spec.file])) return custom[spec.file];
-    if (LORA_CATEGORIES.includes(spec.category)) return spec.category;
     const name = (spec.id + " " + spec.file + " " + spec.label).toLowerCase();
+    if (/face[-_ ]?swap|character[-_ ]?swap/.test(name)) return "swap";
+    if (/natural[-_ ]?face[-_ &]*speech|nafasp/.test(name)) return "speech";
+    if (/camera[-_ ]?motion/.test(name)) return "camera";
+    if (LORA_CATEGORIES.includes(spec.category)) return spec.category;
     if (/turbo|lightx|flashgen|fasth3|[468][-_ ]?step|pdd/.test(name)) return "speed";
     if (/pinkfluffy|chr[_-]|character|albedo|masafy/.test(name)) return "character";
     if (/combat|motion|physics|wushu/.test(name)) return "motion";
@@ -1903,6 +1923,58 @@
     return '<div class="cinema-folder-wrap">' + tab + body + "</div>";
   }
 
+  function normalizeCinemaImageProvider(value) {
+    return value === "image_studio" ? "image_studio" : "minimax";
+  }
+
+  function cinemaImageProductionMethod() {
+    const provider = normalizeCinemaImageProvider(ensureCinema().image_provider);
+    return provider === "image_studio" ? "qwen" : "h3";
+  }
+
+  function cinemaLookReferenceKey(kind, id) {
+    return String(ensureCinema().film_id || "") + ":" + kind + ":" + id;
+  }
+
+  function cinemaLookReferenceHtml(kind, id) {
+    const ref = state.cinemaLookRefs[cinemaLookReferenceKey(kind, id)];
+    if (!ref) return "";
+    return '<div class="cinema-look-pending"><img src="' + htmlEsc(ref.url) + '" alt="' + htmlEsc(tt("cinema.lookSource")) + '" />' +
+      '<span class="muted">' + htmlEsc(tt("cinema.lookReady")) + '</span><div class="row-btns">' +
+      '<button type="button" class="btn-secondary cinema-look-generate"' + (ref.busy ? ' disabled' : '') + '>' + htmlEsc(tt("cinema.lookGenerate")) + '</button>' +
+      '<button type="button" class="btn-ghost cinema-look-clear"' + (ref.busy ? ' disabled' : '') + '>' + htmlEsc(tt("cinema.lookClear")) + '</button></div></div>';
+  }
+
+  async function stageCinemaLookReference(kind, id, file) {
+    const key = cinemaLookReferenceKey(kind, id);
+    const fd = new FormData();
+    fd.append("file", file);
+    const r = await fetch("/api/refs/upload", { method: "POST", body: fd });
+    const data = await r.json();
+    if (!r.ok) throw new Error(errDetail(data));
+    // Uploading only stages a source. Generation requires the explicit button.
+    state.cinemaLookRefs[key] = { name: data.name, url: data.url || "/api/refs/" + encodeURIComponent(data.name) };
+    flushCinemaFields();
+    renderCinemaAssetCards(kind, { force: true });
+  }
+
+  async function produceCinemaLookSheet(kind, id, button) {
+    const key = cinemaLookReferenceKey(kind, id);
+    const ref = state.cinemaLookRefs[key];
+    if (!ref || ref.busy) return;
+    ref.busy = true;
+    try {
+      const ok = await regenerateCinemaAsset(kind, id, button, {
+        ref_images: [ref.name], ref_image: ref.name,
+      });
+      if (ok && state.cinemaLookRefs[key] === ref) delete state.cinemaLookRefs[key];
+    } finally {
+      ref.busy = false;
+      flushCinemaFields();
+      renderCinemaAssetCards(kind, { force: true });
+    }
+  }
+
   function cinemaCardHtml(item, kind) {
     const isChar = kind === "character";
     const useLora = isChar && (item.use_lora ?? !!item.lora_id);
@@ -1963,10 +2035,12 @@
       '<span class="muted cinema-img-cap">' +
       htmlEsc(tf("cinema.imgMax", { slug: cinemaCallSlug(item.name) })) +
       "</span>" +
-      '<button type="button" class="btn-secondary cinema-asset-regen">' + htmlEsc(tt("cinema.regenEntity")) + "</button>") +
+      '<button type="button" class="btn-secondary cinema-asset-regen">' + htmlEsc(tt("cinema.regenEntity")) + "</button>" +
+      '<label class="file-pick file-pick-inline"><input type="file" class="file-pick-input cinema-look-ref" accept="image/*" /><span class="file-pick-btn">' + htmlEsc(tt("cinema.lookFromRef")) + '</span></label>') +
+      (!useLora && item.sheet_overview ? '<button type="button" class="btn-secondary cinema-img-zoom" data-url="/api/refs/' + htmlEsc(encodeURIComponent(item.sheet_overview)) + '" data-name="' + htmlEsc(item.name) + '">' + htmlEsc(tt("cinema.lookOverview")) + '</button>' : '') +
       '<button type="button" class="btn-ghost cinema-del">' +
       htmlEsc(tt("cinema.deleteAsset")) +
-      "</button></div></div></div>"
+      "</button></div>" + (!useLora ? cinemaLookReferenceHtml(kind, item.id) : "") + "</div></div>"
     );
   }
 
@@ -2297,8 +2371,16 @@
     const markers = [
       ["location", /\bLocation:\s*/i],
       ["character", /\bMain character:\s*/i],
+      ["reference_subjects", /\bSubject references:\s*/i],
+      ["reference_environment", /\bEnvironment reference:\s*/i],
+      ["opening_frame", /\bOpening composition:\s*/i],
+      ["transition", /\bTransition from previous clip:\s*/i],
       ["action", /\bAction:\s*/i],
+      ["beats", /\bChronological action beats:\s*/i],
+      ["camera_framing", /\bFraming:\s*/i],
+      ["camera_angle", /\bViewpoint:\s*/i],
       ["camera", /\bCamera:\s*/i],
+      ["ending_frame", /\bEnd composition:\s*/i],
       ["important", /\bConstraints:\s*/i],
     ];
     const hits = [];
@@ -2322,7 +2404,8 @@
       const stop = i + 1 < hits.length ? hits[i + 1].start : body.length;
       out[hit.key] = body.slice(hit.end, stop).trim();
     });
-    const cam = String(out.camera || "");
+    const dialogueField = ["ending_frame", "camera", "action", "important"].find(key => /\(S\d+\)\s+says:.*<\/d>\s*$/i.test(out[key] || "")) || "camera";
+    const cam = String(out[dialogueField] || "");
     const dm = cam.match(
       /\s+\(S\d+\)\s+says:\s*(?:<d>\[([^\]]+)\]\s*)?(.*?)<\/d>\s*$/i
     );
@@ -2330,14 +2413,14 @@
       const before = cam.slice(0, dm.index).trim();
       const who = String(out.character || "").trim();
       if (who && before.endsWith(who)) {
-        out.camera = before.slice(0, -who.length).trim();
+        out[dialogueField] = before.slice(0, -who.length).trim();
       } else {
         const wm = before.match(/^(.+)\s+([A-Z][^()]+)$/);
         if (wm) {
-          out.camera = String(wm[1] || "").trim();
+          out[dialogueField] = String(wm[1] || "").trim();
           if (!who) out.character = String(wm[2] || "").trim();
         } else {
-          out.camera = before;
+          out[dialogueField] = before;
         }
       }
       const line = String(dm[2] || "").trim();
@@ -2925,10 +3008,12 @@
     const lock = $("cinema-seed-lock");
     if (lock) lock.checked = !!c.seed_lock;
     document.querySelectorAll("#cinema-image-provider [data-image-provider]").forEach((btn) => {
-      const on = btn.dataset.imageProvider === (c.image_provider === "image_studio" ? "image_studio" : "minimax");
+      const on = btn.dataset.imageProvider === (normalizeCinemaImageProvider(c.image_provider));
       btn.classList.toggle("on", on);
       btn.setAttribute("aria-pressed", String(on));
     });
+    const methodHint = $("cinema-image-provider-status");
+    if (methodHint) methodHint.textContent = tt("cinema.methodHint." + cinemaImageProductionMethod());
     if (seed && document.activeElement !== seed && !lock?.checked) {
       seed.value = String(c.seed != null && c.seed !== "" ? c.seed : -1);
     }
@@ -3125,36 +3210,6 @@
     filmWorkspace.render();
   }
 
-  function renderCinemaTimeline() {
-    const c = ensureCinema();
-    const shots = (c.shots || []).filter((shot) => (shot.text || "").trim());
-    const shotDuration = Number(c.duration) || 5;
-    const duration = shots.length * shotDuration;
-    const scale = Math.max(1, duration);
-    const ruler = $("cinema-timeline-ruler");
-    if (ruler) {
-      ruler.innerHTML = Array.from({ length: Math.ceil(scale / 5) + 1 }, (_, i) =>
-        `<span style="left:${(i * 5 / scale) * 100}%">${i * 5}s</span>`
-      ).join("");
-    }
-    const lanes = { video: $("cinema-timeline-video"), dialogue: $("cinema-timeline-dialogue"), music: $("cinema-timeline-music") };
-    [lanes.video, lanes.dialogue, lanes.music].forEach((lane) => { if (lane) lane.innerHTML = ""; });
-    let offset = 0;
-    shots.forEach((shot, index) => {
-      const left = (offset / scale) * 100;
-      const width = (shotDuration / scale) * 100;
-      const block = `<button type="button" class="timeline-clip" data-shot-id="${htmlEsc(shot.id)}" style="left:${left}%;width:${width}%" title="Shot ${index + 1} · ${shotDuration} ${tt("sec")}"><b>${index + 1}</b><span>${htmlEsc(shot.text.slice(0, 32))}</span></button>`;
-      if (lanes.video) lanes.video.insertAdjacentHTML("beforeend", block);
-      if (lanes.dialogue && cinemaAudio().mode === "film") lanes.dialogue.insertAdjacentHTML("beforeend", block);
-      offset += shotDuration;
-    });
-    if (lanes.music) lanes.music.innerHTML = cinemaAudio().score_name
-      ? `<div class="timeline-audio-clip" style="width:100%"><span>♪ ${htmlEsc(cinemaAudio().score_name)}</span><em>waveform</em></div>`
-      : `<div class="timeline-empty">${tt("cinema.timelineNoScore")}</div>`;
-    const total = $("cinema-timeline-total");
-    if (total) total.textContent = tf("cinema.timelineTotal", { clip: String(shotDuration), total: duration.toFixed(1).replace(".0", "") });
-  }
-
   function syncCinemaShotJobs() {
     const host = $("cinema-shots");
     if (!host) return;
@@ -3221,7 +3276,6 @@
     renderCinemaPills();
     renderCinemaKnobs();
     renderCinemaAudio();
-    renderCinemaTimeline();
     renderCinemaAssetCards("character");
     renderCinemaAssetCards("creature");
     renderCinemaAssetCards("vehicle");
@@ -3884,12 +3938,13 @@ async function clearCinemaSheetRef(kind) {
         quality,
         steps,
         aspect: state.aspect || "16:9",
-        image_provider: cine.image_provider === "image_studio" ? "image_studio" : "minimax",
+        image_provider: normalizeCinemaImageProvider(cine.image_provider),
       };
       if (sheetRef?.name) {
         payload.ref_image = sheetRef.name;
         payload.ref_images = [sheetRef.name];
       }
+      payload.production_method = cinemaImageProductionMethod();
       const r = await fetch("/api/cinema/generate-sheet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -4866,7 +4921,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           seamless: wantSeamless,
           prepare_sheets: !wantSeamless,
           force_sheets: !!$("cinema-force-sheets")?.checked,
-          image_provider: cine.image_provider === "image_studio" ? "image_studio" : "minimax",
+          image_provider: normalizeCinemaImageProvider(cine.image_provider),
           post_pass: state.postPass || "",
           ...collectLoraPayload(),
         }),
@@ -4940,11 +4995,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
-  async function regenerateCinemaAsset(kind, assetId, button) {
+  async function regenerateCinemaAsset(kind, assetId, button, sheetOptions = {}) {
     const item = cinemaItem(kind, assetId);
     if (!item || !(item.name || "").trim()) return;
+    if (!sheetOptions.sheet_method && item.source_ref) {
+      sheetOptions = { ref_image: item.source_ref, ref_images: [item.source_ref] };
+    }
     if (button) button.disabled = true;
-    if (ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
+    if (!sheetOptions.sheet_method && ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
     try {
       const cine = ensureCinema();
       await saveCinema(true);
@@ -4957,7 +5015,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           quality: normalizeQuality(cine.quality || "736"),
           steps: Number($("cinema-steps")?.value) || cine.steps || 20,
           aspect: state.aspect || "16:9",
-          image_provider: cine.image_provider === "image_studio" ? "image_studio" : "minimax",
+          image_provider: normalizeCinemaImageProvider(cine.image_provider),
+          production_method: cinemaImageProductionMethod(),
+          ...sheetOptions,
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -4965,8 +5025,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       toast(tf("cinema.sheetQueuedToast", { name: item.name }));
       setProdLane("director");
       await refreshJobs();
+      return true;
     } catch (e) {
       toast(String(e.message || e));
+      return false;
     } finally {
       stopImageStudioQueuePoll();
       if (button?.isConnected) button.disabled = false;
@@ -5001,7 +5063,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         silent_audio: audio.mode === "silent",
         purpose: cine.setup?.purpose !== "auto" ? cine.setup?.purpose : "short_film",
         sage_attention: "disabled", post_pass: state.postPass || "",
-        image_provider: cine.image_provider === "image_studio" ? "image_studio" : "minimax",
+        image_provider: normalizeCinemaImageProvider(cine.image_provider),
         ...collectLoraPayload(),
       };
       const r = await fetch("/api/cinema/produce-one", {
@@ -5477,6 +5539,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       (jobId && state.jobs && state.jobs.find((j) => j.id === jobId)) ||
       (jobId && state.galleryItems && state.galleryItems.find((j) => j.id === jobId)) ||
       null;
+    if (job && prompt !== undefined) setClipPrompt(prompt, jobProductionMeta(job), job.seed);
     const name =
       downloadName ||
       job?.download_name ||
@@ -6718,6 +6781,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const d = data.detail;
     if (typeof d === "string" && d.trim()) return d;
     if (typeof d === "object" && d !== null) {
+      if (typeof d.code === "string" && d.code.startsWith("lora.")) return tt(d.code);
       if (typeof d.message === "string" && d.message.trim()) return d.message;
       if (typeof d.detail === "string" && d.detail.trim()) return d.detail;
       const s = JSON.stringify(d);
@@ -7827,7 +7891,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   function selectJob(job, { play = true, quiet = false } = {}) {
     state.selectedJobId = job.id;
     state.playerCleared = false;
-    const meta = `${job.duration || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`;
+    const meta = jobProductionMeta(job);
     setClipPrompt(job.prompt || "", meta, job.seed);
     if (play && job.output?.url) {
       showPlayerVideo(job.output.url, job.id, job.prompt || "");
@@ -8002,7 +8066,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration || "?"}${tt("sec")} · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
+            jobProductionMeta(j),
             j.seed
           );
         };
@@ -8017,7 +8081,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration || "?"}${tt("sec")} · ${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}`,
+            jobProductionMeta(j),
             j.seed
           );
         };
@@ -8457,7 +8521,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           e.stopPropagation();
           openPromptView(
             j.prompt,
-            `${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`,
+            jobProductionMeta(j),
             j.seed
           );
         };
@@ -8605,31 +8669,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
-  function applySheetStillsFromJobs() {
-    const c = ensureCinema();
-    if (!c) return false;
-    let changed = false;
-    const filmId = String(c.film_id || "");
-    (state.jobs || []).forEach((j) => {
-      if (!j?.sheet_attached || !j.sheet_asset_id) return;
-      if (filmId && String(j.film_id || "") && String(j.film_id) !== filmId) return;
-      const urls = Array.isArray(j.sheet_still_urls) && j.sheet_still_urls.length
-        ? j.sheet_still_urls
-        : (j.sheet_still_url ? [j.sheet_still_url] : []);
-      if (!urls.length) return;
-      const item = cinemaItem(j.sheet_kind || "character", j.sheet_asset_id);
-      if (!item || cinemaAssetImages(item).length >= urls.length) return;
-      item.images = urls.map((url) => {
-        const file = String(url).split("/").pop() || "";
-        return { name: "", file, url };
-      });
-      item.image = item.images[0].file;
-      item.url = item.images[0].url;
-      changed = true;
-    });
-    return changed;
-  }
-
   async function refreshJobs() {
     try {
       const data = await fetch("/api/jobs").then((r) => r.json());
@@ -8645,24 +8684,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           prevStatus[j.id] &&
           prevStatus[j.id] !== "done"
       );
-      if (sheetJustDone) {
+      // Completed job history is not the asset library: it can contain images
+      // the user has since deleted. Reload only after a newly completed sheet.
+      if (sheetJustDone) state.cinemaSheetReloadPending = true;
+      if (state.cinemaSheetReloadPending) {
         const typing =
           cinemaAssetCardsTyping("character") ||
           cinemaAssetCardsTyping("creature") ||
           cinemaAssetCardsTyping("vehicle") ||
           cinemaAssetCardsTyping("location");
-        if (!typing) await loadCinema();
-        else if (applySheetStillsFromJobs()) {
-          renderCinemaAssetCards("character", { force: true });
-          renderCinemaAssetCards("creature", { force: true });
-          renderCinemaAssetCards("vehicle", { force: true });
-          renderCinemaAssetCards("location", { force: true });
+        if (!typing) {
+          await loadCinema();
+          state.cinemaSheetReloadPending = false;
         }
-      } else if (applySheetStillsFromJobs()) {
-        renderCinemaAssetCards("character", { force: true });
-        renderCinemaAssetCards("creature", { force: true });
-        renderCinemaAssetCards("vehicle", { force: true });
-        renderCinemaAssetCards("location", { force: true });
       }
       renderJobs();
       autoPlayNewestFinished(prevStatus);
@@ -8854,7 +8888,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         return false;
       }
     }
-    if (isRef && !state.refImages.length && !sceneAssetReferences?.payload().asset_bindings?.length) {
+    if (isRef && !state.refImages.length && !sceneAssetReferences?.payload().asset_bindings?.length && !window.hasPreparedSceneAudioReference?.()) {
       tToast("toast.refNeedImage");
       return false;
     }
@@ -8881,6 +8915,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const faceLockOn = !!$("face-lock-chain")?.checked && state.faceImages.length > 0;
       const body = {
         prompt: withStyleLock(prompt),
+        ...window.getSceneAudioPayload?.(),
         ...sceneAssetReferences?.payload(),
         duration: state.duration,
         aspect: state.aspect || "16:9",
@@ -9036,6 +9071,24 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         box.disabled = !box.checked && selected.size >= 3;
       });
     });
+    const presets = [...selected].map(id => (state.loraCatalog || []).find(item => item.id === id)).filter(item => item?.preset && item.file);
+    if (presets.length === 1) {
+      const recipe = presets[0];
+      if (recipe.steps) {
+        if ($("steps")) $("steps").value = String(recipe.steps);
+        if ($("cinema-steps")) $("cinema-steps").value = String(recipe.steps);
+        ensureCinema().steps = recipe.steps;
+      }
+      for (const key of ["sampler", "scheduler"]) {
+        const select = $(key);
+        if (select && recipe[key]) {
+          if (![...select.options].some(opt => opt.value === recipe[key])) {
+            const option = document.createElement("option"); option.value = recipe[key]; option.textContent = recipe[key]; select.appendChild(option);
+          }
+          select.value = recipe[key];
+        }
+      }
+    }
     state.loraId = [...selected][0] || "";
     state.loraApplied = selected.size > 0;
     updateLoraHint();
@@ -9111,6 +9164,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       }).join("");
       const syncLoraChecks = () => {
         const boxes = [...checks.querySelectorAll('input[type="checkbox"]')];
+        const speedBoxes = boxes.filter(box => box.checked && (state.loraCatalog || []).some(spec => spec.id === box.value && spec.preset));
+        if (speedBoxes.length > 1) {
+          const newest = speedBoxes.find(box => box === document.activeElement) || speedBoxes[speedBoxes.length - 1];
+          speedBoxes.forEach(box => { if (box !== newest) box.checked = false; });
+        }
         const ids = boxes.filter((box) => box.checked).map((box) => box.value);
         syncLoraSelection(ids);
       };
@@ -9370,6 +9428,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (status) status.textContent = String(e.message || e);
     }
   }
+
+  window.addEventListener("h3-model-files-changed", async () => {
+    await loadLoras(false);
+    syncLoraSelection(selectedLoraIds().filter(id => state.loraCatalog.some(s => s.id === id && s.ready)));
+    await loadH3Models();
+    await loadCinemaActorLoras();
+  });
 
   async function loadLoras(retry = true) {
     const checks = $("lora-check-list");
@@ -10067,7 +10132,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!btn) return;
     cinemaAudio().mode = btn.dataset.audio === "silent" ? "silent" : "film";
     renderCinemaAudio();
-    renderCinemaTimeline();
     void saveCinema(true);
   });
   $("cinema-score-file")?.addEventListener("change", (e) => {
@@ -10445,7 +10509,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       shot.text = e.target.value;
       void saveCinema(true);
       scheduleCinemaPreview();
-      renderCinemaTimeline();
     }
   });
   $("cinema-shots")?.addEventListener("click", (e) => {
@@ -10565,7 +10628,38 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         if (field === "name" || field === "use_lora") renderCinema();
       });
     });
+    $(rootId)?.addEventListener("change", async (e) => {
+      const input = e.target.closest(".cinema-look-ref");
+      const file = input?.files?.[0];
+      const id = input?.closest(".cinema-card")?.dataset.id;
+      if (!file || !id) return;
+      input.disabled = true;
+      try {
+        await stageCinemaLookReference(kind, id, file);
+      } catch (err) {
+        toast(String(err.message || err));
+      } finally {
+        if (input.isConnected) { input.disabled = false; input.value = ""; }
+      }
+    });
     $(rootId)?.addEventListener("click", (e) => {
+      const lookAction = e.target.closest(".cinema-look-generate, .cinema-look-clear");
+      if (lookAction) {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = lookAction.closest(".cinema-card")?.dataset.id;
+        if (!id) return;
+        const key = cinemaLookReferenceKey(kind, id);
+        if (state.cinemaLookRefs[key]?.busy) return;
+        if (lookAction.classList.contains("cinema-look-generate")) {
+          void produceCinemaLookSheet(kind, id, lookAction);
+        } else {
+          delete state.cinemaLookRefs[key];
+          flushCinemaFields();
+          renderCinemaAssetCards(kind, { force: true });
+        }
+        return;
+      }
       const regen = e.target.closest(".cinema-asset-regen");
       if (regen) {
         e.preventDefault();
@@ -10668,7 +10762,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("cinema-image-provider")?.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-image-provider]");
     if (!btn) return;
-    ensureCinema().image_provider = btn.dataset.imageProvider === "image_studio" ? "image_studio" : "minimax";
+    ensureCinema().image_provider = normalizeCinemaImageProvider(btn.dataset.imageProvider);
     renderCinemaKnobs();
     void saveCinema(true);
   });

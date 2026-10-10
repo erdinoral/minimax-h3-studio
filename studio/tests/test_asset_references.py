@@ -64,6 +64,49 @@ class ReferencePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'8'):
             self.plan([],existing=[f'{i}.png' for i in range(9)],continuation=True)
 
+    def crowded_film(self):
+        lib = film()
+        for key, count in [('characters', 5), ('creatures', 3), ('locations', 1)]:
+            lib[key][0]['images'] = [{'file': f'{key}_{i}.png'} for i in range(count)]
+        bindings = [{'asset_id': key} for key in ('characters', 'creatures', 'locations')]
+        return lib, bindings
+
+    def test_continue_balances_default_angles_and_keeps_every_asset(self):
+        lib, bindings = self.crowded_film()
+        plan = asset_references.resolve('Move', bindings, lib, lambda f: True, continuation=True)
+        self.assertEqual(len(plan['ref_images']), 8)
+        self.assertEqual({r['asset']['id'] for r in plan['rows']},
+                         {'characters', 'creatures', 'locations'})
+        self.assertIn('characters_0.png', plan['ref_images'])
+        self.assertIn('creatures_0.png', plan['ref_images'])
+        self.assertEqual(len(lib['characters'][0]['images']), 5)
+
+    def test_auto_angles_over_nine_reach_shared_budget(self):
+        lib, bindings = self.crowded_film()
+        lib['locations'][0]['images'].append({'file': 'road_second.png'})
+        plan = asset_references.resolve('Move', bindings, lib, lambda f: True)
+        self.assertEqual(len(plan['ref_images']), 9)
+
+    def test_explicit_angles_and_picture_indices_are_never_truncated(self):
+        lib, bindings = self.crowded_film()
+        for b in bindings:
+            b['files'] = [im['file'] for im in lib[b['asset_id']][0]['images']]
+        with self.assertRaisesRegex(ValueError, '8'):
+            asset_references.resolve('Move', bindings, lib, lambda f: True, continuation=True)
+        for b in bindings:
+            del b['files']
+        with self.assertRaisesRegex(ValueError, '8'):
+            asset_references.resolve('Use <Picture 9>', bindings, lib, lambda f: True, continuation=True)
+
+    def test_uploaded_references_stay_first_when_auto_angles_are_reduced(self):
+        lib, bindings = self.crowded_film()
+        plan = asset_references.resolve('Move', bindings, lib, lambda f: True,
+                                        existing=['uploaded.png'], continuation=True)
+        self.assertEqual(len(plan['ref_images']), 8)
+        self.assertEqual(plan['ref_images'][0], 'uploaded.png')
+        self.assertEqual({r['asset']['id'] for r in plan['rows'] if 'asset' in r},
+                         {'characters', 'creatures', 'locations'})
+
     def test_graph_has_last_frame_first_and_all_assets_in_exact_order(self):
         plan=self.plan([{'asset_id':'vehicles'},{'asset_id':'locations'}],continuation=True)
         prompt=enhance_ref_prompt(asset_references.prompt('Move',plan['rows'],1),n_images=3,role='asset_continue')
@@ -74,6 +117,30 @@ class ReferencePlanTests(unittest.TestCase):
             self.assertEqual(graph[link[0]]['inputs']['image'],file)
         self.assertIn('not opening frames',prompt)
         self.assertIn('vehicle geometry',prompt)
+
+    def test_new_scene_starts_with_scene_instruction_not_reference_catalogue(self):
+        plan = self.plan([{'asset_id': 'characters'}, {'asset_id': 'creatures'}, {'asset_id': 'locations'}])
+        legacy = enhance_ref_prompt('Ada lies beside the stream while Dragon drinks.',
+                                     n_images=3, role='general')
+        text = asset_references.prompt(legacy, plan['rows'], new_scene=True)
+        self.assertTrue(text.startswith('SCENE FROM FRAME ZERO:'))
+        self.assertIn('At 0.00 seconds', text)
+        self.assertIn('Do not display, animate or transition out of', text)
+        self.assertLess(text.index('Ada lies beside'), text.index('<Picture 1> is'))
+        self.assertNotIn('as visual reference(s) for style', text)
+        graph = build_ref2va_prompt(text=text, ref_image_names=plan['ref_images'])
+        self.assertEqual(graph['104']['inputs']['prompt'], text)
+        self.assertNotIn('451', graph)
+        self.assertNotIn('first_frame', graph['104']['inputs'])
+
+    def test_frame_zero_instruction_is_idempotent_and_continuation_stays_distinct(self):
+        text = enhance_ref_prompt('Rest beside the stream.', n_images=2, role='asset_new')
+        self.assertEqual(enhance_ref_prompt(text, n_images=2, role='asset_new'), text)
+        plan = self.plan([{'asset_id': 'characters'}])
+        continued = enhance_ref_prompt(asset_references.prompt('Continue resting.', plan['rows'], 1),
+                                       n_images=2, role='asset_continue')
+        self.assertIn('exact final frame of the previous clip', continued)
+        self.assertNotIn('SCENE FROM FRAME ZERO:', continued)
 
 
 class SharedQueueTests(unittest.IsolatedAsyncioTestCase):
@@ -136,6 +203,22 @@ class SharedQueueTests(unittest.IsolatedAsyncioTestCase):
         job=(await env['batch'](body))['jobs'][0]
         self.assertEqual(job['ref_images'],['creatures.png'])
         self.assertEqual(job['lane'],'scene')
+
+    async def test_director_chapter_with_nine_default_refs_queues_all_six_shots(self):
+        env = self.env()
+        lib, selection = ReferencePlanTests().crowded_film()
+        env['cinema'].load = lambda: lib
+        modes = ['t2v', 'continue', 't2v', 'continue', 'continue', 'continue']
+        body = self.body(prompts=['Move'] * 6, modes=modes, continue_from_job_id=None,
+                         shot_bindings=[selection] * 6)
+        jobs = (await env['batch'](body))['jobs']
+        self.assertEqual(len(jobs), 6)
+        for index, job in enumerate(jobs):
+            self.assertEqual(len(job['ref_images']), 8 if modes[index] == 'continue' else 9)
+            self.assertEqual({r['asset']['id'] for r in job['reference_manifest']},
+                             {'characters', 'creatures', 'locations'})
+            if modes[index] == 'continue':
+                self.assertEqual(job['continue_from'], jobs[index - 1]['id'])
 
     async def test_batch_validates_all_selections_before_queuing_any(self):
         env=self.env();body=self.body(prompts=['A','B'],modes=['t2v','continue'],continue_from_job_id=None,

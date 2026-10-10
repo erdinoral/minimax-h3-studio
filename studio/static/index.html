@@ -1,5 +1,5 @@
-﻿<!DOCTYPE html>
-<html lang="tr">
+<!DOCTYPE html>
+<html lang="tr" data-theme="orange" data-ui-style="modern">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,12 +7,16 @@
   <script>
     (function () {
       try {
+        var theme = localStorage.getItem("h3-theme");
+        document.documentElement.dataset.theme = ["blue", "orange", "graphite"].includes(theme) ? theme : "orange";
+        var uiStyle = localStorage.getItem("h3-ui-style");
+        document.documentElement.dataset.uiStyle = ["modern", "old-school", "studio"].includes(uiStyle) ? uiStyle : "modern";
         var v = localStorage.getItem("h3-chrome-fit");
         if (v !== "0" && v !== "false") document.documentElement.classList.add("chrome-fit");
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema198" />
+  <link rel="stylesheet" href="/static/app.css?v=cinema216" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -41,6 +45,7 @@
       <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
       <button type="button" id="btn-settings" class="menu-btn">Ayarlar</button>
       <button type="button" id="btn-support" class="menu-btn support-rainbow-btn" title="Sponsor / sorun bildir">Destek</button>
+      <button type="button" id="btn-workflow-guide" class="menu-btn">Guide</button>
       <span class="comfy-pill" id="comfy-pill" title="Comfy arka uç — Pinokio Stop ile kapanır" data-i18n-title="ui.comfy-pill.title">Comfy …</span>
     </nav>
   </header>
@@ -110,6 +115,19 @@
         </div>
 
         <div id="scene-asset-references"></div>
+        <details class="scene-audio-card" id="scene-audio-card">
+          <summary id="scene-audio-title">Audio · single clip</summary>
+          <label><span id="scene-audio-mode-label">Use audio as</span>
+            <select id="scene-audio-mode"><option value="reference">Audio reference</option><option value="original">Original soundtrack</option></select>
+          </label>
+          <p class="muted" id="scene-audio-hint"></p>
+          <div class="row-btns"><label class="file-pick"><input type="file" id="scene-audio-file" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg,.aac" /><span id="scene-audio-pick">Select audio</span></label><button type="button" class="btn-ghost" id="scene-audio-remove">Remove</button></div>
+          <label><span id="scene-audio-start-label">Start (seconds)</span><input id="scene-audio-start" type="number" value="0" min="0" step="0.1" /></label>
+          <label><span id="scene-audio-end-label">End (seconds; optional)</span><input id="scene-audio-end" type="number" min="0.1" step="0.1" /></label>
+          <button type="button" class="btn-secondary" id="scene-audio-upload">Prepare audio</button>
+          <p class="muted" role="status" id="scene-audio-status"></p>
+          <audio id="scene-audio-preview" controls hidden></audio>
+        </details>
         <div id="panel-mode-new">
           <p class="muted mode-hint" id="mode-hint-new">Sıfırdan T2V üret veya bir görselle I2V başlat.</p>
           <label id="new-video-input-label">Başlangıç türü</label>
@@ -323,7 +341,7 @@
           <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 12 step" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
           <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step" data-i18n-title="ui.btn-speed-quick.title">Hızlı</button>
         </div>
-        <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Step sayısı Ayarlar’daki kutudan gelir — LoRA zorlamaz.</p>
+        <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Hız LoRA’sı seçildiğinde adım ve sampler ayarları otomatik uygulanır.</p>
         <label class="check"><input type="checkbox" id="fast-tae-preview" /> <span data-i18n="ayar.fastPreview">Hızlı taslak önizleme (TAE; final kalite değil)</span></label>
         <label class="check rewriter-toggle"><input type="checkbox" id="prompt-rewriter-enabled" /> <span id="prompt-optimize-label">Prompt’u LLM ile düzenle</span></label>
         <p class="muted mode-hint" id="prompt-rewriter-status">Yönetmen LLM kontrol ediliyor…</p>
@@ -641,14 +659,6 @@
           <label><span id="cinema-seed-label">Seed</span>
             <input type="number" id="cinema-seed" value="-1" />
           </label>
-          <div class="cinema-image-provider" role="group" aria-labelledby="cinema-image-provider-label">
-            <span id="cinema-image-provider-label">Görsel üretimi</span>
-            <div class="ios-segment" id="cinema-image-provider">
-              <button type="button" class="on" data-image-provider="minimax" aria-pressed="true">MiniMax</button>
-                <button type="button" data-image-provider="image_studio" aria-pressed="false">Qwen Image</button>
-            </div>
-            <span class="muted" id="cinema-image-provider-status" aria-live="polite"></span>
-          </div>
           <label class="cinema-seamless-label" title="Aynı seed ile look kıyasla" data-i18n-title="ui.hint76">
             <input type="checkbox" id="cinema-seed-lock" />
             <span id="cinema-seed-lock-label">Seed kilidi</span>
@@ -678,6 +688,14 @@
           <p class="muted mode-hint" id="cinema-mode-hint">JSON takes[] = sahne. 5 sahneli = 5 take × 8 shot, hikaye devam. Karakter/mekan kartı gerekmez</p>
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
         </div>
+      </div>
+      <div class="cinema-image-provider cinema-asset-method" role="group" aria-labelledby="cinema-image-provider-label">
+        <span id="cinema-image-provider-label" data-i18n="cinema.imageProvider">Asset üretim yöntemi</span>
+        <div class="ios-segment" id="cinema-image-provider">
+          <button type="button" class="on" data-image-provider="minimax" aria-pressed="true">H3</button>
+          <button type="button" data-image-provider="image_studio" aria-pressed="false">Qwen</button>
+        </div>
+        <span class="muted" id="cinema-image-provider-status" aria-live="polite"></span>
       </div>
       <div class="cinema-workspace-toolbar">
         <button type="button" class="cinema-library-heading" id="btn-cinema-library-toggle" aria-pressed="false" aria-controls="cinema-asset-stack"><span id="cinema-library-toggle-label" data-i18n="ui.cinema-library-toggle-label">Kütüphane</span><span class="cinema-library-chevron" aria-hidden="true">▾</span></button>
@@ -918,28 +936,6 @@
         <summary data-i18n="ui.label5">İsteğe bağlı: bölüm düzeni ve çekime özel referans seçimi</summary>
         <div id="film-workspace"></div>
       </details>
-      <section class="cinema-timeline" aria-label="Zaman çizelgesi" data-i18n-aria-label="ui.timelineAria">
-        <div class="cinema-timeline-head">
-          <div>
-            <span class="eyebrow">TIMELINE</span>
-            <h3 data-i18n="ui.label6">Kurgu zaman çizelgesi</h3>
-          </div>
-            <span class="muted" id="cinema-timeline-total">5 sn / shot</span>
-        </div>
-        <div class="timeline-ruler" id="cinema-timeline-ruler"></div>
-        <div class="timeline-track" data-track="video">
-          <span class="timeline-track-label">Video</span>
-          <div class="timeline-lane" id="cinema-timeline-video"></div>
-        </div>
-        <div class="timeline-track" data-track="dialogue">
-          <span class="timeline-track-label" data-i18n="ui.label8">Diyalog / SFX</span>
-          <div class="timeline-lane" id="cinema-timeline-dialogue"></div>
-        </div>
-        <div class="timeline-track" data-track="music">
-          <span class="timeline-track-label" data-i18n="ui.label7">Film müziği</span>
-          <div class="timeline-lane" id="cinema-timeline-music"></div>
-        </div>
-      </section>
       <div class="cinema-character-modal hidden" id="cinema-ai-modal" aria-hidden="true">
         <div class="cinema-character-dialog cinema-ai-dialog" role="dialog" aria-modal="true" aria-labelledby="cinema-ai-title">
           <header>
@@ -1164,6 +1160,7 @@
         <button type="button" class="menu-btn" id="btn-settings-close">← Studio</button>
       </header>
       <div class="llm-settings" id="llm-settings">
+        <section id="studio-theme-settings"></section>
         <section id="h3-engine-control" class="h3-engine-card"></section>
         <div id="optional-h3-models"></div>
         <h3 class="llm-settings-title">Yönetmen LLM / API anahtarları</h3>
@@ -1262,8 +1259,14 @@
 
 
         <h3 class="llm-settings-title" id="settings-lora-title" style="margin-top:1.25rem">H3 LoRA’lar</h3>
+        <label><span data-i18n="lora.civitaiKey">Civitai API key (optional)</span><input type="password" id="lora-civitai-key" autocomplete="off" /></label>
+        <button type="button" class="btn-ghost" id="btn-lora-civitai-key" data-i18n="lora.saveKey">Save Civitai key</button>
+        <p class="muted mode-hint" id="lora-access-status" aria-live="polite"></p>
+        <p class="muted mode-hint" data-i18n="lora.filmTools">Outfit sheets and video/audio latent continuation tools are available as ComfyUI workflows.</p>
+        <a class="btn-ghost" id="film-tools-link" target="_blank" rel="noopener" hidden data-i18n="lora.openFilmTools">Open film tools in ComfyUI</a>
         <p class="muted mode-hint lora-shop-title" id="lora-shop-title">Hazır LoRA’lar — yoksa isme tıkla, Hugging Face’ten iner</p>
         <div class="lora-shop" id="lora-shop"></div>
+        <section id="model-storage" style="margin-top:24px"></section>
         <label class="file-pick">
           <input type="file" id="lora-file" class="file-pick-input" accept=".safetensors" />
           <span class="file-pick-btn" id="lora-file-btn">LoRA ekle</span>
@@ -1315,12 +1318,16 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema198" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=cinema216" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=1" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema198" charset="utf-8"></script>
+  <script src="/static/app.js?v=cinema216" charset="utf-8"></script>
+  <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
+  <script src="/static/model-storage.js?v=1" charset="utf-8"></script>
+  <script src="/static/workflow-access.js?v=3" charset="utf-8"></script>
+<script src="/static/h3-enhancements.js?v=1"></script>
 </body>
 </html>

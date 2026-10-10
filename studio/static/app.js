@@ -3134,13 +3134,7 @@
     if (filmWorkspace) renderFilmWorkspace();
   }
 
-  const sceneAssetReferences = window.createSceneAssetReferences?.({
-    toast,
-    context: () => ({prompt: $("prompt")?.value || "", continuation: state.mode === "continue",
-      first_frame_name: state.mode === "t2v" && state.newVideoInput === "i2v" ? state.firstFrameName : null,
-      ref_images: (state.mode === "ref" ? state.refImages : state.mode === "face" ? state.faceImages :
-        state.mode === "v2v" ? state.v2vImages : state.mode === "continue" && $("face-lock-chain")?.checked ? state.faceImages : []).map(x => x.name)})
-  });
+  const sceneAssetReferences = null;
   let filmWorkspace = null;
   let planReview = null;
   let filmSaveStatus = "Kaydedildi";
@@ -7498,7 +7492,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       };
       const rm = document.createElement("button");
       rm.type = "button";
-      rm.className = "btn-ghost";
+      rm.className = "btn-ghost job-action-delete";
       rm.textContent = tt("job.del");
       rm.onclick = () => {
         state.queueItems = state.queueItems.filter((x) => x.id !== item.id);
@@ -8072,6 +8066,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         };
       }
       const right = document.createElement("div");
+      right.className = "job-actions";
       if (j.prompt) {
         const cp = document.createElement("button");
         cp.textContent = tt("job.prompt");
@@ -8091,12 +8086,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         if (j.mode !== "qwen_sheet") {
           const b = document.createElement("button");
           b.textContent = tt("job.play");
+          b.className = "btn-secondary job-action-main";
           b.onclick = () => selectJob(j);
           right.appendChild(b);
         }
         const rm = document.createElement("button");
         rm.textContent = tt("job.del");
-        rm.className = "btn-ghost";
+        rm.className = "btn-ghost job-action-delete";
         rm.onclick = (e) => {
           e.stopPropagation();
           void deleteJob(j.id);
@@ -8105,6 +8101,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       } else if (j.status === "error" || j.status === "cancelled") {
         const b = document.createElement("button");
         b.textContent = tt("job.retry");
+        b.className = "btn-secondary job-action-main";
         b.onclick = async (e) => {
           e.stopPropagation();
           b.disabled = true;
@@ -8122,7 +8119,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         right.appendChild(b);
         const rm = document.createElement("button");
         rm.textContent = tt("job.del");
-        rm.className = "btn-ghost";
+        rm.className = "btn-ghost job-action-delete";
         rm.onclick = (e) => {
           e.stopPropagation();
           void deleteJob(j.id);
@@ -9004,12 +9001,23 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function applySpeedProfile(kind) {
+    document.querySelectorAll("#speed-chips [data-speed]").forEach(button => {
+      const selected = button.dataset.speed === kind;
+      button.classList.toggle("on", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
     if (kind === "draft") {
       setDuration(5);
       setQuality("480");
       const steps = $("steps");
       if (steps) steps.value = "12";
       applyCinemaSpeed("draft");
+      return;
+    }
+    if (kind === "quality") {
+      setQuality("1088");
+      const steps = $("steps");
+      if (steps) steps.value = "20";
       return;
     }
     if (kind === "quick") {
@@ -9024,6 +9032,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-generate").onclick = () => submitGenerate();
   $("btn-fast-preset")?.addEventListener("click", () => applySpeedProfile("draft"));
   $("btn-speed-quick")?.addEventListener("click", () => applySpeedProfile("quick"));
+  $("btn-speed-quality")?.addEventListener("click", () => applySpeedProfile("quality"));
 
   function currentLoraSpec() {
     const cine = $("cinema-lora-select");
@@ -9156,11 +9165,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const checks = $(hostId);
       if (!checks) return;
       const selected = new Set(previousIds.length ? previousIds : prev ? [prev] : []);
+      const expanded = new Set([...checks.querySelectorAll("details[open][data-category]")].map(el => el.dataset.category));
       checks.innerHTML = LORA_CATEGORIES.map(category => {
         const items = catalog.filter(spec => spec.id && spec.file && spec.ready && loraCategory(spec) === category);
         if (!items.length) return "";
-        return `<fieldset class="lora-category"><legend>${htmlEsc(loraCategoryLabel(category))}</legend>` +
-          items.map(spec => `<div class="lora-pick-row"><label><input type="checkbox" aria-label="${htmlEsc(spec.label)}" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label><input type="number" data-lora-weight="${htmlEsc(spec.file)}" aria-label="${htmlEsc(spec.label)} ${window.h3Lang?.() === "en" ? "weight" : "ağırlık"}" min="-6" max="6" step="0.05" value="${loraWeight(spec)}" style="width:75px" /></div>`).join("") + "</fieldset>";
+        return `<details class="lora-category" data-category="${htmlEsc(category)}" ${expanded.has(category) ? "open" : ""}><summary>${htmlEsc(loraCategoryLabel(category))}</summary><div class="lora-category-items">` +
+          items.map(spec => `<div class="lora-pick-row"><label><input type="checkbox" aria-label="${htmlEsc(spec.label)}" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label><input type="number" data-lora-weight="${htmlEsc(spec.file)}" aria-label="${htmlEsc(spec.label)} ${window.h3Lang?.() === "en" ? "weight" : "ağırlık"}" min="-6" max="6" step="0.05" value="${loraWeight(spec)}" style="width:75px" /></div>`).join("") + "</div></details>";
       }).join("");
       const syncLoraChecks = () => {
         const boxes = [...checks.querySelectorAll('input[type="checkbox"]')];
@@ -9210,16 +9220,20 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!box) return;
     const catalog = visibleLoraCatalog().filter((spec) => spec && spec.file);
     const busyId = state.loraDownload?.busy ? state.loraDownload.id : "";
+    const openCategories = new Set([...box.querySelectorAll("details[open][data-category]")].map(el => el.dataset.category));
     box.innerHTML = "";
+    let categoryItems = null;
     let lastCategory = "";
     catalog.sort((a,b) => LORA_CATEGORIES.indexOf(loraCategory(a)) - LORA_CATEGORIES.indexOf(loraCategory(b)));
     catalog.forEach((spec) => {
       const category = loraCategory(spec);
       if (category !== lastCategory) {
-        const heading = document.createElement("h4");
-        heading.className = "lora-category-heading";
+        const group = document.createElement("details");
+        group.className = "lora-category"; group.dataset.category = category; group.open = openCategories.has(category);
+        const heading = document.createElement("summary");
         heading.textContent = loraCategoryLabel(category);
-        box.appendChild(heading);
+        categoryItems = document.createElement("div"); categoryItems.className = "lora-category-items";
+        group.append(heading, categoryItems); box.appendChild(group);
         lastCategory = category;
       }
       const btn = document.createElement("button");
@@ -9269,7 +9283,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         renderCinemaAssetCards("character", { force: true });
       };
       card.appendChild(categorySelect);
-      box.appendChild(card);
+      categoryItems.appendChild(card);
     });
   }
 
@@ -11340,6 +11354,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     exitGalleryMergeMode();
     $("view-gallery")?.classList.add("hidden");
   });
+  void loadH3Models();
   $("btn-settings")?.addEventListener("click", () => {
     setDirectorLlmOpen(false);
     $("view-gallery")?.classList.add("hidden");

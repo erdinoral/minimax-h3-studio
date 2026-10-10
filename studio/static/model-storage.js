@@ -13,14 +13,16 @@
     'storage.invalidFile':['Geçersiz model dosyası.','Invalid model file.']
   };
   function render() {
+    const expanded=new Set([...host.querySelectorAll("details[open][data-folder]")].map(el=>el.dataset.folder));
     host.replaceChildren();
     const title=document.createElement('h3');title.textContent=en()?'Model storage':'Model depolama';host.append(title);
     const hint=document.createElement('p');hint.className='muted';hint.textContent=en()?'Delete downloaded weights to free disk space. Active and required base files are protected.':'Diskte yer açmak için indirilen ağırlıkları sil. Aktif motor ve temel kurulum dosyaları korunur.';host.append(hint);
     const refresh=document.createElement('button');refresh.type='button';refresh.className='btn-secondary';refresh.textContent=en()?'Refresh':'Yenile';refresh.onclick=load;host.append(refresh);
     const list=document.createElement('div');list.style.cssText='max-height:340px;overflow:auto;margin-top:12px';host.append(list);
-    let folder='';
+    let folder=''; let groupItems;
+    files.sort((a,b)=>a.folder.localeCompare(b.folder) || a.file.localeCompare(b.file));
     files.forEach(file=>{
-      if(folder!==file.folder){folder=file.folder;const heading=document.createElement('h4');heading.textContent=folder==='loras'?'LoRA':folder;list.append(heading);}
+      if(folder!==file.folder){folder=file.folder;const group=document.createElement('details');group.className='lora-category model-storage-group';group.dataset.folder=folder;group.open=expanded.has(folder);const heading=document.createElement('summary');heading.textContent=folder==='loras'?'LoRA':folder;groupItems=document.createElement('div');groupItems.className='lora-category-items';group.append(heading,groupItems);list.append(group);}
       const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border, #555)';
       const label=document.createElement('span');label.style.cssText='flex:1;min-width:0;overflow-wrap:anywhere';label.textContent=file.file+' · '+size(file.bytes);row.append(label);
       const del=document.createElement('button');del.type='button';del.className='btn-ghost';del.disabled=file.protected;del.textContent=file.protected?(en()?'Protected':'Korumalı'):(en()?'Delete':'Sil');
@@ -33,7 +35,7 @@
           window.dispatchEvent(new Event('h3-model-files-changed'));await load();
         } catch(error){window.alert(error.message);del.disabled=false;}
       };
-      row.append(del);list.append(row);
+      row.append(del);groupItems.append(row);
     });
   }
   async function load(){

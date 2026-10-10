@@ -1,3 +1,19 @@
+## 2026-10-10 — Scene workspace and LoRA interface update
+
+- Aligned Scene, player, queue, LoRA and settings panels; compact player and queue actions.
+- Icon dropdowns for project type, visual style, duration, aspect and quality.
+- Scene Seed and Steps controls with Draft (480p/12), Medium (736p/15) and Quality (1088p/20) presets.
+- Clear green selected states for switches, checkboxes and speed presets.
+- Collapsible LoRA categories and model-storage folders; bilingual step-by-step LoRA guide.
+- Engine and appearance controls in Scene settings; themed image-to-video upload/generation controls.
+- Scene no longer pulls Director library assets; Director library remains accessible in seamless mode.
+- Removed duplicate queue controls and explanatory clutter; improved Turkish/English labels.
+- Known LoRA catalog triggers take precedence over saved notes and apply automatically.
+- Scene audio remains available. Audio-driven motion and exact lip sync are planned, not part of this update.
+
+Update through Pinokio, restart Studio, and refresh the browser to load the new assets.
+
+---
 # H3 Studio — Güncelleme Notları
 
 **Sürüm:** 2026-08-20 (Studio patch 2)  

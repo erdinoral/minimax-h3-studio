@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=cinema216" />
+  <link rel="stylesheet" href="/static/app.css?v=scene-layout249" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -59,9 +59,9 @@
   </div>
 
   <main class="workspace" id="view-studio">
-    <!-- grid: scene | player | player / prompt | ayar | prod -->
+    <!-- grid: scene | player | ayar / prompt | prod | ayar -->
     <section class="zone zone-scene panel scene">
-        <h2 id="scene-zone-title">Sahne · tek klip</h2>
+        <h2 id="scene-zone-title">Sahne</h2>
         <p class="muted mode-hint" id="scene-zone-sub">Tek video üretimi: yeni / devam / referans. Film için üstten <strong>Direktör</strong>.</p>
 
         <div id="panel-workspace-director" class="panel-workspace-director hidden">
@@ -87,7 +87,7 @@
         </div>
 
         <div class="scene-project" id="scene-project">
-          <label>Üretim türü</label>
+          <label id="scene-purpose-label">Üretim türü</label>
           <div class="chips wrap" id="scene-purpose-chips" role="group" aria-label="Üretim türü" data-i18n-aria-label="ui.scene-purpose-chips.aria-label">
             <button type="button" class="chip" data-group="purpose" data-purpose="short_film" aria-pressed="false">kısa film</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-silent="1" aria-pressed="false" title="Sadece video — MiniMax ses üretmez">müzik klibi</button>
@@ -111,23 +111,9 @@
             <button type="button" class="chip" data-group="style" data-style="clay" aria-pressed="false">kil</button>
             <button type="button" class="chip" data-group="style" data-style="found_footage" aria-pressed="false">found footage</button>
           </div>
-          <p class="muted mode-hint" id="project-audio-hint">Tür seç → müzik klibinde sessiz video; diğerlerinde video + ses</p>
+          <p id="project-audio-hint" hidden></p>
         </div>
 
-        <div id="scene-asset-references"></div>
-        <details class="scene-audio-card" id="scene-audio-card">
-          <summary id="scene-audio-title">Audio · single clip</summary>
-          <label><span id="scene-audio-mode-label">Use audio as</span>
-            <select id="scene-audio-mode"><option value="reference">Audio reference</option><option value="original">Original soundtrack</option></select>
-          </label>
-          <p class="muted" id="scene-audio-hint"></p>
-          <div class="row-btns"><label class="file-pick"><input type="file" id="scene-audio-file" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg,.aac" /><span id="scene-audio-pick">Select audio</span></label><button type="button" class="btn-ghost" id="scene-audio-remove">Remove</button></div>
-          <label><span id="scene-audio-start-label">Start (seconds)</span><input id="scene-audio-start" type="number" value="0" min="0" step="0.1" /></label>
-          <label><span id="scene-audio-end-label">End (seconds; optional)</span><input id="scene-audio-end" type="number" min="0.1" step="0.1" /></label>
-          <button type="button" class="btn-secondary" id="scene-audio-upload">Prepare audio</button>
-          <p class="muted" role="status" id="scene-audio-status"></p>
-          <audio id="scene-audio-preview" controls hidden></audio>
-        </details>
         <div id="panel-mode-new">
           <p class="muted mode-hint" id="mode-hint-new">Sıfırdan T2V üret veya bir görselle I2V başlat.</p>
           <label id="new-video-input-label">Başlangıç türü</label>
@@ -187,7 +173,7 @@
           <div class="muted" id="quality-hint">1280×736 · H3 (×32)</div>
           <label id="scene-post-label">Son geçiş</label>
           <div class="chips" id="post-pass-chips">
-            <button type="button" class="chip on" data-post="">Kapalı</button>
+            <button type="button" class="chip on" data-post="" data-i18n="ayar.postOff">Kapalı</button>
             <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
             <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
@@ -274,7 +260,7 @@
           <div class="muted" id="quality-hint-cont">1280×736</div>
           <label id="cont-post-label">Son geçiş</label>
           <div class="chips" id="post-pass-chips-cont">
-            <button type="button" class="chip on" data-post="">Kapalı</button>
+            <button type="button" class="chip on" data-post="" data-i18n="ayar.postOff">Kapalı</button>
             <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
             <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
@@ -286,6 +272,30 @@
             <img id="continue-thumb" alt="son kare" />
           </div>
         </div>
+        <div class="scene-generation-settings">
+        <label><span id="ayar-seed-label">Seed</span> <input type="number" id="seed" value="-1" /> <small id="ayar-seed-rand">(-1 = random)</small></label>
+        <label><span id="ayar-steps-label">Adım</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
+        <label id="ayar-speed-label">Hız</label>
+        <div class="chips wrap" id="speed-chips" role="group" aria-label="Hız" data-i18n-aria-label="ui.speed-chips.aria-label">
+          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 12 step" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
+          <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step" data-i18n-title="ui.btn-speed-quick.title">Orta</button>
+          <button type="button" class="chip" id="btn-speed-quality" data-speed="quality" data-i18n="ayar.qualityPreset" title="1088p · 20 steps">Kalite</button>
+        </div>
+        </div>
+        <details class="scene-audio-card" id="scene-audio-card">
+          <summary id="scene-audio-title">Add audio to this clip</summary>
+          <p class="muted mode-hint" id="scene-audio-purpose">Upload a recording to guide generated sound or add it to the finished video.</p>
+          <label><span id="scene-audio-mode-label">Use audio as</span>
+            <select id="scene-audio-mode"><option value="reference">Audio reference</option><option value="original">Original soundtrack</option></select>
+          </label>
+          <p class="muted" id="scene-audio-hint"></p>
+          <div class="row-btns"><label class="file-pick"><input type="file" id="scene-audio-file" accept="audio/*,.mp3,.wav,.flac,.m4a,.ogg,.aac" /><span id="scene-audio-pick">Select audio</span></label><button type="button" class="btn-ghost" id="scene-audio-remove">Remove</button></div>
+          <label><span id="scene-audio-start-label">Start (seconds)</span><input id="scene-audio-start" type="number" value="0" min="0" step="0.1" /></label>
+          <label><span id="scene-audio-end-label">End (seconds; optional)</span><input id="scene-audio-end" type="number" min="0.1" step="0.1" /></label>
+          <button type="button" class="btn-secondary" id="scene-audio-upload">Prepare audio</button>
+          <p class="muted" role="status" id="scene-audio-status"></p>
+          <audio id="scene-audio-preview" controls hidden></audio>
+        </details>
         </div>
     </section>
 
@@ -300,8 +310,8 @@
       <div class="player-actions">
         <button type="button" class="btn-secondary" id="btn-use-in-continue">Bu videodan devam</button>
         <a class="btn-secondary" id="btn-download" href="#" download>İndir</a>
-        <button type="button" class="cta hidden" id="btn-open-prompt" title="Bu videonun üretim prompt’u" data-i18n-title="ui.btn-open-prompt.title">Prompt</button>
         <button type="button" class="btn-secondary hidden" id="btn-player-delete">Sil</button>
+        <button type="button" class="cta hidden" id="btn-open-prompt" title="Bu videonun üretim prompt’u" data-i18n-title="ui.btn-open-prompt.title">Prompt</button>
       </div>
       <div class="prod-info" id="prod-info">
         <div class="prod-main">
@@ -321,40 +331,18 @@
     </section>
 
     <section class="zone zone-prompt panel prompt">
-      <h2>Prompt / Sahne</h2>
+      <h2>Prompt</h2>
       <textarea id="prompt" rows="3" placeholder="Sahneyi, kamerayı, diyalogu ve sesi anlat… (Ctrl+Enter = sıraya ekle)"></textarea>
       <div class="gen-actions">
-        <button type="button" class="btn-secondary" id="btn-batch-add" title="Prompt / Sahne metnini üretim kuyruğuna ekle" data-i18n-title="ui.btn-batch-add.title">Sıraya ekle</button>
         <button type="button" class="btn-ghost" id="btn-prompt-rewrite" title="LLM ile prompt düzenle (üretmeden)" data-i18n-title="ui.btn-prompt-rewrite.title">Rewrite</button>
         <button type="button" class="cta" id="btn-generate">Üret</button>
       </div>
       <p class="muted gen-hint" id="gen-hint">Mod: Yeni video · Sıraya ekle = kuyruğa ekle</p>
     </section>
 
-    <section class="zone zone-ayar panel drawer-ayar-panel">
-      <h2>Ayarlar</h2>
+    <section class="zone zone-lora panel">
+      <h2>LoRA</h2>
       <div class="drawer-body">
-        <label><span id="ayar-seed-label">Seed</span> <input type="number" id="seed" value="-1" /> <small id="ayar-seed-rand">(-1 = random)</small></label>
-        <label><span id="ayar-steps-label">Steps</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
-        <label id="ayar-speed-label">Hız</label>
-        <div class="chips wrap" id="speed-chips" role="group" aria-label="Hız" data-i18n-aria-label="ui.speed-chips.aria-label">
-          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 12 step" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
-          <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step" data-i18n-title="ui.btn-speed-quick.title">Hızlı</button>
-        </div>
-        <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Hız LoRA’sı seçildiğinde adım ve sampler ayarları otomatik uygulanır.</p>
-        <label class="check"><input type="checkbox" id="fast-tae-preview" /> <span data-i18n="ayar.fastPreview">Hızlı taslak önizleme (TAE; final kalite değil)</span></label>
-        <label class="check rewriter-toggle"><input type="checkbox" id="prompt-rewriter-enabled" /> <span id="prompt-optimize-label">Prompt’u LLM ile düzenle</span></label>
-        <p class="muted mode-hint" id="prompt-rewriter-status">Yönetmen LLM kontrol ediliyor…</p>
-        <label><span id="ayar-sampler-label">Sampler</span>
-          <select id="sampler">
-            <option value="res_multistep">res_multistep</option>
-            <option value="er_sde">er_sde</option>
-            <option value="sa_solver">sa_solver</option>
-          </select>
-        </label>
-        <label><span id="ayar-scheduler-label">Scheduler</span>
-          <select id="scheduler"><option>simple</option></select>
-        </label>
         <div class="lora-prod-pick" id="lora-prod-pick">
           <label><span id="lora-prod-label">LoRA</span>
             <select id="lora-select" class="hidden" multiple>
@@ -372,6 +360,27 @@
       </div>
     </section>
 
+    <section class="zone zone-ayar panel drawer-ayar-panel">
+      <h2>Ayarlar</h2>
+      <div class="drawer-body">
+        <section id="scene-engine-settings"></section>
+        <section id="scene-appearance-settings"></section>
+
+        <p class="muted mode-hint" id="speed-hint">Süre ve çözünürlük süreyi en çok keser. Hız LoRA’sı seçildiğinde adım ve sampler ayarları otomatik uygulanır.</p>
+        <label><span id="ayar-sampler-label">Sampler</span>
+          <select id="sampler">
+            <option value="res_multistep">res_multistep</option>
+            <option value="er_sde">er_sde</option>
+            <option value="sa_solver">sa_solver</option>
+          </select>
+        </label>
+        <label><span id="ayar-scheduler-label">Scheduler</span>
+          <select id="scheduler"><option>simple</option></select>
+        </label>
+
+      </div>
+    </section>
+
     <section class="zone zone-prod panel drawer-production">
       <h2>Üretim listesi</h2>
       <div class="drawer-body drawer-body-production">
@@ -386,10 +395,7 @@
         <div class="batch-add-row queue-toolbar">
           <button type="button" class="btn-ghost" id="btn-clear-errors">Hatalıları temizle</button>
           <button type="button" class="btn-ghost" id="btn-cancel-queue" title="Çalışan işi ve bekleyen kuyruğu iptal et" data-i18n="ui.btn-cancel-queue" data-i18n-title="ui.btn-cancel-queue.title">Kuyruğu iptal et</button>
-          <button type="button" class="btn-ghost" id="btn-merge-clips">Klipleri birleştir</button>
           <button type="button" class="btn-ghost" id="btn-clear-finished">Geçmişi temizle</button>
-          <button type="button" class="btn-ghost" id="btn-reset-production" title="Kuyruk + klipler + kareler">Sıfırla (temiz başlat)</button>
-          <button type="button" class="btn-ghost" id="btn-open-logs" title="Studio log dosyası">Loglar</button>
         </div>
       </div>
     </section>
@@ -454,7 +460,7 @@
       <div class="director-post-pass">
         <span class="muted" id="director-post-label">Son geçiş</span>
         <div class="chips" id="director-post-pass-chips" role="group" aria-label="Son geçiş" data-i18n-aria-label="ui.director-post-pass-chips.aria-label">
-          <button type="button" class="chip on" data-post="">Kapalı</button>
+          <button type="button" class="chip on" data-post="" data-i18n="ayar.postOff">Kapalı</button>
           <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
           <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
         </div>
@@ -675,7 +681,7 @@
                 </select>
                 <div class="lora-check-list" id="cinema-lora-check-list" aria-label="Director LoRA selection"></div>
                 <button type="button" class="btn-secondary" id="btn-cinema-lora-save">Kaydet</button>
-                <button type="button" class="btn-ghost" data-lora-guide="cinema-lora-select">LoRA rehberi</button>
+                <button type="button" class="btn-ghost" data-lora-guide="cinema-lora-select" >LoRA rehberi</button>
               </div>
             </div>
             <label class="cinema-seamless-switch" title="Kesintisiz">
@@ -1318,16 +1324,18 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=cinema216" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=scene-i18n247" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
-  <script src="/static/lora-guidance.js?v=1" charset="utf-8"></script>
-  <script src="/static/asset-references.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=cinema216" charset="utf-8"></script>
+  <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
+  <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
+  <script src="/static/app.js?v=scene-controls247" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
-  <script src="/static/model-storage.js?v=1" charset="utf-8"></script>
-  <script src="/static/workflow-access.js?v=3" charset="utf-8"></script>
-<script src="/static/h3-enhancements.js?v=1"></script>
+  <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
+  <script src="/static/workflow-access.js?v=6" charset="utf-8"></script>
+<script src="/static/h3-enhancements.js?v=2"></script>
+  <script src="/static/scene-selectors.js?v=3"></script>
+  <script src="/static/scene-settings.js?v=1"></script>
 </body>
 </html>

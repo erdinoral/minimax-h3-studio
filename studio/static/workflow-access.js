@@ -13,7 +13,9 @@
   function render() {
     $('btn-workflow-guide').textContent = label('Guide', 'Rehber');
     const names = {
-      'scene-audio-title': ['Audio · single clip', 'Ses · tek klip'],
+      'scene-reference-title': ['Visual references', 'Görsel referanslar'],
+      'scene-audio-title': ['Audio', 'Ses'],
+      'scene-audio-purpose': ['Upload a recording to guide generated sound or add it to the finished video.', 'Ses dosyası yükle: üretilen sese referans ver veya kaydını bitmiş videoya ekle.'],
       'scene-audio-mode-label': ['Use audio as', 'Ses kullanım amacı'],
       'scene-audio-pick': ['Select audio', 'Ses seç'],
       'scene-audio-remove': ['Remove', 'Kaldır'],
@@ -21,9 +23,9 @@
       'scene-audio-start-label': ['Start (seconds)', 'Başlangıç (saniye)'],
       'scene-audio-end-label': ['End (seconds; optional)', 'Bitiş (saniye; isteğe bağlı)'],
     };
-    for (const [id, words] of Object.entries(names)) $(id).textContent = label(...words);
-    $('scene-audio-mode').options[0].textContent = label('Audio reference', 'Ses referansı');
-    $('scene-audio-mode').options[1].textContent = label('Use original audio in result', 'Sonuçta orijinal sesi kullan');
+    for (const [id, words] of Object.entries(names)) { const element = $(id); if (element) element.textContent = label(...words); }
+    $('scene-audio-mode').options[0].textContent = label('Guide generated audio', 'Üretilen sese referans ver');
+    $('scene-audio-mode').options[1].textContent = label('Add my recording to the video', 'Kaydımı videoya ekle');
     $('scene-audio-hint').textContent = $('scene-audio-mode').value === 'reference'
       ? label('Guides generated voice and sound. Does not guarantee exact words, timing or lip sync. Describe the speech in your prompt. Audio references use the Ref2VA model.', 'Üretilen sesi yönlendirir. Kelimeleri, zamanlamayı veya dudak senkronunu garanti etmez. Konuşmayı promptta yaz. Ses referansı Ref2VA modelini kullanır.')
       : label('Adds your recording to the result from its beginning and replaces generated audio. Longer audio is cut to video length; shorter audio ends in silence. Does not create lip sync. For song-wide lyric planning, use Director.', 'Kaydını başından itibaren sonuç videoya ekler ve üretilen sesi değiştirir. Uzun ses video süresinde kesilir; kısa sesin sonrası sessizdir. Dudak senkronu oluşturmaz. Şarkının tümüne söz/sahne planı için Direktör kullan.');

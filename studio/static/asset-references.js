@@ -36,11 +36,11 @@
     }
     function render() {
       if (!host) return;
-      host.innerHTML = `<details><summary>${word('Asset referansları','Asset references')}</summary>
-      <p>${esc(film?.title || '')} · ${word('Sahne bağımsızdır. Assetleri seç veya isim eşleştirmeyi aç.','Scene is independent. Select assets or enable name matching.')}</p>
-      <div class="row-btns"><button class="btn-secondary" data-action="refresh">${word('Yenile','Refresh')}</button><button class="btn-secondary" data-action="auto">${word('İsimlerden otomatik','Automatic by name')}</button><button class="btn-secondary" data-action="none">${word('Asset kullanma','No assets')}</button><button class="btn-secondary" data-action="preview">${word('Gönderilecekleri göster','Preview references')}</button></div>
+      host.innerHTML = `
+      <p>${esc(film?.title || '')} · ${word('Direktör kütüphanesinden bu sahnede kullanılacak görselleri seç.','Select images from the Director library for this scene.')}</p>
+      <div class="row-btns"><button class="btn-secondary" data-action="refresh">${word('Yenile','Refresh')}</button><button class="btn-secondary" data-action="auto">${word('İsimlerden otomatik','Automatic by name')}</button><button class="btn-secondary" data-action="none">${word('Seçimi temizle','No assets')}</button><button class="btn-secondary" data-action="preview">${word('Seçimi önizle','Preview references')}</button></div>
       ${assets().map(a=>`<div class="film-asset"><strong>${esc(a.name)}</strong><div class="film-ref-images">${(a.images||[]).map(im=>`<label><img src="${esc(im.url||'/api/refs/'+encodeURIComponent(im.file))}" alt="${esc(window.assetReferenceLabel(im))}"><input type="checkbox" data-owner="${esc(a.id)}" data-file="${esc(im.file)}" ${selected.get(a.id)?.has(im.file)?'checked':''}>${esc(window.assetReferenceLabel(im))}</label>`).join('') || `<small>${word('Görsel eksik; Director kartından yükle veya üret.','Missing image; upload or generate it in the Director card.')}</small>`}</div></div>`).join('')}
-      <p>${explicit ? word('Yalnızca seçili görseller gönderilecek.','Only selected images will be sent.') : word('Asset isimleri otomatik eşleştirilecek.','Asset names will be matched automatically.')}</p></details>`;
+      <p>${explicit ? word('Yalnızca seçili görseller gönderilecek.','Only selected images will be sent.') : word('Asset isimleri otomatik eşleştirilecek.','Asset names will be matched automatically.')}</p>`;
     }
     async function refresh() {
       const response = await fetch('/api/cinema'); if (!response.ok) throw Error('Asset catalog unavailable');

@@ -30,7 +30,7 @@ def guidance(name: str) -> dict:
     row = load_store().get(name)
     if isinstance(row, dict):
         return {"file": name, "guide": str(row.get("guide") or "")[:4000],
-                "triggers": str(row.get("triggers") or "")[:500]}
+                "triggers": str(spec.get("trigger") or row.get("triggers") or "")[:500]}
     guide = ""
     sidecar = LORAS_DIR / (name + ".guide.txt")
     if sidecar.is_file() and sidecar.stat().st_size <= 64000 and sidecar.resolve().parent == LORAS_DIR.resolve():

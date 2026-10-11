@@ -29,3 +29,5 @@ venv
 /docs/lora-roadmap.md
 /docs/singularity-comparison.json
 /download/app/
+
+/studio/static/benchmarks/

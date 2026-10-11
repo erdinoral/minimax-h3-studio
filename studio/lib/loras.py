@@ -12,7 +12,20 @@ from urllib.parse import unquote, urlparse
 STUDIO_ROOT = Path(__file__).resolve().parent.parent
 LORAS_DIR = STUDIO_ROOT.parent / "app" / "models" / "loras"
 
-CATALOG: list[dict[str, Any]] = [{'id': 'lightx2v-fl2v-4step-v12',
+CATALOG: list[dict[str, Any]] = [{'id': 'lightx2v-hybrid-r48',
+  'label': 'LightX2V Hybrid r48 (8 step)',
+  'file': 'lightx2v_hybrid-4to8step-Turbo_r48.safetensors',
+  'steps': 8,
+  'sampler': 'res_multistep',
+  'scheduler': 'simple',
+  'strength': 1.0,
+  'graphs': ['fl2va', 'ref2va'],
+  'category': 'speed',
+  'hint': 'Hybrid H3 · 8 steps · experimental',
+  'size_hint': '~944 MB',
+  'url': 'https://huggingface.co/TenStrip/MinimaxH3-Turbo_Shenanigans/resolve/main/lightx2v_hybrid-4to8step-Turbo_r48.safetensors',
+  'preset': True},
+ {'id': 'lightx2v-fl2v-4step-v12',
   'label': 'LightX2V FL2V v1.2 (4 step)',
   'file': 'minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors',
   'steps': 4,

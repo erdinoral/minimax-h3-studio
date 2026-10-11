@@ -9,7 +9,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib import asset_references, cinema
+from lib import asset_references, cinema, optional_models, h3_models
 from lib.comfy import enhance_ref_prompt, build_ref2va_prompt, add_h3_first_frame_guide
 from studio.tests import test_continuation as continuation_test
 
@@ -163,6 +163,7 @@ class SharedQueueTests(unittest.IsolatedAsyncioTestCase):
 
     def env(self):
         env=continuation_test.ContinuationTests().env()
+        env.update(optional_models=optional_models, h3_models=h3_models)
         lib=film()
         env['cinema']=cinema
         env['_asset_plan']=lambda text,bindings,lib,*a,**kw: asset_references.resolve(text,bindings,lib,lambda f:True,*a,continuation=kw.get('continuation',False))

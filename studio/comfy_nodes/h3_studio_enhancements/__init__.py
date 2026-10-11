@@ -4,6 +4,7 @@ Uses the installed SKEBA RefMod runtime; no model training or identity guarantee
 """
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 import folder_paths
@@ -60,5 +61,34 @@ class H3StudioRefMods:
         return (output,)
 
 
-NODE_CLASS_MAPPINGS = {'H3StudioRefMods': H3StudioRefMods}
-NODE_DISPLAY_NAME_MAPPINGS = {'H3StudioRefMods': 'H3 Studio RefMod References'}
+class H3StudioHybridLora:
+    """Fail closed when the hybrid speed adapter was only partially applied."""
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {'required': {'model': ('MODEL',),
+                             'lora_name': (folder_paths.get_filename_list('loras'),),
+                             'strength_model': ('FLOAT', {'default': 1.0, 'min': 0.0, 'max': 2.0})}}
+
+    RETURN_TYPES = ('MODEL', 'STRING')
+    FUNCTION = 'apply'
+    CATEGORY = 'H3 Studio/LoRA'
+
+    def apply(self, model, lora_name, strength_model=1.0):
+        if strength_model == 0:
+            return model, 'Hybrid LoRA disabled (strength 0)'
+        import nodes
+        loader = nodes.NODE_CLASS_MAPPINGS.get('H3PowerLoraStack')
+        if loader is None:
+            raise RuntimeError('Install ComfyUI-H3-PowerLoraStack and restart ComfyUI; see docs/hybrid-h3.md')
+        patched, report = loader().apply(model=model, quantized_layers='auto', adaln_port='auto',
+                                        lora_1={'on': True, 'lora': lora_name, 'strength': strength_model})
+        if (lora_name not in report or 'merged' not in report
+                or re.search(r'failed|rejected|could not resolve|unchanged|dropped x[1-9]|\b[1-9]\d* skipped', report, re.I)
+                or ('adaLN: curve' in report and not re.search(r'adaLN ported x51\b', report))):
+            raise RuntimeError('Hybrid LoRA was not fully applied; check the AdaLN grid and loader.\n' + report)
+        return patched, report
+
+
+NODE_CLASS_MAPPINGS = {'H3StudioRefMods': H3StudioRefMods, 'H3StudioHybridLora': H3StudioHybridLora}
+NODE_DISPLAY_NAME_MAPPINGS = {'H3StudioRefMods': 'H3 Studio RefMod References',
+                             'H3StudioHybridLora': 'H3 Studio Hybrid LoRA (verified)'}

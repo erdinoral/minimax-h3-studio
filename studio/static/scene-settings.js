@@ -14,6 +14,14 @@
         }
       }
     });
+    target.addEventListener('change', event => {
+      const input = event.target.closest('input[data-acceleration]');
+      if (!input || input.disabled) return;
+      const original = source.querySelector('input[data-acceleration="' + input.dataset.acceleration + '"]');
+      if (!original || original.disabled) return;
+      original.checked = input.checked;
+      original.dispatchEvent(new Event('change', {bubbles:true}));
+    });
     sync();
   }
 })();

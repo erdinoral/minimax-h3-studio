@@ -17,6 +17,16 @@ SINGULARITY = {
     "slots": ["unet", "unet_ref2va"],
 }
 ALIASES = [SINGULARITY["file"], "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors"]
+HYBRID_FILE = "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"
+HYBRID_BYTES = 20970379632
+
+def hybrid_installed():
+    return next((MODELS_ROOT/sub/HYBRID_FILE for sub in ("diffusion_models", "unet")
+        if (MODELS_ROOT/sub/HYBRID_FILE).is_file()
+        and (MODELS_ROOT/sub/HYBRID_FILE).stat().st_size == HYBRID_BYTES), None)
+
+def supports_long_reference(duration, mode, model):
+    return duration == 30 and mode == "ref" and model == HYBRID_FILE
 _status: dict = {}
 _task = None
 
@@ -33,14 +43,16 @@ def engine_status():
     names = [resolved[g]["unet"] for g in resolved]
     active = "singularity" if all(n in ALIASES for n in names) else (
         "minimax" if all(resolved[g]["unet"] == h3_models.defaults()["unet_ref2va" if g == "ref2va" else "unet"] for g in resolved) else "custom")
-    return {"active": active, "singularity_ready": bool(installed()), "resolved": resolved}
+    if all(n == HYBRID_FILE for n in names):
+        active = "hybrid"
+    return {"active": active, "hybrid_ready": bool(hybrid_installed()), "singularity_ready": bool(installed()), "resolved": resolved}
 
 def select_engine(engine):
-    if engine not in ("minimax", "singularity"):
+    if engine not in ("minimax", "singularity", "hybrid"):
         raise ValueError("Unknown engine")
-    path = installed() if engine == "singularity" else None
-    if engine == "singularity" and not path:
-        raise ValueError("Singularity model is not installed")
+    path = hybrid_installed() if engine == "hybrid" else installed() if engine == "singularity" else None
+    if engine != "minimax" and not path:
+        raise ValueError(f"{engine} model is not installed")
     name = path.name if path else ""
     h3_models.save({"unet": name, "unet_ref2va": name})
     state = engine_status()

@@ -1001,7 +1001,7 @@ def apply_lora(
     lora_name: Optional[str],
     strength: float = 0.75,
 ) -> dict[str, Any]:
-    """Patch UNET with LoraLoaderModelOnly; rewire guider + scheduler."""
+    """Patch UNET with the adapter's compatible loader; rewire model users."""
     names = [Path(part).name.strip() for part in str(lora_name or "").split("|") if Path(part).name.strip()][:3]
     if not names:
         return g
@@ -1023,6 +1023,9 @@ def apply_lora(
                 "verbose": False, "experimental_curve_refit": True}}
             g["14"]["inputs"]["sigmas"] = [nid, 1]
             g["17"]["inputs"]["sampler_name"] = "euler"
+        elif name == "lightx2v_hybrid-4to8step-Turbo_r48.safetensors":
+            g[nid] = {"class_type": "H3StudioHybridLora", "inputs": {
+                "model": src, "lora_name": name, "strength_model": weight}}
         else:
             g[nid] = {"class_type": "LoraLoaderModelOnly", "inputs": {"model": src, "lora_name": name, "strength_model": weight}}
         for other_id, node in g.items():
@@ -1060,5 +1063,36 @@ def apply_sage_attention(
     *,
     comfy_root: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Studio no longer patches Sage Attention into graphs."""
+    """Sage remains disabled; independently apply opt-in Spectrum acceleration."""
+    settings = Path(__file__).resolve().parents[1] / "data" / "h3_acceleration.json"
+    try:
+        enabled = json.loads(settings.read_text(encoding="utf-8")).get("spectrum_enabled") is True
+    except (OSError, ValueError, AttributeError):
+        enabled = False
+    return apply_spectrum(g) if enabled else g
+
+
+def apply_spectrum(g: dict[str, Any]) -> dict[str, Any]:
+    """Add the reviewed Spectrum defaults after LoRAs, only to native H3 graphs."""
+    loaders = [n for n in g.values() if n.get("class_type") == "UNETLoader"]
+    if not any("minimax_h3" in str(n.get("inputs", {}).get("unet_name", "")).lower() for n in loaders):
+        return g
+    guider = next((n for n in g.values() if n.get("class_type") == "BasicGuider"), None)
+    if not guider or "model" not in guider.get("inputs", {}):
+        return g
+    source = guider["inputs"]["model"]
+    node_id = str(max((int(k) for k in g if str(k).isdigit()), default=0) + 1)
+    for n in g.values():
+        if n.get("class_type") in ("BasicGuider", "BasicScheduler") and n.get("inputs", {}).get("model") == source:
+            n["inputs"]["model"] = [node_id, 0]
+    g[node_id] = {
+        "class_type": "SpectrumApplyMiniMaxH3",
+        "inputs": {
+            "model": source, "enabled": True, "blend_weight": 0.5,
+            "degree": 1, "ridge_lambda": 0.1, "window_size": 2.0,
+            "flex_window": 0.75, "warmup_steps": 1, "tail_actual_steps": 1,
+            "max_history": 8, "debug": False, "history_storage": "system_ram",
+            "audio_blend_weight": 0.0, "offline_smoothing_replay": True,
+        },
+    }
     return g

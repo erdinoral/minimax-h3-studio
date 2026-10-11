@@ -2,6 +2,10 @@
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-Support_Erdin-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/erdindev)
 
+## v9.2.0 — Spectrum acceleration and experimental Hybrid engine
+
+Optional Spectrum acceleration is available below Video engine in Scene and Settings, with an ON/OFF switch, Experimental badge and TR/EN text. Experimental H3 Hybrid selection and reference-only 30-second requests are also included. Sliding-window generation is not included. See the [9.2.0 release notes](docs/releases/v9.2.0.md).
+
 ## v9.1.1 — Director fixes, short clips and support
 
 Add scenes directly inside empty chapters, produce all chapters or one chapter explicitly, and export 2–3 second clips using a four-second render followed by trimming. The Support panel now links to Erdin's Buy Me a Coffee page, with aligned chapter actions and a styled repository-star button. See the [9.1.1 release notes](docs/releases/v9.1.1.md).
@@ -705,3 +709,7 @@ HyperFlow is shown with the speed LoRAs, but uses its dedicated `ApplyHyperFlowH
 Install the optional nodes with **Film tools**; Install/Update also provisions them. Restart Studio after installation. No ComfyUI core files are modified by these patches.
 
 API: `GET /api/h3-enhancements` returns `refmod_enabled`, `refmod_ready`, `hyperflow_ready`; `POST /api/h3-enhancements` accepts `{"refmod_enabled": true}` (or false). Queueing snapshots the switch, so later toggles do not alter jobs already queued.
+
+### Optional Spectrum acceleration
+
+Settings → Video engine includes an opt-in Spectrum switch. It is off by default. See [setup, local API and comparison notes](docs/spectrum-acceleration.md).

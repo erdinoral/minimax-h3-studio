@@ -2074,6 +2074,40 @@ async def get_donors():
     return await donor_roll.list_donors()
 
 
+class H3AccelerationBody(BaseModel):
+    spectrum_enabled: bool = False
+
+
+@app.get("/api/h3-acceleration")
+async def get_h3_acceleration():
+    path = DATA / "h3_acceleration.json"
+    try:
+        enabled = json.loads(path.read_text(encoding="utf-8")).get("spectrum_enabled") is True
+    except (OSError, ValueError, AttributeError):
+        enabled = False
+    installed = (COMFY_ROOT / "custom_nodes" / "ComfyUI-Spectrum-MiniMax-H3" / "__init__.py").is_file()
+    return {"spectrum_enabled": enabled, "spectrum_installed": installed}
+
+
+@app.post("/api/h3-acceleration")
+async def set_h3_acceleration(body: H3AccelerationBody):
+    if body.spectrum_enabled:
+        try:
+            async with httpx.AsyncClient(timeout=10) as c:
+                r = await c.get(f"{COMFY_URL}/object_info/SpectrumApplyMiniMaxH3")
+                r.raise_for_status()
+                loaded = "SpectrumApplyMiniMaxH3" in r.json()
+        except Exception:
+            loaded = False
+        if not loaded:
+            raise HTTPException(409, "Spectrum düğümü yüklenmedi; ComfyUI'yi yeniden başlatın.")
+    path = DATA / "h3_acceleration.json"
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps(body.model_dump(), indent=2), encoding="utf-8")
+    temporary.replace(path)
+    return await get_h3_acceleration()
+
+
 @app.get("/api/health")
 async def health():
     _ensure_queue_loop()
@@ -2417,7 +2451,9 @@ async def asset_reference_preview(body: AssetReferencePreviewBody):
 
 @app.post("/api/generate")
 async def generate(body: GenerateBody):
-    if body.duration not in ALLOWED_DURATIONS:
+    long_reference = optional_models.supports_long_reference(
+        body.duration, body.mode, h3_models.resolve("ref2va")["unet"])
+    if body.duration not in ALLOWED_DURATIONS and not long_reference:
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
         raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")

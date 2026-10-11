@@ -3,6 +3,17 @@ module.exports = {
     {
       method: "shell.run",
       params: {
+        path: "app/custom_nodes",
+        message: [
+          "git clone https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3.git",
+          "git -C ComfyUI-Spectrum-MiniMax-H3 checkout 806fe498d574a726fecb8818917f00a4b993fd77"
+        ]
+      },
+      when: "{{!exists('app/custom_nodes/ComfyUI-Spectrum-MiniMax-H3')}}"
+    },
+    {
+      method: "shell.run",
+      params: {
         message: "git pull"
       }
     },

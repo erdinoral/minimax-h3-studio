@@ -4,9 +4,27 @@ from pathlib import Path
 from unittest.mock import patch
 import sys
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from lib import optional_models as models, h3_models
+from lib import optional_models as models, h3_models, comfy
 
 class EngineSelection(unittest.TestCase):
+    def test_hybrid_lora_uses_adaln_port_and_rewires_model_consumers(self):
+        graph = {"6": {"class_type": "UNETLoader", "inputs": {}},
+                 "guider": {"inputs": {"model": ["6", 0]}},
+                 "scheduler": {"inputs": {"model": ["6", 0]}}}
+        name = "lightx2v_hybrid-4to8step-Turbo_r48.safetensors"
+        comfy.apply_lora(graph, name, 1.0)
+        self.assertEqual(graph["7"]["class_type"], "H3StudioHybridLora")
+        self.assertEqual(graph["7"]["inputs"]["lora_name"], name)
+        self.assertEqual(graph["7"]["inputs"]["model"], ["6", 0])
+        for node in ("guider", "scheduler"):
+            self.assertEqual(graph[node]["inputs"]["model"], ["7", 0])
+
+    def test_ordinary_lora_keeps_standard_loader(self):
+        graph = {"6": {"inputs": {}}, "guider": {"inputs": {"model": ["6", 0]}}}
+        comfy.apply_lora(graph, "ordinary.safetensors", 0.5)
+        self.assertEqual(graph["7"]["class_type"], "LoraLoaderModelOnly")
+        self.assertEqual(graph["7"]["inputs"]["strength_model"], 0.5)
+
     def test_both_graphs_change_and_auxiliary_choices_survive(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -28,4 +46,28 @@ class EngineSelection(unittest.TestCase):
         with patch.object(models, "installed", return_value=None), patch.object(h3_models, "save") as save:
             for engine in ("singularity", "unknown"):
                 with self.assertRaises(ValueError): models.select_engine(engine)
+            save.assert_not_called()
+
+    def test_hybrid_selection_keeps_encoder_and_vae(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "diffusion_models").mkdir()
+            (root / "diffusion_models" / models.HYBRID_FILE).write_bytes(b"abc")
+            with patch.object(models, "MODELS_ROOT", root), patch.object(h3_models, "MODELS_ROOT", root), patch.object(h3_models, "SETTINGS_PATH", root / "settings.json"), patch.object(models, "HYBRID_BYTES", 3):
+                h3_models.SETTINGS_PATH.write_text('{"clip":"encoder.safetensors","vae":"vae.safetensors"}')
+                self.assertEqual(models.select_engine("hybrid")["active"], "hybrid")
+                self.assertEqual(h3_models.resolve("ref2va")["unet"], models.HYBRID_FILE)
+                self.assertEqual(h3_models.load()["clip"], "encoder.safetensors")
+                self.assertEqual(h3_models.load()["vae"], "vae.safetensors")
+                self.assertEqual(models.select_engine("minimax")["active"], "minimax")
+
+    def test_long_reference_is_limited_to_hybrid_ref_mode(self):
+        self.assertTrue(models.supports_long_reference(30, "ref", models.HYBRID_FILE))
+        for duration, mode, name in [(60, "ref", models.HYBRID_FILE), (30, "t2v", models.HYBRID_FILE), (30, "continue", models.HYBRID_FILE), (30, "ref", "stock.safetensors")]:
+            self.assertFalse(models.supports_long_reference(duration, mode, name))
+
+    def test_missing_hybrid_does_not_mutate_selection(self):
+        with patch.object(models, "hybrid_installed", return_value=None), patch.object(h3_models, "save") as save:
+            with self.assertRaises(ValueError):
+                models.select_engine("hybrid")
             save.assert_not_called()

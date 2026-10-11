@@ -980,7 +980,7 @@
 
   function setDuration(sec) {
     const n = Number(sec);
-    if (![2, 3, 4, 5, 6, 8, 10, 15].includes(n)) return;
+    if (![2, 3, 4, 5, 6, 8, 10, 15].includes(n) && !(n === 30 && state.videoEngine === "hybrid" && state.produceMode === "ref")) return;
     state.duration = n;
     document
       .querySelectorAll("#dur-chips .chip, #dur-chips-cont .chip, #dur-chips-story .chip")
@@ -992,6 +992,17 @@
   }
 
   // Official H3 sizes (ResolutionSelector, multiple of 32). Six practical MP tiers.
+  function syncHybridDuration() {
+    const button = $("hybrid-long-duration");
+    const enabled = state.videoEngine === "hybrid" && state.produceMode === "ref";
+    if (button) {
+      button.hidden = !enabled;
+      button.classList.toggle("hidden", !enabled);
+      button.title = window.h3Lang?.() === "en" ? "Experimental single 30-second reference generation" : "Deneysel: tek üretimde 30 saniye, referans modu";
+    }
+    if (!enabled && state.duration === 30) setDuration(15);
+  }
+
   // Legacy UI keys 720/1080 alias to 736/1088.
   const H3_QUALITY_ALIASES = { 720: "736", 1080: "1088", "720": "736", "1080": "1088" };
   const H3_QUALITY_KEYS = ["352", "480", "608", "736", "768", "1088"];
@@ -1143,6 +1154,7 @@
     const allowed = ["t2v", "continue", "ref", "face", "v2v", "cinema", "storyboard"];
     const m = allowed.includes(mode) ? (mode === "storyboard" ? "cinema" : mode) : "t2v";
     state.produceMode = m;
+    syncHybridDuration();
     document.querySelectorAll("#mode-chips .chip").forEach((b) => {
       b.classList.toggle("on", b.dataset.mode === m);
     });
@@ -9333,7 +9345,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const host = $("h3-engine-control");
     if (!host) return;
     const en = window.h3Lang?.() === "en";
-    host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${id === "singularity" && !engine.singularity_ready ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
+    state.videoEngine = engine.active;
+    syncHybridDuration();
+    host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"], ["hybrid", "H3 Hybrid"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${(id === "singularity" && !engine.singularity_ready) || (id === "hybrid" && !engine.hybrid_ready) ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "hybrid" ? "H3 Hybrid b25–49" : engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
     host.onclick = async event => {
       const button = event.target.closest("button[data-engine]");
       if (!button || button.disabled) return;
@@ -9345,6 +9359,38 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         await loadH3Models();
       } catch(error) { toast(error.message); await loadH3Models(); }
     };
+    void renderH3Acceleration(host);
+  }
+
+  async function renderH3Acceleration(host) {
+    try {
+      const response = await fetch("/api/h3-acceleration");
+      if (!response.ok || !host.isConnected) return;
+      const data = await response.json();
+      const en = window.h3Lang?.() === "en";
+      let panel = document.getElementById("h3-acceleration-settings");
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "h3-acceleration-settings";
+        host.appendChild(panel);
+      }
+      panel.className = "h3-spectrum-control";
+      panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${data.spectrum_enabled ? "checked" : ""} ${data.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "Accelerates new single-clip H3 videos. Can change motion and speech quality." : "Yeni tek klip H3 videolarını hızlandırır. Hareket ve konuşma kalitesini değiştirebilir."}</p>`;
+      const toggle = panel.querySelector("input");
+      toggle.onchange = async () => {
+        const previous = !toggle.checked;
+        toggle.disabled = true;
+        toggle.setAttribute("disabled", "");
+        toggle.toggleAttribute("checked", toggle.checked);
+        try {
+          const r = await fetch("/api/h3-acceleration", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({spectrum_enabled:toggle.checked})});
+          const result = await r.json();
+          if (!r.ok) throw Error(errDetail(result));
+          toggle.checked = result.spectrum_enabled;
+        } catch (error) { toggle.checked = previous; toast(error.message); }
+        finally { toggle.disabled = false; toggle.removeAttribute("disabled"); toggle.toggleAttribute("checked", toggle.checked); }
+      };
+    } catch { /* optional acceleration controls must not block model settings */ }
   }
 
   let optionalModelTimer;
@@ -11731,6 +11777,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-director-reset")?.addEventListener("click", () => void resetDirectorSession());
 
   document.addEventListener("h3-lang", () => {
+    if ($("h3-engine-control")) void renderH3Acceleration($("h3-engine-control"));
     syncGalleryPhotoToolbar();
     syncGalleryVideoToolbar();
     if (!$("view-settings")?.classList.contains("hidden")) { void loadH3Models(); void refreshNotifySettings(); }

@@ -980,7 +980,7 @@
 
   function setDuration(sec) {
     const n = Number(sec);
-    if (![4, 5, 6, 8, 10, 15].includes(n)) return;
+    if (![2, 3, 4, 5, 6, 8, 10, 15].includes(n)) return;
     state.duration = n;
     document
       .querySelectorAll("#dur-chips .chip, #dur-chips-cont .chip, #dur-chips-story .chip")
@@ -2693,10 +2693,12 @@
         : '<p class="muted cinema-chapter-empty">' + htmlEsc(tt("cinema.chapterEmpty")) + "</p>";
     const tools =
       '<div class="cinema-chapter-tools">' +
+      '<button type="button" class="btn-secondary cinema-chapter-add-scene">' +
+      htmlEsc(tt("cinema.addScene")) + '</button>' +
       '<button type="button" class="cta cinema-chapter-produce" title="' +
       htmlEsc(tt("film.ws.produceChapter")) +
-      '">' +
-      htmlEsc(tt("cinema.produce")) +
+      '"' + (shots.some((s) => s.enabled !== false && String(s.text || "").trim()) ? '' : ' disabled') + '>' +
+      htmlEsc(tt("film.ws.produceChapter")) +
       "</button>" +
       '<button type="button" class="btn-ghost cinema-chapter-json">' +
       htmlEsc(tt("cinema.json")) +
@@ -2727,6 +2729,7 @@
 
   let cinemaSceneEditId = null;
   let cinemaSceneEditMode = "t2v";
+  let cinemaSceneEditChapter = null;
 
   function readCinemaSceneForm() {
     const out = emptyCinemaStructured();
@@ -2760,6 +2763,7 @@
     const modal = $("cinema-scene-modal");
     if (!modal) return;
     cinemaSceneEditId = shotId || null;
+    cinemaSceneEditChapter = null;
     cinemaSceneEditMode =
       cinemaStudioMode() === "seamless"
         ? "t2v"
@@ -2827,7 +2831,7 @@
     const c = ensureCinema();
     const type = $("cinema-scene-type")?.value;
     cinemaSceneEditMode = type === "continue" ? "continue" : "t2v";
-    const durationSec = Math.max(4, Math.min(15, Number($("cinema-scene-duration")?.value || c.duration || 5)));
+    const durationSec = Math.max(2, Math.min(15, Number($("cinema-scene-duration")?.value || c.duration || 5)));
     cinemaForceLocalShots = true;
     const text = composed || structured.action || "";
     if (cinemaSceneEditId) {
@@ -2842,7 +2846,7 @@
       shot.mode = cinemaSceneEditMode;
       shot.mode_locked = true;
     } else {
-      const chapter = cinemaActiveChapter();
+      const chapter = cinemaSceneEditChapter || cinemaActiveChapter();
       c.shots.push({
         id: cinemaId(),
         text,
@@ -3117,6 +3121,8 @@
     if (!host) return;
     const c = ensureCinema();
     const shots = c.shots || [];
+    const produce = $("btn-cinema-produce");
+    if (produce) produce.disabled = !shots.some((s) => s.enabled !== false && String(s.text || "").trim());
     const chapters = cinemaChapterList();
     const byChapter = new Map(chapters.map((name) => [name, []]));
     shots.forEach((s) => {
@@ -4821,7 +4827,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           ? String(opts.chapter || "").trim()
           : Array.isArray(opts.shots)
             ? ""
-            : cinemaActiveChapter();
+            : opts.all ? "" : cinemaActiveChapter();
       const idAllow = Array.isArray(opts.shots)
         ? new Set(
             opts.shots
@@ -4985,7 +4991,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       toast(String(e.message || e));
     } finally {
       stopImageStudioQueuePoll();
-      if (btn) btn.disabled = false;
+      if (btn) btn.disabled = !(ensureCinema().shots || []).some((s) => s.enabled !== false && String(s.text || "").trim());
     }
   }
 
@@ -10092,7 +10098,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-cinema-add-t2v")?.addEventListener("click", () => addEmptyCinemaChapter());
   $("btn-cinema-add-cont")?.addEventListener("click", () => addEmptyCinemaScene("continue"));
   $("btn-cinema-save")?.addEventListener("click", () => void saveCinema(false));
-  $("btn-cinema-produce")?.addEventListener("click", () => void produceCinema());
+  $("btn-cinema-produce")?.addEventListener("click", () => void produceCinema({ all: true }));
   $("cinema-duration")?.addEventListener("change", () => {
     ensureCinema().duration = Number($("cinema-duration").value) || 5;
     void saveCinema(true);
@@ -10527,6 +10533,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   });
   $("cinema-shots")?.addEventListener("click", (e) => {
+    const chapterAdd = e.target.closest(".cinema-chapter-add-scene");
+    if (chapterAdd) {
+      e.preventDefault();
+      const chapter = chapterAdd.closest(".cinema-chapter")?.dataset.chapter;
+      openCinemaSceneModal(null, "t2v");
+      cinemaSceneEditChapter = chapter || null;
+      return;
+    }
     const chapterProduce = e.target.closest(".cinema-chapter-produce");
     if (chapterProduce) {
       e.preventDefault();
@@ -11393,14 +11407,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   const OC_SLUG = "minimax-h3-studio";
 
-  function setDonorRoll(names, donateUrl) {
+  function setDonorRoll(names) {
     const bar = $("donor-ticker");
     const track = $("donor-ticker-track");
     const list = $("support-donors-list");
     const empty = $("support-donors-empty");
-    const oc = $("btn-support-oc");
     const clean = (names || []).map((n) => String(n || "").trim()).filter(Boolean);
-    if (donateUrl && oc) oc.href = donateUrl;
     if (!clean.length) {
       document.body.classList.remove("has-donors");
       bar?.classList.add("hidden");
@@ -11431,15 +11443,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   async function loadDonorRoll() {
     let names = [];
-    let donateUrl = `https://opencollective.com/${OC_SLUG}`;
     try {
       const data = await fetch("/api/donors").then((r) => (r.ok ? r.json() : null));
       if (data) {
         names = Array.isArray(data.names) ? data.names : [];
-        if (data.donate_url) donateUrl = data.donate_url;
-        if (data.github_sponsors && $("btn-support-sponsor")) {
-          $("btn-support-sponsor").href = data.github_sponsors;
-        }
       }
     } catch {
       /* old Studio process — try public Open Collective */
@@ -11461,7 +11468,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         names = [];
       }
     }
-    setDonorRoll(names, donateUrl);
+    setDonorRoll(names);
   }
 
   $("btn-donor-ticker")?.addEventListener("click", () => $("btn-support")?.click());

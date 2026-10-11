@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=scene-layout249" />
+  <link rel="stylesheet" href="/static/app.css?v=scene-layout251" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -123,6 +123,8 @@
           </div>
         <label id="scene-duration-label">Süre</label>
           <div class="chips" id="dur-chips">
+            <button type="button" data-dur="2" class="chip">2 sn</button>
+            <button type="button" data-dur="3" class="chip">3 sn</button>
             <button type="button" data-dur="4" class="chip">4 sn</button>
             <button type="button" data-dur="5" class="chip on">5 sn</button>
             <button type="button" data-dur="6" class="chip">6 sn</button>
@@ -241,6 +243,8 @@
           <p class="muted mode-hint">Önceki videonun <strong>son karesinden</strong> devam (zincir). I2V değil — fotoğraftan başlamak için <strong>Yeni video + İlk kare</strong>.</p>
           <label id="cont-dur-label">Devam süresi</label>
           <div class="chips" id="dur-chips-cont">
+            <button type="button" data-dur="2" class="chip">2 sn</button>
+            <button type="button" data-dur="3" class="chip">3 sn</button>
             <button type="button" data-dur="4" class="chip">4 sn</button>
             <button type="button" data-dur="5" class="chip on">5 sn</button>
             <button type="button" data-dur="6" class="chip">6 sn</button>
@@ -709,7 +713,7 @@
           <button type="button" class="btn-secondary" id="btn-cinema-add-scene" data-i18n="cinema.addScene">+ Sahne ekle</button>
           <button type="button" class="btn-ghost" id="btn-cinema-add-t2v" data-i18n="cinema.addT2v">+ Bölüm ekle</button>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
-          <button type="button" class="cta" id="btn-cinema-produce">Üret</button>
+          <button type="button" class="cta" id="btn-cinema-produce" data-i18n="cinema.produceAll" disabled>Tümünü üret</button>
         </div>
       </div>
       <div class="cinema-grid">
@@ -1021,7 +1025,7 @@
                 <label class="cinema-scene-lang"><span data-i18n="scene.editor.1">Video türü</span>
                   <select id="cinema-scene-type"><option value="t2v" data-i18n="scene.editor.2">Yeni video</option><option value="continue" data-i18n="scene.editor.3">Devam videosu</option></select>
                 </label>
-                <label class="cinema-scene-lang"><span data-i18n="scene.editor.4">Süre (sn)</span><input id="cinema-scene-duration" type="number" min="4" max="15" step="1" value="5" /></label>
+                <label class="cinema-scene-lang"><span data-i18n="scene.editor.4">Süre (sn)</span><input id="cinema-scene-duration" type="number" min="2" max="15" step="1" value="5" /></label>
               </div>
               <label><span data-i18n="scene.editor.5">Karakter çağırmaları</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character" placeholder="Master Kyros, Seraph Vane"></textarea></label>
               <label><span data-i18n="scene.editor.6">Mekan / durum</span><textarea id="cinema-scene-location" rows="3" data-scene-field="location" data-i18n-placeholder="scene.editor.50" placeholder="Bu sahnede ne oluyor?"></textarea></label>
@@ -1102,7 +1106,7 @@
     <div class="gallery-panel support-panel">
       <header>
         <h2>Destek</h2>
-        <span class="muted gallery-order-hint">GitHub Sponsors · Open Collective · sorun · fikir</span>
+        <span class="muted gallery-order-hint">Buy me a coffee · sorun · fikir</span>
         <button type="button" class="menu-btn" id="btn-support-close">← Studio</button>
       </header>
       <section class="support-sponsor">
@@ -1111,22 +1115,7 @@
           Destekleriniz benim için çok önemli. Bu iş vaktimin büyük bir kısmını alıyor — her destek beni gerçekten mutlu eder ve daha fazla projenin gelmesine de katkı olur.
         </p>
         <div class="support-sponsor-actions">
-        <a
-          class="support-rainbow-btn support-sponsor-cta"
-          href="https://opencollective.com/minimax-h3-studio"
-          target="_blank"
-          rel="noopener noreferrer"
-          id="btn-support-oc"
-          data-i18n="support.ocBtn"
-        >Open Collective’te bağış yap</a>
-        <a
-          class="support-rainbow-btn support-sponsor-cta"
-          href="https://github.com/sponsors/erdinoral"
-          target="_blank"
-          rel="noopener noreferrer"
-          id="btn-support-sponsor"
-          data-i18n="support.sponsorBtn"
-        >GitHub Sponsors</a>
+        <a class="support-rainbow-btn support-sponsor-cta" href="https://buymeacoffee.com/erdindev" target="_blank" rel="noopener noreferrer" id="btn-support-coffee">☕ Buy me a coffee</a>
         </div>
         <section class="support-donors" id="support-donors">
           <h3 data-i18n="support.donorsTitle">Destekleyenler</h3>
@@ -1135,7 +1124,7 @@
         </section>
         <p class="muted mode-hint" data-i18n="support.sponsorThanks">Teşekkürler — bir yıldız bile projenin bulunmasına yardım eder.</p>
         <p class="muted mode-hint">
-          <a href="https://github.com/erdinoral/minimax-h3-studio" target="_blank" rel="noopener" id="support-star-link" data-i18n="support.starRepo">Depoyu yıldızla</a>
+          <a class="btn-secondary" href="https://github.com/erdinoral/minimax-h3-studio" target="_blank" rel="noopener noreferrer" id="support-star-link" data-i18n="support.starRepo">Depoyu yıldızla</a>
         </p>
       </section>
       <p class="muted mode-hint" id="support-intro" data-i18n="support.intro">
@@ -1326,7 +1315,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=director-scene250" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=coffee-support251" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>

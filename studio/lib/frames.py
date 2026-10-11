@@ -139,9 +139,31 @@ def resize_image(src: Path, out_path: Path, width: int, height: int) -> Path:
 
 
 def duration_to_length(seconds: int) -> int:
-    """H3 17k+5 grid @ 24fps (Comfy Math Expression in stock workflow)."""
-    a = max(5, int(round(seconds * 24)))
+    """H3 17k+5 grid @ 24fps; 2/3s inserts render at 4s then trim."""
+    generation_seconds = 4 if seconds in (2, 3) else seconds
+    a = max(5, int(round(generation_seconds * 24)))
     return a + (5 - (a % 17)) % 17
+
+
+def trim_short_clip(video_path: Path, seconds: int) -> Path:
+    """Make an exact 2/3s insert, preserving optional audio and replacing atomically."""
+    if seconds not in (2, 3):
+        raise ValueError("Only 2/3 second inserts use short-clip trimming")
+    video_path = Path(video_path)
+    tmp = video_path.with_suffix(".trim.tmp.mp4")
+    try:
+        result = _run([
+            _ffmpeg(), "-v", "error", "-y", "-i", str(video_path),
+            "-t", str(seconds), "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+            "-c:a", "aac", "-movflags", "+faststart", str(tmp),
+        ])
+        if result.returncode or not tmp.exists() or tmp.stat().st_size == 0:
+            raise RuntimeError(f"Short clip trim failed: {result.stderr[-600:]}")
+        tmp.replace(video_path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return video_path
 
 
 def strip_audio(video_path: Path) -> Path:

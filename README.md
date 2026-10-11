@@ -1,5 +1,13 @@
 # MiniMax H3 Studio
 
+[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-Support_Erdin-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/erdindev)
+
+## v9.1.1 — Director fixes, short clips and support
+
+Add scenes directly inside empty chapters, produce all chapters or one chapter explicitly, and export 2–3 second clips using a four-second render followed by trimming. The Support panel now links to Erdin's Buy Me a Coffee page, with aligned chapter actions and a styled repository-star button. See the [9.1.1 release notes](docs/releases/v9.1.1.md).
+
+After updating in Pinokio, stop and start Studio, then reload the browser.
+
 ## v9.1.0 — Appearance, Scene audio and creator tools
 
 Appearance settings are now available in the public build under **Settings → Appearance**: choose Orange, Blue or Graphite independently from Modern, Old School or Studio styles. Your choices persist in this browser.

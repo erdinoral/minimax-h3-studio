@@ -23,3 +23,68 @@ test('Scene creation button opens a new-scene editor without needing existing sh
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0], [null, 't2v']);
 });
+
+test('Empty chapter offers scene creation and disables chapter production', () => {
+  const context = {
+    cinemaChapterOpen: () => true,
+    htmlEsc: String, tt: x => x, tf: x => x,
+    cinemaChapterDisplayName: String,
+  };
+  vm.createContext(context);
+  const start = source.indexOf('  function cinemaChapterHtml(');
+  const end = source.indexOf('  let cinemaSceneEditId', start);
+  vm.runInContext(source.slice(start, end), context);
+  const rendered = context.cinemaChapterHtml('Chapter 2', [], 0);
+  assert.match(rendered, /cinema-chapter-add-scene/);
+  assert.match(rendered, /cinema-chapter-produce[^>]* disabled/);
+});
+
+test('Scene created from a chapter is assigned to that chapter', () => {
+  const start = source.indexOf('    const chapterAdd = e.target.closest(');
+  const end = source.indexOf('    const chapterProduce', start);
+  const calls = [];
+  const context = {
+    cinemaSceneEditChapter: null,
+    openCinemaSceneModal: (...args) => calls.push(args),
+    e: {preventDefault() {}, target: {closest: () => ({closest: () => ({dataset: {chapter: 'Chapter 2'}})})}},
+  };
+  vm.createContext(context);
+  vm.runInContext('(function(){' + source.slice(start, end) + '})()', context);
+  assert.equal(context.cinemaSceneEditChapter, 'Chapter 2');
+  assert.deepEqual(calls[0], [null, 't2v']);
+});
+
+test('Produce all queues both chapters; chapter production queues only its chapter', async () => {
+  const cinema = {shots: [
+    {id: 'a', text: 'First scene', chapter: 'A'},
+    {id: 'b', text: 'Second scene', chapter: 'B'},
+    {id: 'empty', text: '', chapter: 'B'},
+    {id: 'disabled', text: 'Disabled scene', chapter: 'B', enabled: false},
+  ]};
+  const requests = [], errors = [];
+  const noop = () => {};
+  const context = {
+    $: () => null, ensureCinema: () => cinema, state: {},
+    flushCinemaFields: noop, saveCinema: async () => {},
+    cinemaActiveChapter: () => 'A', cinemaChapterOf: s => s.chapter,
+    cinemaStudioMode: () => 'assets', cinemaAudio: () => ({mode: 'silent'}),
+    numOr: () => -1, normalizeQuality: String,
+    normalizeCinemaImageProvider: String, collectLoraPayload: () => ({}),
+    fetch: async (url, options) => {
+      requests.push(JSON.parse(options.body));
+      return {ok: true, json: async () => ({phase: 'sheets', sheets_queued: []})};
+    },
+    tt: String, tf: String, toast: x => errors.push(x),
+    setProdLane: noop, refreshJobs: async () => {},
+    stopImageStudioQueuePoll: noop,
+  };
+  vm.createContext(context);
+  const start = source.indexOf('  async function produceCinema(opts)');
+  const end = source.indexOf('  async function regenerateCinemaAsset', start);
+  vm.runInContext(source.slice(start, end), context);
+  await context.produceCinema({all: true});
+  await context.produceCinema({chapter: 'B'});
+  assert.equal(requests.length, 2, errors.join('\n'));
+  assert.deepEqual(requests[0].shots.map(s => s.id), ['a', 'b']);
+  assert.deepEqual(requests[1].shots.map(s => s.id), ['b']);
+});

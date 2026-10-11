@@ -101,7 +101,7 @@ from lib.director import (
     expected_shot_count,
     MIN_H3_PROMPT_CHARS,
 )
-from lib.frames import duration_to_length, extract_audio_tail, extract_last_frame, resize_image, strip_audio
+from lib.frames import duration_to_length, extract_audio_tail, extract_last_frame, resize_image, strip_audio, trim_short_clip
 from lib.music import (
     build_song_director_seed,
     concat_and_mux,
@@ -137,7 +137,7 @@ CINEMA_FINALS = DATA / "cinema_finals"
 COMFY_ROOT = ROOT.parent / "app"
 COMFY_OUTPUT = COMFY_ROOT / "output"
 COMFY_INPUT = COMFY_ROOT / "input"
-ALLOWED_DURATIONS = (4, 5, 6, 8, 10, 15)
+ALLOWED_DURATIONS = (2, 3, 4, 5, 6, 8, 10, 15)
 LOGS = ROOT / "logs"
 JOBS_FILE = DATA / "jobs.json"
 GALLERY_FILE = DATA / "gallery.json"
@@ -1245,7 +1245,7 @@ class GenerateBody(BaseModel):
     asset_film_id: Optional[str] = None
     ref_role: Optional[str] = None
     prompt: str = Field(..., min_length=1)
-    duration: int = Field(5, description="4 | 5 | 6 | 8 | 10 | 15")
+    duration: int = Field(5, description="2 | 3 | 4 | 5 | 6 | 8 | 10 | 15; 2/3s renders at 4s then trims")
     aspect: str = "16:9"
     quality: str = Field("736", description="352 | 480 | 608 | 736 | 768 | 1088 (aliases: 720->736, 1080->1088)")
     seed: int = -1
@@ -8907,6 +8907,10 @@ async def _run_job(job: dict):
                     "url": f"/api/clips/{job['id']}/video",
                 }
                 job["local_path"] = str(dest)
+                if int(job["duration"]) in (2, 3) and job.get("mode") != "multishot":
+                    await asyncio.to_thread(trim_short_clip, dest, int(job["duration"]))
+                    job["short_clip_trimmed"] = True
+                    job["generation_duration"] = 4
                 job["download_name"] = video_download_name(job, item_id=job["id"])
                 job["progress"] = 98
                 job["progress_label"] = "last frame çıkarılıyor"

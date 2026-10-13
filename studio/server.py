@@ -28,7 +28,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
     "director_progress", default=None
 )
 
-from lib import h3_enhancements
+from lib import h3_enhancements, continuum, flow_refine
 from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
@@ -1066,10 +1066,12 @@ def _archive_job_to_gallery(job: dict) -> None:
         "width": job.get("width"),
         "height": job.get("height"),
         "mode": job.get("mode") or "t2v",
+        "silent_audio": bool(job.get('silent_audio')),
         "seed": job.get("seed"),
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
         **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "character_manifest")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link")},
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
@@ -1238,6 +1240,9 @@ def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
 
 
 class GenerateBody(BaseModel):
+    continuation_method: str = "standard"
+    continuum_chunks: int = Field(1, ge=1, le=16)
+    prepare_refine: bool = False
     scene_audio_file: Optional[str] = None
     scene_audio_mode: str = "reference"
     asset_auto_match: bool = False
@@ -1383,6 +1388,7 @@ class CinemaProduceBody(BaseModel):
     append_to_chain: bool = False
     audio: Optional[dict[str, Any]] = None
     seamless: bool = False
+    seamless_backend: str = 'multishot'
     # First queue missing character/creature/vehicle/location sheets; scenes start after they finish
     prepare_sheets: bool = True
     # If true, queue sheets even when the card already has a still
@@ -2451,6 +2457,12 @@ async def asset_reference_preview(body: AssetReferencePreviewBody):
 
 @app.post("/api/generate")
 async def generate(body: GenerateBody):
+    if body.prepare_refine:
+        if body.continuation_method == 'continuum' or body.fast_preview or body.post_pass:
+            raise HTTPException(400, 'Refine recording requires a native single clip without preview/post-pass')
+        capabilities = await workflow_capabilities()
+        if not capabilities['refine_ready']:
+            raise HTTPException(409, 'Flow tools are not loaded; restart Studio after the queue finishes')
     long_reference = optional_models.supports_long_reference(
         body.duration, body.mode, h3_models.resolve("ref2va")["unet"])
     if body.duration not in ALLOWED_DURATIONS and not long_reference:
@@ -2686,6 +2698,47 @@ async def generate(body: GenerateBody):
         prompt_txt, lora_id=lora_applied.get("lora_id") or "",
         file=lora_applied.get("lora_name") or "",
     )
+    continuum_data = {}
+    if body.continuation_method not in ('standard','continuum'):
+        raise HTTPException(400, 'Unknown continuation method')
+    if body.continuation_method == 'continuum':
+        if body.duration < 4 or body.duration > 15 or body.scene_audio_file or body.ref_videos:
+            raise HTTPException(400, 'Continuum supports 4–15 second chunks; external media is not supported in this first integration')
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{COMFY_URL}/object_info")
+            info = response.json() if response.is_success else {}
+        if continuum.SAMPLER not in info:
+            raise HTTPException(409, 'Continuum is not loaded; finish the queue and restart Studio/ComfyUI')
+        parent = _clip_record(continue_from) if continue_from else None
+        if continue_from and not (parent and parent.get('continuum_run')):
+            raise HTTPException(409, 'Source clip has no Continuum run record')
+        prompts = list(parent.get('continuum_prompts') or []) if parent else []
+        prompts += [prompt_txt] * body.continuum_chunks
+        if len(prompts) > 16:
+            raise HTTPException(400, 'Continuum supports at most 16 chunks per run')
+        continuum_data = {'continuum_run':parent['continuum_run'] if parent else 'studio_' + uuid.uuid4().hex,
+                          'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration}
+        if parent:
+            continuum_data.update({key:parent[key] for key in (
+                'continuum_base_graph','continuum_model_link','continuum_sigma_link') if key in parent})
+            body.duration = int(parent['continuum_chunk_seconds'])
+            silent = bool(parent.get('silent_audio'))
+            body.aspect = parent.get('aspect') or body.aspect
+            body.quality = parent.get('quality') or body.quality
+            steps = int(parent['steps'])
+            sampler = parent['sampler']
+            scheduler = parent['scheduler']
+            continuum_data['continuum_chunk_seconds'] = body.duration
+            continuum_data['h3_models'] = parent['h3_models']
+            continuum_data['reference_manifest'] = parent.get('reference_manifest')
+            lora_applied = {key: parent.get(key) for key in ('lora_name', 'lora_strength', 'lora_strengths')}
+            for key,value in (("seed",parent['seed']), ("width",parent['width']), ("height",parent['height'])):
+                if key == 'seed': seed=value
+                elif key == 'width': w=value
+                else: h=value
+            first_frame=parent.get('first_frame_name')
+            ref_images=parent.get('ref_images') or []
+        mode='continuum'
     job = {
         "id": str(uuid.uuid4()),
         "status": "queued",
@@ -2723,10 +2776,12 @@ async def generate(body: GenerateBody):
         "sage_attention": _sage_mode(body),
         "lane": "director" if (body.lane or "").strip().lower() == "director" else "scene",
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
-        "h3_models": h3_models.resolve("ref2va" if audio_reference else h3_models.graph_for_mode(mode)),
+        "h3_models": h3_models.resolve("ref2va" if audio_reference or (mode == 'continuum' and ref_images) else h3_models.graph_for_mode(mode)),
         "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
         "fast_preview": bool(body.fast_preview),
         "sheet_job": bool(getattr(body, "sheet_job", False)),
+        **continuum_data,
+        "prepare_refine": body.prepare_refine,
         **lora_applied,
     }
     async with _lock:
@@ -4289,14 +4344,21 @@ async def _queue_cinema_seamless(
     purpose: str,
 ) -> dict:
     """H3MultishotSampler jobs: packs of 8 shots (e.g. 8×5s = 40s). Extra shots = next take."""
-    if not detect_multishot_pack(COMFY_ROOT):
+    use_continuum = body.seamless_backend == 'continuum'
+    if body.seamless_backend not in ('multishot', 'continuum'):
+        raise HTTPException(400, 'Unknown seamless backend')
+    if use_continuum and (body.duration < 4 or body.duration > 15):
+        raise HTTPException(400, 'Continuum requires 4–15 second chunks')
+    if use_continuum and not (await workflow_capabilities())['continuum_ready']:
+        raise HTTPException(409, 'Continuum is not loaded')
+    if not use_continuum and not detect_multishot_pack(COMFY_ROOT):
         raise HTTPException(
             400,
             "H3 Multishot paketi yok — Pinokio: Download Models → H3 Multishot, sonra Stop → Start",
         )
     if not parsed:
         raise HTTPException(400, "Senaryo / shot yok")
-    pack = max(1, int(MULTISHOT_MAX_SHOTS))
+    pack = 16 if use_continuum else max(1, int(MULTISHOT_MAX_SHOTS))
     chunks = cinema.group_seamless_takes(parsed, prompts, pack=pack)
     take_total = len(chunks)
     w, h = resolve_size(body.aspect, body.quality)
@@ -4358,7 +4420,10 @@ async def _queue_cinema_seamless(
             "error": None,
             "output": None,
             "created_at": time.time(),
-            "mode": "multishot",
+            "mode": "continuum" if use_continuum else "multishot",
+            **({'continuum_run':'studio_' + uuid.uuid4().hex,
+                'continuum_prompts':texts, 'continuum_chunk_seconds':body.duration,
+                'h3_models':h3_models.resolve('fl2va')} if use_continuum else {}),
             "batch_index": take_i,
             "batch_total": take_total,
             "shot_count": len(chunk_parsed),
@@ -6746,6 +6811,56 @@ async def h3_enhancements_get():
             "hyperflow_ready": "ApplyHyperFlowH3" in nodes}
 
 
+@app.get('/api/video-workflows')
+async def workflow_capabilities():
+    async with httpx.AsyncClient(timeout=5) as client:
+        try:
+            response = await client.get(f'{COMFY_URL}/object_info')
+            available = response.json() if response.is_success else {}
+        except Exception:
+            available = {}
+    return {'continuum_ready': all(n in available for n in (
+                continuum.SAMPLER, 'H3ContinuumAssembleSeamV35')),
+            'refine_ready': all(n in available for n in (
+                'H3TrajectoryCapture','H3FlowAlignedRegenerate','H3StudioSaveFlowState','H3StudioLoadFlowState',
+                'MinimaxH3LatentUpscaler3DProvider')) and
+                (COMFY_ROOT / 'models/latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors').is_file(),
+            'continuum_max_chunks':16}
+
+
+class RefineBody(BaseModel):
+    quality: str
+
+
+@app.post('/api/clips/{clip_id}/refine')
+async def refine_clip(clip_id: str, body: RefineBody):
+    source = _clip_record(clip_id)
+    if not source:
+        raise HTTPException(404, 'Clip not found')
+    if not (await workflow_capabilities())['refine_ready']:
+        raise HTTPException(409, 'Flow tools are not loaded')
+    if not source.get('prepare_refine') or not (flow_refine.STORE / (clip_id + '.json')).is_file() or not (COMFY_ROOT / 'output' / 'H3_Studio_Flow' / (clip_id + '.pt')).is_file():
+        raise HTTPException(409, 'This clip has no saved Flow state. Enable Prepare H3 Refine before rendering a new clip.')
+    if str(body.quality) not in QUALITY_SHORT_EDGE:
+        raise HTTPException(400, 'Unsupported resolution')
+    quality = normalize_quality(body.quality)
+    scale = QUALITY_SHORT_EDGE[quality] / min(int(source['width']),int(source['height']))
+    width, height = snap_h3_size(int(source['width'])*scale, int(source['height'])*scale)
+    if min(width,height) <= min(int(source['width']),int(source['height'])):
+        raise HTTPException(400, 'Choose a resolution above the source clip')
+    job = {key:value for key,value in source.items() if key in (
+        'prompt','duration','aspect','seed','steps','sampler','scheduler','h3_models',
+        'lora_name','lora_strength','lora_strengths','silent_audio','purpose','ref_images','first_frame_name')}
+    job.update(id=str(uuid.uuid4()), status='queued', progress=0, progress_label='sırada · H3 Refine',
+               mode='flow_refine', lane='scene', quality=quality, width=width, height=height,
+               created_at=time.time(), output=None, error=None, refine_source_id=clip_id,
+               continue_from=None, prepare_refine=False)
+    async with _lock:
+        _jobs.append(job)
+        _save_jobs()
+    return job
+
+
 @app.post("/api/h3-enhancements")
 async def h3_enhancements_set(body: dict[str, Any]):
     if not isinstance(body.get("refmod_enabled"), bool):
@@ -8576,7 +8691,7 @@ async def _run_job(job: dict):
         job["progress_label"] = "frame / graph"
         _save_jobs()
         first = None
-        if (job.get("mode") or "").lower() != "multishot":
+        if (job.get("mode") or "").lower() not in ("multishot", "continuum", "flow_refine"):
             first = await _resolve_first_frame(job)
             if job.get("mode") == "continue" or job.get("continue_from"):
                 if not first:
@@ -8651,6 +8766,10 @@ async def _run_job(job: dict):
             )
             if first:
                 prompt = add_h3_first_frame_guide(prompt, first)
+        elif mode == "continuum":
+            prompt = continuum.build(job)
+        elif mode == "flow_refine":
+            prompt = flow_refine.build(job)
         elif mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
@@ -8818,6 +8937,8 @@ async def _run_job(job: dict):
         if job.get("sheet_method") == "look_sheets":
             look_sheets.add_nodes(prompt, job.get("sheet_kind") or "character", f"H3_Studio_Look/{job['id'][:8]}")
         prompt = h3_enhancements.patch_graph(prompt, job)
+        if job.get('prepare_refine'):
+            prompt = flow_refine.capture(prompt, job)
         prompt_id = await comfy.queue_prompt(prompt)
         job["prompt_id"] = prompt_id
         job["progress"] = 12
@@ -8943,6 +9064,8 @@ async def _run_job(job: dict):
                     "url": f"/api/clips/{job['id']}/video",
                 }
                 job["local_path"] = str(dest)
+                if job.get('mode') == 'continuum':
+                    job['duration'] = int(job['continuum_chunk_seconds']) * len(job['continuum_prompts'])
                 if int(job["duration"]) in (2, 3) and job.get("mode") != "multishot":
                     await asyncio.to_thread(trim_short_clip, dest, int(job["duration"]))
                     job["short_clip_trimmed"] = True

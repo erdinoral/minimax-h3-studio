@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=spectrum253" />
+  <link rel="stylesheet" href="/static/app.css?v=sponsor260" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -49,14 +49,6 @@
       <span class="comfy-pill" id="comfy-pill" title="Comfy arka uç — Pinokio Stop ile kapanır" data-i18n-title="ui.comfy-pill.title">Comfy …</span>
     </nav>
   </header>
-
-  <div id="donor-ticker" class="donor-ticker hidden" hidden>
-    <button type="button" class="donor-ticker-label" id="btn-donor-ticker" data-i18n="donor.thanks">Teşekkürler</button>
-    <div class="donor-ticker-mask" aria-live="polite">
-      <div class="donor-ticker-track" id="donor-ticker-track"></div>
-    </div>
-    <button type="button" class="donor-ticker-join" id="btn-donor-join" data-i18n="donor.join">Sen de destekle</button>
-  </div>
 
   <main class="workspace" id="view-studio">
     <!-- grid: scene | player | ayar / prompt | prod | ayar -->
@@ -278,6 +270,7 @@
           </div>
         </div>
         <div class="scene-generation-settings">
+        <div class="h3-workflow-card" id="video-workflow-controls"></div>
         <label><span id="ayar-seed-label">Seed</span> <input type="number" id="seed" value="-1" /> <small id="ayar-seed-rand">(-1 = random)</small></label>
         <label><span id="ayar-steps-label">Adım</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
         <label id="ayar-speed-label">Hız</label>
@@ -305,6 +298,9 @@
     </section>
 
     <section class="zone zone-player panel player">
+      <a id="sponsor-banner" class="sponsor-banner" href="https://buymeacoffee.com/erdindev" target="_blank" rel="noopener noreferrer" aria-label="Buy me a coffee">
+        <span class="sponsor-banner-message"></span>
+      </a>
       <div class="player-stage">
         <button type="button" class="player-nav player-nav-next hidden" id="btn-player-next" title="Sonraki video" aria-label="Sonraki video" data-i18n-title="ui.btn-player-next.title" data-i18n-aria-label="ui.btn-player-next.aria-label">‹</button>
         <button type="button" class="player-close hidden" id="btn-player-close" title="Aktif üretimi kapat">×</button>
@@ -317,6 +313,7 @@
         <a class="btn-secondary" id="btn-download" href="#" download>İndir</a>
         <button type="button" class="btn-secondary hidden" id="btn-player-delete">Sil</button>
         <button type="button" class="cta hidden" id="btn-open-prompt" title="Bu videonun üretim prompt’u" data-i18n-title="ui.btn-open-prompt.title">Prompt</button>
+        <button type="button" class="btn-secondary h3-refine-action" id="btn-h3-refine" disabled>H3 Refine <small>Experimental</small></button>
       </div>
       <div class="prod-info" id="prod-info">
         <div class="prod-main">
@@ -696,6 +693,7 @@
             </label>
           </div>
           <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
+          <div id="director-continuum-control" class="h3-workflow-card"></div>
           <p class="muted mode-hint" id="cinema-mode-hint">JSON takes[] = sahne. 5 sahneli = 5 take × 8 shot, hikaye devam. Karakter/mekan kartı gerekmez</p>
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
         </div>
@@ -714,6 +712,7 @@
           <button type="button" class="btn-secondary" id="btn-cinema-add-scene" data-i18n="cinema.addScene">+ Sahne ekle</button>
           <button type="button" class="btn-ghost" id="btn-cinema-add-t2v" data-i18n="cinema.addT2v">+ Bölüm ekle</button>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
+          <span id="cinema-save-status" class="muted" role="status" aria-live="polite" data-i18n="cinema.saveHint">Değişiklikler otomatik kaydedilir</span>
           <button type="button" class="cta" id="btn-cinema-produce" data-i18n="cinema.produceAll" disabled>Tümünü üret</button>
         </div>
       </div>
@@ -1019,6 +1018,7 @@
             <button type="button" class="menu-btn" id="btn-cinema-scene-close">Kapat</button>
           </header>
           <p class="muted cinema-scene-hint" id="cinema-scene-hint" data-i18n="ui.cinema-scene-hint">JSON'daki temel sahne bilgisini düzenle: karakterler, mekan ve prompt.</p>
+          <p class="muted" data-i18n="scene.saveHint">Bu penceredeki değişiklikleri uygulamak için Kaydet’e bas. Ek ayrıntılar isteğe bağlıdır.</p>
           <div class="cinema-scene-fields">
             <section class="cinema-scene-group">
               <div class="cinema-scene-row">
@@ -1032,16 +1032,14 @@
               <label><span data-i18n="scene.editor.6">Mekan / durum</span><textarea id="cinema-scene-location" rows="3" data-scene-field="location" data-i18n-placeholder="scene.editor.50" placeholder="Bu sahnede ne oluyor?"></textarea></label>
               <label><span data-i18n="scene.editor.7">Prompt</span><textarea id="cinema-scene-action" rows="7" data-scene-field="action" data-i18n-placeholder="scene.editor.51" placeholder="Videoda üretilecek görsel ve aksiyon açıklaması"></textarea></label>
             </section>
-            <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" data-i18n="scene.editor.8">Referanslar ve süreklilik</h4>
+            <details class="cinema-scene-group cinema-scene-optional"><summary data-i18n="scene.editor.8">Referanslar ve süreklilik</summary>
               <p class="muted cinema-scene-hint" data-i18n="ui.label12">Adları kayıtlı karakter ve mekân kartlarıyla aynı yaz. Her referansın bu çekimdeki görevini belirt.</p>
               <label><span data-i18n="scene.editor.10">Karakter / yaratık / araç referansları</span><input data-scene-field="reference_subjects" type="text" data-i18n-placeholder="scene.editor.52" placeholder="Prenses: yüz ve kostüm; Şövalye: yüz ve zırh" /></label>
               <label><span data-i18n="scene.editor.11">Mekân referansı</span><input data-scene-field="reference_environment" type="text" data-i18n-placeholder="scene.editor.53" placeholder="Şapel: yerleşim ve ışık" /></label>
               <label><span data-i18n="scene.editor.12">Açılış kadrajı</span><textarea data-scene-field="opening_frame" rows="2" data-i18n-placeholder="scene.editor.54" placeholder="İlk anda ekranda ne, nerede görünüyor?"></textarea></label>
               <label><span data-i18n="scene.editor.13">Son kadraj</span><textarea data-scene-field="ending_frame" rows="2" data-i18n-placeholder="scene.editor.55" placeholder="5. saniyede hangi kadraja varılmalı?"></textarea></label>
-            </section>
-            <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" data-i18n="scene.editor.14">Kamera ve kurgu</h4>
+            </details>
+            <details class="cinema-scene-group cinema-scene-optional"><summary data-i18n="scene.editor.14">Kamera ve kurgu</summary>
               <div class="cinema-scene-row">
                 <label class="cinema-scene-grow"><span data-i18n="scene.editor.15">Plan ölçeği / kadraj</span><input data-scene-field="camera_framing" type="text" data-i18n-placeholder="scene.editor.56" placeholder="Yakın plan → göz detayı" /></label>
                 <label class="cinema-scene-grow"><span data-i18n="scene.editor.16">Açı ve bakış yönü</span><input data-scene-field="camera_angle" type="text" data-i18n-placeholder="scene.editor.57" placeholder="Göz hizası, prensese bakış" /></label>
@@ -1056,19 +1054,18 @@
               </div>
               <label><span data-i18n="scene.editor.38">Önceki çekimle bağlantı</span><select data-scene-field="transition"><option value="" data-i18n="scene.editor.39">Belirtilmedi</option><option value="hard cut" data-i18n="scene.editor.40">Sert kesme</option><option value="reverse angle" data-i18n="scene.editor.41">Karşı açı</option><option value="continuous" data-i18n="scene.editor.42">Aynı kadrajdan devam</option></select></label>
               <label><span data-i18n="scene.editor.43">Ek kamera tarifi</span><textarea data-scene-field="camera" rows="2" data-i18n-placeholder="scene.editor.59" placeholder="Gerekirse serbest kamera yönlendirmesi"></textarea></label>
-            </section>
-            <section class="cinema-scene-group">
-              <h4 class="cinema-scene-group-title" data-i18n="scene.editor.44">Çekim içi akış ve ses</h4>
+            </details>
+            <details class="cinema-scene-group cinema-scene-optional"><summary data-i18n="scene.editor.44">Çekim içi akış ve ses</summary>
               <label><span data-i18n="scene.editor.45">Zamanlı aksiyonlar</span><textarea data-scene-field="beats" rows="3" data-i18n-placeholder="scene.editor.60" placeholder="0: Şövalye bakar&#10;2: Gözünde yaş birikir&#10;4: Yaş düşer"></textarea></label>
               <label><span data-i18n="scene.editor.46">Diyalog</span><textarea data-scene-field="dialogue" rows="2"></textarea></label>
               <label><span data-i18n="scene.editor.47">Ortam ve fiziksel sesler</span><textarea data-scene-field="audio" rows="2"></textarea></label>
               <label><span data-i18n="scene.editor.48">İzleyicinin duyduğu müzik</span><textarea data-scene-field="music" rows="2" data-i18n-placeholder="scene.editor.61" placeholder="N/A = müzik yok"></textarea></label>
-            </section>
-            <section class="cinema-scene-group">
+            </details>
+            <details class="cinema-scene-group cinema-scene-optional"><summary data-i18n="scene.advanced">Stil ve diğer ayrıntılar</summary>
               <label><span data-i18n="scene.editor.style">Görsel stil</span><textarea data-scene-field="visual_style" rows="2"></textarea></label>
               <label><span data-i18n="scene.editor.constraints">Sabit tutulacak ayrıntılar</span><textarea data-scene-field="important" rows="2"></textarea></label>
               <label><span data-i18n="scene.editor.language">Diyalog dili</span><input data-scene-field="dialogue_lang" type="text" placeholder="auto / tr / en" /></label>
-            </section>
+            </details>
           </div>
           <details class="cinema-scene-preview-fold"><summary data-i18n="scene.editor.49">MiniMax H3 prompt önizlemesi</summary><pre class="cinema-scene-preview" id="cinema-scene-preview"></pre></details>
           <div class="row-btns">
@@ -1120,6 +1117,10 @@
         </div>
         <section class="support-donors" id="support-donors">
           <h3 data-i18n="support.donorsTitle">Destekleyenler</h3>
+          <article class="support-featured-sponsor">
+            <strong>Diamond204a</strong> <span class="muted">· $25</span>
+            <p class="mode-hint" data-i18n="support.firstSponsor">İlk sponsorumuz. $25 desteği ve geri bildirimleriyle uygulamanın gelişimine katkıda bulunuyor. Teşekkürler!</p>
+          </article>
           <p class="muted mode-hint" id="support-donors-empty" data-i18n="support.donorsEmpty">İlk bağış senin adını buraya yazar.</p>
           <p class="support-donors-list hidden" id="support-donors-list" hidden></p>
         </section>
@@ -1316,18 +1317,21 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=coffee-support251" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=scene258" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
-  <script src="/static/app.js?v=spectrum254" charset="utf-8"></script>
+  <script src="/static/app.js?v=sponsor260" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
-  <script src="/static/workflow-access.js?v=6" charset="utf-8"></script>
+  <script src="/static/studio-guide.js?v=1" charset="utf-8"></script>
+  <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
 <script src="/static/h3-enhancements.js?v=2"></script>
+  <script src="/static/video-workflows.js?v=1"></script>
   <script src="/static/scene-selectors.js?v=3"></script>
   <script src="/static/scene-settings.js?v=2"></script>
+  <script src="/static/sponsor-banner.js?v=1"></script>
 </body>
 </html>

@@ -2,6 +2,7 @@
 import shutil
 import json
 import sys
+import subprocess
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -16,6 +17,32 @@ REPLACEMENTS={
     "minimax_h3_video_vae_fp16.safetensors":"vae",
     "minimax_h3_audio_vae_fp32.safetensors":"vae",
 }
+
+WORKFLOW_PACKS = (
+    ('ComfyUI-H3-Continuum', 'https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum.git', 'e9b1294ccd08dfce972cd8e5a11703b3f616ee54'),
+    ('MiniMax-H3-Flow-Aligned-Regenerate', 'https://github.com/xmarre/MiniMax-H3-Flow-Aligned-Regenerate.git', '2bc8247810f99ccf5f580bfab985b7defe26a620'),
+    ('Comfyui_Minimax_h3_latent_Upscaler-Plus', 'https://github.com/xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus.git', '1ddcc33e9b674aaabbccc3808fe36e1a47bdd36d'),
+)
+
+def install_workflow_packs():
+    for name,url,revision in WORKFLOW_PACKS:
+        destination = APP / 'custom_nodes' / name
+        if destination.exists():
+            # Preserve locally installed packages; never reset user modifications.
+            if not (destination / '__init__.py').is_file():
+                raise RuntimeError('Incomplete workflow package: ' + name)
+            continue
+        subprocess.run(['git','clone','--no-checkout',url,str(destination)], check=True)
+        subprocess.run(['git','-C',str(destination),'checkout','--detach',revision], check=True)
+    target = APP / 'models/latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors'
+    if not target.is_file():
+        from huggingface_hub import hf_hub_download
+        target.parent.mkdir(parents=True, exist_ok=True)
+        downloaded = hf_hub_download('LBH-123-AI/Minimax_h3_latent_Upscaler',
+            filename='minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_bf16.safetensors',
+            revision='3f941d5d182014dd5c0a5e16330420ee2d4aa0c6',
+            local_dir=str(target.parent / '.h3_download'))
+        shutil.move(downloaded, target)
 
 
 def adapt(data):
@@ -57,12 +84,19 @@ def _studio_file_digest(handle, algorithm):
 
 
 def main():
+    install_workflow_packs()
     patch_hyperflow_python310()
     DEST.mkdir(parents=True,exist_ok=True)
     source = ROOT / "studio" / "comfy_nodes" / "h3_studio_enhancements"
     destination = APP / "custom_nodes" / "h3_studio_enhancements"
     destination.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source / "__init__.py", destination / "__init__.py")
+    for module in source.glob('*.py'):
+        shutil.copy2(module, destination / module.name)
+    source = ROOT / 'studio' / 'comfy_nodes' / 'h3_studio_flow_states'
+    destination = APP / 'custom_nodes' / 'h3_studio_flow_states'
+    destination.mkdir(parents=True, exist_ok=True)
+    for module in source.glob('*.py'):
+        shutil.copy2(module, destination / module.name)
     # Minimal API workflow: core H3 + the two installed sheet nodes only.
     # Person/outfit filenames are deliberately placeholders for the user's uploads.
     graph=build_ref2va_prompt(text="<Picture 1> defines the person's identity, face and hairstyle. <Picture 2> defines clothing only; ignore its wearer. Show the same adult person wearing this outfit on a neutral studio background. Sequential views: front full body, left profile, right profile, back full body, front three-quarter, face close-up. Keep face, hair and clothing consistent. No text, no collage in the video.",ref_image_names=["person.png","outfit.png"],width=864,height=480,length=121,steps=20,sage_attention="disabled",silent_audio=True)

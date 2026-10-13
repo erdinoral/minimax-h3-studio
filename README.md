@@ -1,5 +1,9 @@
 # MiniMax H3 Studio
 
+## 9.3.0 — Experimental video workflows and sponsors
+
+Continuum and H3 Refine are available as experimental options, alongside the detailed Scene/Director guide and an intermittent sponsor banner. Refine requires a source generated with capture enabled and saves a separate Gallery result. See [9.3.0 release notes](docs/releases/v9.3.0.md).
+
 [![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-Support_Erdin-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/erdindev)
 
 ## v9.2.0 — Spectrum acceleration and experimental Hybrid engine
@@ -713,3 +717,7 @@ API: `GET /api/h3-enhancements` returns `refmod_enabled`, `refmod_ready`, `hyper
 ### Optional Spectrum acceleration
 
 Settings → Video engine includes an opt-in Spectrum switch. It is off by default. See [setup, local API and comparison notes](docs/spectrum-acceleration.md).
+
+## Sponsors
+
+**Diamond204a** — our first sponsor, with **$25** in support. Their feedback also helps improve H3 Studio. Thank you!

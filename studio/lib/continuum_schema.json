@@ -1,0 +1,488 @@
+{
+  "inputs": {
+    "required": {
+      "model": [
+        "MODEL",
+        {
+          "tooltip": "MiniMax H3 diffusion model used for every Continuum chunk."
+        }
+      ],
+      "clip": [
+        "CLIP",
+        {
+          "tooltip": "MiniMax H3 text encoder used to encode the complete Sequence Prompt."
+        }
+      ],
+      "video_vae": [
+        "VAE",
+        {
+          "tooltip": "Used only to encode image conditioning. T2VA does not use it; Continuum never decodes with it."
+        }
+      ],
+      "sampler": [
+        "SAMPLER",
+        {
+          "tooltip": "ComfyUI sampler algorithm used unchanged for every generated chunk."
+        }
+      ],
+      "sigmas": [
+        "SIGMAS",
+        {
+          "tooltip": "ComfyUI noise schedule used unchanged for every generated chunk."
+        }
+      ],
+      "sequence_prompt": [
+        "STRING",
+        {
+          "forceInput": true,
+          "display_name": "Sequence Prompt",
+          "tooltip": "Connect one Text (Multiline) for the complete sequence."
+        }
+      ],
+      "prompt_mode": [
+        [
+          "Auto",
+          "Fixed",
+          "List",
+          "Timeline"
+        ],
+        {
+          "default": "Auto",
+          "display_name": "Prompt Format",
+          "tooltip": "Auto accepts Fixed, list-separated, and timeline prompt styles.",
+          "advanced": true
+        }
+      ],
+      "chunks": [
+        "INT",
+        {
+          "default": 3,
+          "min": 1,
+          "max": 16,
+          "step": 1,
+          "tooltip": "Number of sequential Continuum chunks to generate."
+        }
+      ],
+      "chunk_seconds": [
+        "FLOAT",
+        {
+          "default": 5.0,
+          "min": 4.0,
+          "max": 30.0,
+          "step": 0.1,
+          "tooltip": "Target duration shared by every chunk. 5\u201315 seconds is the recommended and validated range. Values above 15 seconds are supported, but VRAM use and processing time can increase substantially, especially at high resolution."
+        }
+      ],
+      "aspect": [
+        [
+          "Auto from First Image",
+          "Landscape 16:9",
+          "Portrait 9:16",
+          "Square 1:1"
+        ],
+        {
+          "default": "Auto from First Image",
+          "display_name": "Legacy Aspect",
+          "advanced": true,
+          "tooltip": "Saved V3.8 workflow compatibility only. The frontend migrates this value to Size Source and hides it from the Main UI."
+        }
+      ],
+      "preset": [
+        [
+          "Draft \u2014 0.30 MP",
+          "Balanced \u2014 0.60 MP",
+          "Native 768",
+          "Custom"
+        ],
+        {
+          "default": "Draft \u2014 0.30 MP",
+          "display_name": "Resolution Preset",
+          "tooltip": "Used only with Size Source = First Image. Draft is fastest; Balanced retains more detail; Native 768 uses the H3 native short edge; Custom uses Custom MP."
+        }
+      ],
+      "custom_mp": [
+        "FLOAT",
+        {
+          "default": 0.3,
+          "min": 0.1,
+          "max": 16.0,
+          "step": 0.01,
+          "display_name": "Custom MP",
+          "tooltip": "Custom target megapixels while preserving the connected First Image aspect ratio. Used only when Resolution Preset is Custom."
+        }
+      ],
+      "continuity": [
+        [
+          "Auto \u2014 conservative",
+          "Balanced \u2014 22 frames",
+          "Fast \u2014 5 frames",
+          "Strong \u2014 39 frames (Experimental)"
+        ],
+        {
+          "default": "Balanced \u2014 22 frames",
+          "tooltip": "Amount of prior video context retained at each chunk boundary."
+        }
+      ],
+      "base_seed": [
+        "INT",
+        {
+          "default": 0,
+          "min": 0,
+          "max": 18446744073709551615,
+          "control_after_generate": true,
+          "tooltip": "Base seed used to derive deterministic per-chunk seeds."
+        }
+      ],
+      "audio_continuity": [
+        "BOOLEAN",
+        {
+          "default": true,
+          "advanced": true,
+          "tooltip": "On passes prior audio context into continuation chunks. Turn it off only to isolate or replace generated audio."
+        }
+      ],
+      "diagnostics": [
+        [
+          "Basic",
+          "Detailed Report",
+          "Off"
+        ],
+        {
+          "default": "Basic",
+          "display_name": "Report Detail",
+          "advanced": true,
+          "tooltip": "Controls the detail level of the read-only Status report. It does not change generated tensors."
+        }
+      ],
+      "reroll_from_chunk": [
+        [
+          "Auto",
+          "Chunk 1",
+          "Chunk 2",
+          "Chunk 3",
+          "Chunk 4",
+          "Chunk 5",
+          "Chunk 6",
+          "Chunk 7",
+          "Chunk 8",
+          "Chunk 9",
+          "Chunk 10",
+          "Chunk 11",
+          "Chunk 12",
+          "Chunk 13",
+          "Chunk 14",
+          "Chunk 15",
+          "Chunk 16"
+        ],
+        {
+          "default": "Auto",
+          "display_name": "Regenerate From",
+          "advanced": true,
+          "tooltip": "Auto resumes the longest compatible saved prefix. Choosing a chunk reuses earlier chunks and regenerates that chunk and everything after it."
+        }
+      ],
+      "reroll_nonce": [
+        "INT",
+        {
+          "default": 0,
+          "min": 0,
+          "max": 4294967295,
+          "step": 1,
+          "advanced": true,
+          "display_name": "Variation Nonce",
+          "tooltip": "Change only when regenerating an explicit chunk and you want a new variation with otherwise identical settings."
+        }
+      ],
+      "strict_compatibility": [
+        "BOOLEAN",
+        {
+          "default": true,
+          "advanced": true,
+          "tooltip": "Legacy saved-workflow input. V3.8 keeps it loadable but ignores its value."
+        }
+      ],
+      "debug": [
+        "BOOLEAN",
+        {
+          "default": false,
+          "advanced": true,
+          "tooltip": "Developer diagnostics controlled by the H3 Continuum settings panel."
+        }
+      ],
+      "show_preview": [
+        "BOOLEAN",
+        {
+          "default": true,
+          "advanced": true,
+          "tooltip": "Show live sampling previews. Disable only to reduce preview overhead."
+        }
+      ],
+      "run_storage": [
+        [
+          "Off",
+          "Save + Auto Resume"
+        ],
+        {
+          "default": "Off",
+          "display_name": "Run Storage",
+          "advanced": true,
+          "tooltip": "Atomically save raw AV chunks and resume a compatible saved run."
+        }
+      ],
+      "run_name": [
+        "STRING",
+        {
+          "default": "",
+          "display_name": "Run Name (Optional Override)",
+          "advanced": true,
+          "tooltip": "Enter a stable name for this saved run. Compatible chunks are selected automatically."
+        }
+      ],
+      "reference_size": [
+        [
+          "Match Output",
+          "Max Identity"
+        ],
+        {
+          "default": "Match Output",
+          "display_name": "Reference Size",
+          "advanced": true,
+          "tooltip": "Match Output is the practical default; Max Identity preserves more reference detail."
+        }
+      ],
+      "project_id": [
+        "STRING",
+        {
+          "default": "",
+          "display_name": "Auto Resume ID Override",
+          "advanced": true,
+          "tooltip": "Optional. Leave blank to derive a stable ID from this sampler node. Run Name remains the explicit override."
+        }
+      ],
+      "video_reference_size": [
+        [
+          "Efficient - 0.4 MP",
+          "Balanced - 0.6 MP",
+          "Match Output"
+        ],
+        {
+          "default": "Efficient - 0.4 MP",
+          "display_name": "Video Guide Size",
+          "tooltip": "Efficient limits Video Guide Frames to about 0.4 MP; Balanced uses about 0.6 MP; Match Output uses the output pixel area. Source aspect ratio is preserved and smaller sources are not enlarged."
+        }
+      ],
+      "continuation_backend": [
+        [
+          "Standard",
+          "Compatibility"
+        ],
+        {
+          "default": "Standard",
+          "display_name": "Continuation Backend",
+          "advanced": true,
+          "tooltip": "Standard uses the V3.6 target-preserving continuation path. With Audio Continuity enabled, Masked AV currently uses Balanced 22; Fast 5, Strong 39, and Auto safely use Reference Context. Compatibility restores the V3.5 Reference Context path for older workflows or comparison. Run Storage identity follows the resolved transport before execution begins."
+        }
+      ],
+      "generation_mode": [
+        [
+          "Full Run",
+          "Review Each Chunk"
+        ],
+        {
+          "default": "Full Run",
+          "display_name": "Generation Mode",
+          "tooltip": "Full Run preserves normal Production execution. Review Each Chunk generates at most one new physical group per Queue and requires Run Storage = Save + Auto Resume."
+        }
+      ],
+      "review_action": [
+        [
+          "Continue / Next",
+          "Regenerate Current",
+          "Finish Remaining"
+        ],
+        {
+          "default": "Continue / Next",
+          "display_name": "Review Action",
+          "tooltip": "Continue / Next accepts the current review and advances. Regenerate Current and Finish Remaining are one-shot actions. Smart Regenerate requires Regenerate From = Auto."
+        }
+      ],
+      "take_group": [
+        "INT",
+        {
+          "default": 0,
+          "min": 0,
+          "max": 16,
+          "step": 1,
+          "advanced": true,
+          "display_name": "Selected Take Group",
+          "tooltip": "Internal Render History selection. Use the visible Previous/Next Take controls instead of editing this value directly."
+        }
+      ],
+      "take_revision_id": [
+        "STRING",
+        {
+          "default": "",
+          "advanced": true,
+          "display_name": "Selected Take Revision",
+          "tooltip": "Immutable revision selected by Render History. The visible Take controls manage this value from verified Run Storage data."
+        }
+      ],
+      "take_action": [
+        [
+          "Automatic",
+          "Use This Take",
+          "Continue From Here"
+        ],
+        {
+          "default": "Automatic",
+          "advanced": true,
+          "display_name": "Take Action",
+          "tooltip": "One-shot Render History action. Selecting a Take alone does not change the canonical branch; Queue normally after choosing an action."
+        }
+      ],
+      "size_source": [
+        [
+          "First Image",
+          "Manual",
+          "Legacy Aspect"
+        ],
+        {
+          "default": "Legacy Aspect",
+          "display_name": "Size Source",
+          "tooltip": "First Image preserves its aspect at the selected Resolution Preset. Manual uses Width and Height exactly. Legacy Aspect is accepted only for saved-workflow and API compatibility."
+        }
+      ],
+      "width": [
+        "INT",
+        {
+          "default": 736,
+          "min": 32,
+          "max": 16384,
+          "step": 32,
+          "display_name": "Width",
+          "tooltip": "Exact output width in Manual mode. Use a multiple of 32. Manual mode is the normal choice for T2VA or workflows without a First Image."
+        }
+      ],
+      "height": [
+        "INT",
+        {
+          "default": 416,
+          "min": 32,
+          "max": 16384,
+          "step": 32,
+          "display_name": "Height",
+          "tooltip": "Exact output height in Manual mode. Use a multiple of 32. Manual mode is the normal choice for T2VA or workflows without a First Image."
+        }
+      ]
+    },
+    "optional": {
+      "first_frame": [
+        "IMAGE",
+        {
+          "tooltip": "First Image conditioning for I2VA or FL2VA. With Output Size = First Image, its aspect ratio also defines the output canvas. Leave it disconnected and use Manual Width/Height for T2VA."
+        }
+      ],
+      "last_frame": [
+        "IMAGE",
+        {
+          "tooltip": "Optional last-frame anchor for FL2VA. Leave disconnected for T2VA and normal I2VA."
+        }
+      ],
+      "reference_video_1": [
+        "IMAGE",
+        {
+          "display_name": "Timeline Video Frames",
+          "tooltip": "24 fps IMAGE frames from the Video Adapter. Follow Timeline selects successive physical output intervals; Repeat Reference keeps the legacy shared-prefix guide. Source audio is not included. Follow is Experimental; this is not a hard motion-copy control."
+        }
+      ],
+      "driving_audio": [
+        "AUDIO",
+        {
+          "display_name": "Driving Audio",
+          "tooltip": "Optional original audio timeline. It is used as native H3 guide conditioning and selected unchanged for final output."
+        }
+      ],
+      "audio_vae": [
+        "VAE",
+        {
+          "display_name": "Driving Audio VAE",
+          "tooltip": "Required only when Driving Audio is connected. Uses the same Audio VAE encode path as ComfyUI Core MiniMax H3 Add Guide."
+        }
+      ],
+      "reference_audio_1": [
+        "AUDIO",
+        {
+          "display_name": "Reference Audio (Legacy)",
+          "tooltip": "Optional standalone audio reference for H3 conditioning. It is not the audio track of Video Guide Frames. Unlike Driving Audio, it does not replace the generated final audio."
+        }
+      ],
+      "reference_audio_vae": [
+        "VAE",
+        {
+          "display_name": "Reference Audio VAE (Legacy)",
+          "tooltip": "Required only when Reference Audio is connected. It encodes the reference for H3 conditioning; generated audio remains the output."
+        }
+      ],
+      "guide": [
+        "H3_CONTINUUM_STILL_IMAGE_GUIDE",
+        {
+          "display_name": "Still Image Guide (Optional)",
+          "tooltip": "Optional V3.7 Still Image Guide. Only the owning physical sampling group receives the Core minimax_keyframes entry."
+        }
+      ],
+      "audio_references": [
+        "H3_CONTINUUM_AUDIO_REFERENCES",
+        {
+          "display_name": "Reference Audios (Optional)",
+          "tooltip": "Optional ordered bundle from H3 Continuum Reference Audios. Do not connect it together with the legacy single Reference Audio input."
+        }
+      ],
+      "video_reference_mode": [
+        [
+          "Follow Timeline",
+          "Repeat Reference"
+        ],
+        {
+          "default": "Repeat Reference",
+          "display_name": "Video Reference Mode",
+          "tooltip": "Experimental. Follow Timeline selects the source interval for each physical generation group, then continues without video reference after the source ends. Repeat Reference preserves the previous Video Guide behavior: the same bounded prefix for every group. This is independent of Prompt Format. Input frames must be 24 fps."
+        }
+      ],
+      "reference_images": [
+        "H3_CONTINUUM_REFERENCE_IMAGES_V39",
+        {
+          "display_name": "Reference Images (Optional)",
+          "tooltip": "Connect H3 Continuum Reference Images V3.9; assign chunks there."
+        }
+      ]
+    },
+    "hidden": {
+      "prompt": "PROMPT",
+      "unique_id": "UNIQUE_ID"
+    }
+  },
+  "outputs": [
+    "LATENT",
+    "LATENT",
+    "H3_CONTINUUM_ASSEMBLY_PLAN",
+    "STRING",
+    "AUDIO",
+    "H3_CONTINUUM_REFINE_CONTEXT"
+  ],
+  "names": [
+    "video_latents",
+    "audio_latents",
+    "assembly_plan",
+    "status",
+    "driving_audio",
+    "refine_context"
+  ],
+  "list": [
+    true,
+    true,
+    false,
+    false,
+    false,
+    false
+  ]
+}

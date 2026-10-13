@@ -2,6 +2,13 @@
 (() => {
   const I18N = {
     tr: {
+      "scene.advanced": "Stil ve diğer ayrıntılar",
+      "cinema.saveHint": "Alanı terk ettiğinde değişiklikler otomatik kaydedilir",
+      "cinema.savingStatus": "Kaydediliyor…",
+      "cinema.savedStatus": "Kaydedildi",
+      "cinema.failedStatus": "Kaydedilemedi — tekrar Kaydet’e bas",
+      "scene.saveHint": "Bu penceredeki değişiklikleri uygulamak için Kaydet’e bas. Ek ayrıntılar isteğe bağlıdır.",
+
       "lora.swapInputs": "Yüz/karakter değiştirme LoRA’sı için kaynak video ve hedef karakterin referans görseli gerekli. Referans veya Motion Transfer modunu kullan.",
       "lora.filmTools": "Kıyafet sayfaları ve video+ses latent devam araçları ComfyUI workflow’larında kullanılabilir.",
       "lora.openFilmTools": "Film araçlarını ComfyUI’de aç",
@@ -1067,7 +1074,8 @@
       "support.hint": "Buy me a coffee · sorun · fikir",
       "support.sponsorTitle": "Bu stüdyoyu destekle",
       "support.sponsorBody": "Desteğiniz H3 Studio, M3 Studio ve diğer projelerimi geliştirmeye daha fazla zaman ayırmama yardımcı olur. Buy me a coffee üzerinden geliştirici profilimi destekleyebilirsiniz.",
-      "support.donorsTitle": "Destekleyenler",
+      "support.donorsTitle": "Sponsorlar",
+      "support.firstSponsor": "İlk sponsorumuz. $25 desteği ve geri bildirimleriyle uygulamanın gelişimine katkıda bulunuyor. Teşekkürler!",
       "support.donorsEmpty": "İlk bağış senin adını buraya yazar.",
       "donor.thanks": "Teşekkürler",
       "donor.join": "Sen de destekle",
@@ -1375,6 +1383,13 @@
       "clip.empty": "(prompt yok)",
     },
     en: {
+      "scene.advanced": "Style and other details",
+      "cinema.saveHint": "Changes save automatically when you leave a field",
+      "cinema.savingStatus": "Saving…",
+      "cinema.savedStatus": "Saved",
+      "cinema.failedStatus": "Could not save — press Save to retry",
+      "scene.saveHint": "Press Save to apply changes in this editor. Additional details are optional.",
+
       "lora.swapInputs": "Face/character swap requires a source video and a replacement character image. Use Reference or Motion Transfer mode.",
       "lora.filmTools": "Outfit sheets and video/audio latent continuation tools are available as ComfyUI workflows.",
       "lora.openFilmTools": "Open film tools in ComfyUI",
@@ -2440,7 +2455,8 @@
       "support.hint": "Buy me a coffee · bugs · ideas",
       "support.sponsorTitle": "Support this studio",
       "support.sponsorBody": "Your support helps me dedicate more time to H3 Studio, M3 Studio, and my other projects. You can support my developer profile through Buy me a coffee.",
-      "support.donorsTitle": "Supporters",
+      "support.donorsTitle": "Sponsors",
+      "support.firstSponsor": "Our first sponsor. Their $25 support and feedback help improve the application. Thank you!",
       "support.donorsEmpty": "The first donation puts your name here.",
       "donor.thanks": "Thank you",
       "donor.join": "Support the studio",

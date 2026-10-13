@@ -84,19 +84,8 @@
   $('btn-workflow-guide').onclick = () => {
     const old = $('workflow-guide'); if (old) old.remove();
     const dialog = document.createElement('dialog'); dialog.id = 'workflow-guide';
-    dialog.innerHTML = tr() ? `
-      <h2>H3 Studio kullanım rehberi</h2>
-      <h3>Tek klip ve ses — Sahne</h3><ol><li>Yeni video, çözünürlük ve süreyi seç. İlk deneme için 480p ve 5 saniye kullan.</li><li>Ses kartından dosya seç. Gerekirse başlangıç/bitiş saniyelerini gir; Sesi hazırla ve önizle.</li><li>Ses referansı, modelin sesini yönlendirir. Orijinal ses seçeneği kaydı sonuç videoya ekler. İkisi de tek başına dudak senkronu sağlamaz.</li><li>Prompta görüntüyü, hareketi ve kamerayı yaz; Üret'e bas. Bu ses kartı tek klip Üret düğmesi içindir.</li></ol>
-      <h3>İlk filmin — Direktör</h3><ol><li>Direktör'e geç. Karakter, yaratık ve mekân kartlarını ekle veya JSON içe aktar. Görsel kullanacak kartların referanslarını hazırla. Karakter LoRA'sı kullanıyorsan anahtarı açıp uyumlu LoRA seç.</li><li>AI Yönetmen'e hikâyeni, hedef süreyi ve klip süresini yaz. Oluşturulan sahneleri üretmeden önce incele.</li><li>Yeni video yeni kadraj oluşturur. Continue önceki klibin son karesinden sürer; kadraj değişimi için Yeni video kullan.</li><li>Önce tek sahneyi test et. Sonra bölümün Üret düğmesiyle eksik sahneleri sıraya al. Klipleri birleştir ile sonucu oluştur.</li></ol>
-      <h3>Şarkı ve sözlerle klip</h3><p>AI Yönetmen panelindeki müzik akışında şarkıyı yükle, görsel konsepti ve sözleri gir. Söz zamanlarını oluştur ve elle kontrol et; otomatik zamanlar taslaktır. Sahne planını oluştur, incele, ardından üretime al. Şarkılı final orijinal kaydı bitmiş kliplerle birleştirir. Zamanlanmış sahneler otomatik dudak senkronu anlamına gelmez.</p>
-      <p>Örnek hikâye: Lara dere kenarında uyur; atı su içer. Kamera değişir, Lara uyanır ve ata yürür. 30 saniye, 5 saniyelik altı klip; iki sabit kamera açısı.</p>
-      <button type="button" class="btn-secondary">Kapat</button>` : `
-      <h2>H3 Studio workflow guide</h2>
-      <h3>One clip with audio — Scene</h3><ol><li>Select New video, resolution and duration. Start with 480p and five seconds.</li><li>Select a file in the Audio card. Set optional start/end times, then Prepare audio and preview it.</li><li>Audio reference guides the model's generated sound. Original audio adds your recording to the finished clip. Neither option alone creates lip sync.</li><li>Describe the visuals, action and camera in your prompt, then Generate. This audio card applies to the single-clip Generate button.</li></ol>
-      <h3>Your first film — Director</h3><ol><li>Open Director. Add character, creature and location cards or import JSON. Prepare visual references for image-based assets. For a character LoRA, enable Use LoRA and select a compatible model.</li><li>Give AI Director your story, total duration and clip duration. Review the scenes before producing.</li><li>New video creates a new camera shot. Continue begins from the previous clip's final frame. Use New video when the camera framing changes.</li><li>Test one scene first. Generate on the chapter queues its missing scenes. Merge clips to assemble the result.</li></ol>
-      <h3>A song with timed lyrics</h3><p>In AI Director's music workflow, upload your song and enter the visual concept and lyrics. Create lyric timings and check them manually; automatic timings are a draft. Create and review the scene plan, then queue it. The song final combines your original recording with the finished clips. Timed scenes do not automatically provide lip sync.</p>
-      <p>Example story: Lara sleeps beside a stream while her horse drinks. Cut to a second fixed camera; Lara wakes and walks to the horse. Thirty seconds, six five-second clips, two camera positions.</p>
-      <button type="button" class="btn-secondary">Close</button>`;
+    dialog.setAttribute('aria-label', label('Scene and Director guide', 'Sahne ve Direktör rehberi'));
+    dialog.innerHTML = window.h3StudioGuideHTML(tr());
     dialog.querySelector('button').onclick = () => dialog.close();
     dialog.addEventListener('close', () => dialog.remove()); document.body.append(dialog); dialog.showModal();
   };

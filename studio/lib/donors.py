@@ -176,7 +176,7 @@ async def list_donors() -> dict[str, Any]:
     login = cfg["github_login"]
     oc_names = await _cached_names(_OC_CACHE, slug, lambda: _fetch_opencollective(slug))
     gh_names = await _cached_names(_GH_CACHE, login, lambda: _fetch_github_sponsors(login))
-    names = _unique([*cfg["names"], *gh_names, *oc_names])
+    names = _unique(["Diamond204a", *cfg["names"], *gh_names, *oc_names])
     return {
         "names": names,
         "opencollective_slug": slug,

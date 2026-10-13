@@ -1651,11 +1651,17 @@
     return payload;
   }
 
+  function cinemaSaveStatus(key) {
+    const el = $("cinema-save-status");
+    if (el) { el.dataset.i18n = key; el.textContent = tt(key); }
+  }
+
   async function saveCinema(quiet) {
     if (!state.cinemaLoaded && !(state.cinema && (state.cinema.shots || []).length)) {
       return false;
     }
     const gen = ++cinemaSaveGen;
+    cinemaSaveStatus("cinema.savingStatus");
     const payload = cinemaPayload();
     try {
       const latest = await fetch("/api/cinema").then((r) => r.json());
@@ -1749,10 +1755,12 @@
         cinemaForceLocalShots = false;
         cinemaForceLocalChapters = false;
       }
+      cinemaSaveStatus("cinema.savedStatus");
       if (!quiet) toast(tt("cinema.saved"));
       return true;
     } catch (e) {
       if (controller.signal.aborted || gen !== cinemaSaveGen) return false;
+      cinemaSaveStatus("cinema.failedStatus");
       if (!quiet) toast(String(e.message || e));
       return false;
     }
@@ -4931,6 +4939,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           silent_audio: !filmMode,
           link_continue: true,
           seamless: wantSeamless,
+          seamless_backend: globalThis.getDirectorContinuumBackend?.() || 'multishot',
           prepare_sheets: !wantSeamless,
           force_sheets: !!$("cinema-force-sheets")?.checked,
           image_provider: normalizeCinemaImageProvider(cine.image_provider),
@@ -5519,6 +5528,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("btn-download")?.setAttribute("href", "#");
     state.playerCleared = true;
     state.selectedJobId = null;
+    document.dispatchEvent(new CustomEvent('h3-player-clip', {detail:null}));
     setClipPrompt("");
     if (!quiet) tToast("toast.playerClosed");
   }
@@ -5552,6 +5562,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       (jobId && state.galleryItems && state.galleryItems.find((j) => j.id === jobId)) ||
       null;
     if (job && prompt !== undefined) setClipPrompt(prompt, jobProductionMeta(job), job.seed);
+    document.dispatchEvent(new CustomEvent('h3-player-clip', {detail:job}));
     const name =
       downloadName ||
       job?.download_name ||
@@ -8950,6 +8961,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
                   : "t2v",
         continue_from_job_id: isContinue ? state.continueFrom : null,
         audio_continuity: isContinue && !!$("continue-audio-continuity")?.checked,
+        ...window.getVideoWorkflowPayload?.(),
         purpose: state.projectPurpose || null,
         silent_audio: state.projectSilent || state.projectPurpose === "music_video",
       };
@@ -11472,7 +11484,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       empty?.classList.remove("hidden");
       return;
     }
-    document.body.classList.add("has-donors");
+    document.dispatchEvent(new CustomEvent("h3-donors", { detail: { names: clean } }));
     if (bar) {
       bar.classList.remove("hidden");
       bar.hidden = false;
@@ -11514,7 +11526,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         names = [];
       }
     }
-    setDonorRoll(names);
+    setDonorRoll(["Diamond204a", ...names]);
   }
 
   $("btn-donor-ticker")?.addEventListener("click", () => $("btn-support")?.click());
@@ -11777,6 +11789,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-director-reset")?.addEventListener("click", () => void resetDirectorSession());
 
   document.addEventListener("h3-lang", () => {
+    const engineHeading = $("h3-engine-control")?.querySelector('h3');
+    if (engineHeading) engineHeading.textContent = window.h3Lang?.() === 'en' ? 'Video engine' : 'Video motoru';
     if ($("h3-engine-control")) void renderH3Acceleration($("h3-engine-control"));
     syncGalleryPhotoToolbar();
     syncGalleryVideoToolbar();

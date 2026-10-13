@@ -67,8 +67,9 @@ class Enhancements(unittest.TestCase):
 
     def test_hyperflow_uses_patch_and_trained_sigmas_instead_of_plain_lora(self):
         spec = loras.find_spec(lora_id='hyperflow-8step')
-        graph = build_t2v_prompt(text='A cloud', width=864, height=480, length=121,
-                                lora_name=spec['file'], lora_strength=1.0, sage_attention='disabled')
+        with patch('lib.comfy.apply_spectrum', side_effect=lambda g:g):
+            graph = build_t2v_prompt(text='A cloud', width=864, height=480, length=121,
+                                    lora_name=spec['file'], lora_strength=1.0, sage_attention='disabled')
         self.assertEqual(graph['7']['class_type'], 'ApplyHyperFlowH3')
         self.assertEqual(graph['14']['inputs']['sigmas'], ['7', 1])
         self.assertEqual(graph['17']['inputs']['sampler_name'], 'euler')

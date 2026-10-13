@@ -1,5 +1,26 @@
 # Optional Spectrum acceleration
 
+## Local performance results
+
+Test system: NVIDIA RTX 5060 Ti 16 GB, AMD Ryzen 5 5600X (6 cores), 32 GB RAM,
+Windows, native H3 Ref2VA INT8, PyTorch 2.10.0+cu130 and ComfyUI 0.36.0.
+No additional speed LoRA; SageAttention disabled.
+
+A matched 1056×608, 14-step, approximately 10-second test took 1575.058 seconds
+without Spectrum and 966.344 seconds with Spectrum: **38.65% less total time**
+(about 1.63× throughput). Both Spectrum passes are included.
+
+Recent 1920×1088, five-second, 17-step presenter jobs took around 35 minutes.
+A recalled one-hour baseline would imply roughly 42% less time, but that baseline
+was not verified in a matched 1088p comparison. Do not present it as a measured
+1088p speedup. See the [announcement draft](spectrum-update-post.md).
+
+With offline smoothing replay enabled, a 17-step job may show 34 progress units:
+capture plus replay. This is not an upscaling or face-refinement pass. Spectrum
+does not solve continuation drift or guarantee that longer videos fit in VRAM.
+
+## Usage and integration
+
 Spectrum is installed as a separate ComfyUI custom node. SageAttention remains
 disabled. Native CUDA kernels, DynamicVRAM and async offloading are unchanged.
 

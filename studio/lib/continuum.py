@@ -1,0 +1,74 @@
+"""Pinned Continuum graph contract; native AV chunks, no MP4 last-frame chaining."""
+import json
+import copy
+from pathlib import Path
+from .comfy import build_t2v_prompt
+
+SAMPLER = 'H3ContinuumSamplerV39'
+SCHEMA = json.loads(Path(__file__).with_name('continuum_schema.json').read_text(encoding='utf-8'))
+
+def build(job):
+    prompts = job.get('continuum_prompts') or [job['prompt']]
+    duration = int(job.get('continuum_chunk_seconds') or job['duration'])
+    if not 1 <= len(prompts) <= 16:
+        raise ValueError('Continuum supports 1–16 chunks per run')
+    if not 4 <= duration <= 15:
+        raise ValueError('Continuum supports 4–15 second chunks in Studio')
+    graph = build_t2v_prompt(text='', width=job['width'], height=job['height'], length=124,
+                            seed=job['seed'], steps=job['steps'], models=job['h3_models'],
+                            sampler=job.get('sampler') or 'res_multistep',
+                            scheduler=job.get('scheduler') or 'simple', sage_attention='disabled',
+                            lora_name=job.get('lora_name'), lora_strength=job.get('lora_strength') or 0.75)
+    # Retain the already-patched native model branch and scheduler.
+    model = graph['16']['inputs']['model']
+    sigmas = graph['14']['inputs']['sigmas']
+    keep = set()
+    def visit(key):
+        if key in keep: return
+        keep.add(key)
+        for value in graph[key]['inputs'].values():
+            if isinstance(value,list) and len(value)==2 and str(value[0]) in graph:
+                visit(str(value[0]))
+    for key in (model[0],sigmas[0],'13','11','24','17'): visit(key)
+    graph = {k:v for k,v in graph.items() if k in keep}
+    if job.get('continuum_base_graph'):
+        graph = copy.deepcopy(job['continuum_base_graph'])
+        model = job['continuum_model_link']
+        sigmas = job['continuum_sigma_link']
+    else:
+        job['continuum_base_graph'] = copy.deepcopy(graph)
+        job['continuum_model_link'] = model
+        job['continuum_sigma_link'] = sigmas
+    inputs = {}
+    for key, spec in SCHEMA['inputs']['required'].items():
+        if len(spec) > 1 and 'default' in spec[1]:
+            inputs[key] = spec[1]['default']
+    inputs.update(model=model, clip=['13',0], video_vae=['11',0], sampler=['17',0], sigmas=sigmas,
+                  sequence_prompt='\n---\n'.join(prompts), prompt_mode='List',
+                  chunks=len(prompts), chunk_seconds=duration, base_seed=job['seed'],
+                  size_source='Manual', width=job['width'], height=job['height'],
+                  run_storage='Save + Auto Resume', run_name=job['continuum_run'],
+                  project_id=job['continuum_run'], generation_mode='Full Run',
+                  audio_continuity=not job.get('silent_audio',False))
+    if job.get('first_frame_name'):
+        graph['c_first']=dict(class_type='LoadImage',inputs={'image':job['first_frame_name']})
+        inputs['first_frame']=['c_first',0]
+    refs=job.get('ref_images') or []
+    if refs:
+        ri={'reference_use':'All chunks', **{f'reference_r{i}_chunks':'off' for i in range(1,10)}}
+        for i, name in enumerate(refs[:9],1):
+            graph[f'c_ref{i}']=dict(class_type='LoadImage',inputs={'image':name})
+            ri[f'reference_image_{i}']=[f'c_ref{i}',0]
+        graph['c_refs']=dict(class_type='H3ContinuumReferenceImagesV39',inputs=ri)
+        inputs['reference_images']=['c_refs',0]
+    graph['c_sample']=dict(class_type=SAMPLER,inputs=inputs)
+    graph['c_video']=dict(class_type='VAEDecode',inputs={'samples':['c_sample',0],'vae':['11',0]})
+    graph['c_audio']=dict(class_type='VAEDecodeAudio',inputs={'samples':['c_sample',1],'vae':['24',0]})
+    graph['c_finish']=dict(class_type='H3ContinuumAssembleSeamV35',inputs={
+        'images':['c_video',0],'audio':['c_audio',0],'assembly_plan':['c_sample',2],
+        'exact_total_duration':True,'audio_seam':'Auto','video_seam':'Analyze Only',
+        'buffer_backend':'Auto','diagnostics':'Basic'})
+    graph['91']=dict(class_type='CreateVideo',inputs={'images':['c_finish',0],'audio':['c_finish',1],'fps':24})
+    graph['92']=dict(class_type='SaveVideo',inputs={'video':['91',0],
+        'filename_prefix':f"video/H3_Studio/{job['id'][:8]}",'format':'auto','codec':'auto'})
+    return graph

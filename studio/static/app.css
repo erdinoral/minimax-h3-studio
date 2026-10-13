@@ -4821,3 +4821,25 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 .sponsor-banner.is-showing .sponsor-banner-message { visibility: visible; animation: sponsor-sign-pass 7s linear both; }
 @keyframes sponsor-sign-pass { from { transform: translateX(0); } to { transform: translateX(calc(-100% - var(--sponsor-travel, 1100px))); } }
 @media (prefers-reduced-motion: reduce) { .sponsor-banner.is-showing .sponsor-banner-message { animation: none; inset: 0 8px; overflow: hidden; text-overflow: ellipsis; } }
+.scene-generation-settings > #video-workflow-controls { grid-column: 1 / -1; margin-bottom: 0; }
+/* Scene's top selectors also control continuation duration and quality. */
+#panel-mode-continue :is(#cont-dur-label, #dur-chips-cont, #cont-quality-label, #quality-chips-cont, #quality-hint-cont) { display: none !important; }
+.continuum-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.continuum-toggle { display:flex; align-items:center; gap:8px; cursor:pointer; margin:0; }
+.continuum-toggle input[type=checkbox] { appearance:none; width:40px; height:23px; border-radius:20px; background:#43506a; position:relative; margin:0; cursor:pointer; }
+.continuum-toggle input:checked { background:#8274ef; }
+.continuum-toggle input::after { content:''; position:absolute; width:17px; height:17px; top:3px; left:3px; border-radius:50%; background:white; transition:transform .15s; }
+.continuum-toggle input:checked::after { transform:translateX(17px); }
+.continuum-toggle input:disabled { opacity:.45; cursor:not-allowed; }
+.continuum-layout { display:flex; gap:8px; margin:12px 0; }
+.continuum-segment { display:grid; gap:6px; border-top:1px solid var(--border); padding:10px 0; }
+.continuum-segment textarea { width:100%; box-sizing:border-box; resize:vertical; }
+.continuum-segment button { justify-self:end; }
+/* Neon sponsor sign above the player. */
+.sponsor-banner { height:30px; flex-basis:30px; border:1px solid #ef444455; background:linear-gradient(180deg,#190c16,#080b13); box-shadow:inset 0 0 12px #ff304012,0 0 8px #ff304018; }
+.sponsor-banner.is-showing { border-color:#ff5366aa; box-shadow:inset 0 0 16px #ff304025,0 0 10px #ff304044; }
+.sponsor-banner-message { color:#ffb1b8; font-weight:700; line-height:30px; letter-spacing:.09em; text-shadow:0 0 2px #fff,0 0 5px #ff6579,0 0 12px #ff3048,0 0 22px #f51739; }
+.sponsor-banner.is-showing::after { content:''; position:absolute; inset:0; pointer-events:none; background:repeating-linear-gradient(0deg,transparent 0 3px,#0002 3px 4px); border-radius:inherit; }
+.sponsor-banner.is-showing { animation:sponsor-neon-wake .45s ease-out; }
+@keyframes sponsor-neon-wake { 0% { opacity:.55; } 25% { opacity:1; } 40% { opacity:.8; } 100% { opacity:1; } }
+@media (prefers-reduced-motion:reduce) { .sponsor-banner.is-showing { animation:none; } }

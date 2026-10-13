@@ -36,6 +36,21 @@ class SpectrumTests(unittest.TestCase):
                     current['inputs']['model'] = old_node['inputs']['model']
                 self.assertEqual(current, old_node)
 
+    def test_native_engine_aliases_patch_guider_and_scheduler(self):
+        names = ('minimax_h3_fl2va_pruned_int8_convrot.safetensors',
+                 'minimax_h3_ref2va_pruned_int8_convrot.safetensors',
+                 'minimaxH3Singularity_prunedInt8.safetensors',
+                 'Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors',
+                 'minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors')
+        for name in names:
+            with self.subTest(model=name), patch.object(Path, 'read_text', return_value='{"spectrum_enabled": true}'):
+                graph = build_t2v_prompt(text='test', models={'unet': name})
+            patches = [(key, node) for key, node in graph.items() if node['class_type']=='SpectrumApplyMiniMaxH3']
+            self.assertEqual(len(patches), 1)
+            for node in graph.values():
+                if node['class_type'] in ('BasicGuider', 'BasicScheduler'):
+                    self.assertEqual(node['inputs']['model'], [patches[0][0], 0])
+
     def test_multishot_custom_sampler_is_left_unchanged(self):
         with patch.object(Path, 'read_text', return_value='{}'):
             baseline = build_multishot_prompt(script='test')

@@ -1,10 +1,20 @@
 (() => {
   const $ = id => document.getElementById(id);
-  let caps = {}, clip = null, method = 'standard', chunks = 1, prepare = false, directorBackend='multishot';
+  let caps = {}, clip = null, method = 'standard', chunks = 1, layout = 'single', segments = [''], directorBackend='multishot';
   const text = (tr, en) => window.h3Lang?.() === 'en' ? en : tr;
   window.getVideoWorkflowPayload = () => ({continuation_method:method,
-    continuum_chunks:chunks, prepare_refine:prepare && method === 'standard'});
+    continuum_chunks:layout==='segments'?segments.length:chunks,
+    ...(method==='continuum' && layout==='segments'?{continuum_segment_prompts:segments.map(p=>p.trim())}:{}), prepare_refine:false});
+  window.getContinuumMainPrompt = () => method==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
   window.getDirectorContinuumBackend = () => directorBackend;
+  function updateTotal() {
+    const target=$('continuum-total');if(!target)return;
+    const selected=document.querySelector('#dur-chips .chip.on');
+    let seconds=Number(selected?.dataset.dur)||5;
+    const continuing=document.querySelector('#panel-mode-continue')?.classList.contains('hidden')===false;
+    const count=layout==='segments'?segments.length:chunks;
+    target.textContent=`${count} ${text('bölüm','sections')} × ${seconds} ${text('sn','s')} = ${count*seconds} ${text('sn','s')}${continuing?text(' yeni içerik; önceki diziye eklenir.',' of new content; appended to the previous sequence.'):''}`;
+  }
   function render() {
     const legacyAudio=$('continue-audio-continuity')?.closest('label');
     if(legacyAudio)legacyAudio.hidden=method==='continuum';
@@ -17,19 +27,28 @@
     }
     const host = $('video-workflow-controls');
     if (!host) return;
-    host.innerHTML = `<label>${text('Üretim yöntemi','Generation method')} <small>${text('Deneysel','Experimental')}</small></label>
-      <select id="h3-continuation-method"><option value="standard">${text('Standart H3','Standard H3')}</option>
-      <option value="continuum" ${caps.continuum_ready?'':'disabled'}>Continuum</option></select>
-      <div id="h3-continuum-options" ${method==='continuum'?'':'hidden'}>
-      <label>${text('Yeni bölüm sayısı','New chunks')} <input id="h3-continuum-chunks" type="number" min="1" max="16" value="${chunks}"></label>
-      <p class="muted">${text('1–16 bölüm. Devam için Continuum kaydı gerekir. Seed, adım, çözünürlük ve ses devamlılığı kaynak kayıttan alınır. Yeni video tüm diziyi içerir; önceki kayıt korunur.','1–16 chunks. Continuation requires a Continuum record. Seed, steps, resolution and audio continuity come from the source record. The new video contains the complete sequence; the source is preserved.')}</p></div>
-      <label class="check"><input id="h3-prepare-refine" type="checkbox" ${prepare && method==='standard'?'checked':''} ${caps.refine_ready && method==='standard'?'':'disabled'}> ${text('H3 Refine için kayıt hazırla','Prepare H3 Refine recording')}</label>
-      <p class="muted">${text('Refine kaydı ek RAM ve disk kullanır. Tek klipte önizleme ve son geçiş kapalıyken kullanılabilir.','Refine recording uses additional RAM and disk. Available for single clips with preview and post-pass disabled.')}</p>
-      ${caps.continuum_ready && caps.refine_ready?'':`<p class="muted">${text('Araçlar henüz yüklenmemiş. Kuyruk bitince Studio’yu yeniden başlat.','Tools are not loaded yet. Restart Studio after the queue finishes.')}</p>`}`;
-    $('h3-continuation-method').value = method;
-    $('h3-continuation-method').onchange = e => {method=e.target.value;render();};
-    $('h3-continuum-chunks').onchange = e => {chunks=Math.max(1,Math.min(16,Number(e.target.value)||1));e.target.value=chunks;};
-    $('h3-prepare-refine').onchange = e => {prepare=e.target.checked;};
+    host.innerHTML = `<div class="continuum-heading"><strong>Continuum <small>${text('Deneysel','Experimental')}</small></strong>
+      <label class="continuum-toggle"><input id="h3-continuum-toggle" type="checkbox" ${method==='continuum'?'checked':''} ${caps.continuum_ready?'':'disabled'}><span>${method==='continuum'?'ON':'OFF'}</span></label></div>
+      <div ${method==='continuum'?'':'hidden'}>
+        <div class="continuum-layout"><button type="button" data-layout="single" class="chip ${layout==='single'?'on':''}">${text('Tek prompt','Single prompt')}</button><button type="button" data-layout="segments" class="chip ${layout==='segments'?'on':''}">${text('Bölüm bölüm','Per section')}</button></div>
+        ${layout==='single'?`<label>${text('Bölüm sayısı','Sections')} <input id="h3-continuum-chunks" type="number" min="1" max="16" value="${chunks}"></label>`:`<div id="continuum-segments"></div><button type="button" id="continuum-add" class="btn-secondary" ${segments.length>=16?'disabled':''}>+ ${text('Bölüm ekle','Add section')}</button>`}
+        <p id="continuum-total" class="muted"></p>
+      </div>
+      `;
+    $('h3-continuum-toggle').onchange=e=>{method=e.target.checked?'continuum':'standard';render();};
+    host.querySelectorAll('[data-layout]').forEach(b=>b.onclick=()=>{layout=b.dataset.layout;render();});
+    const count=$('h3-continuum-chunks');
+    if(count)count.onchange=e=>{chunks=Math.max(1,Math.min(16,Number(e.target.value)||1));e.target.value=chunks;updateTotal();};
+    const cards=$('continuum-segments');
+    if(cards)segments.forEach((prompt,i)=>{
+      const card=document.createElement('div');card.className='continuum-segment';
+      const title=document.createElement('label');title.textContent=`${text('Bölüm','Section')} ${i+1}`;
+      const area=document.createElement('textarea');area.value=prompt;area.rows=3;area.placeholder=text('Bu bölümde ne olacak?','What happens in this section?');area.setAttribute('aria-label',title.textContent);area.oninput=e=>{segments[i]=e.target.value;};
+      const remove=document.createElement('button');remove.type='button';remove.className='btn-secondary';remove.textContent=text('Kaldır','Remove');remove.disabled=segments.length===1;remove.onclick=()=>{segments.splice(i,1);render();};
+      card.append(title,area,remove);cards.append(card);
+    });
+    if($('continuum-add'))$('continuum-add').onclick=()=>{if(segments.length<16){segments.push('');render();}};
+    updateTotal();
     const button = $('btn-h3-refine');
     if (button) {
       button.innerHTML = `H3 Refine <small>${text('Deneysel','Experimental')}</small>`;
@@ -58,6 +77,7 @@
   }
   document.addEventListener('h3-player-clip',e=>{clip=e.detail;render();});
   document.addEventListener('change',e=>{if(e.target.id==='cinema-seamless-toggle')render();});
+  document.addEventListener('click',()=>requestAnimationFrame(updateTotal));
   document.addEventListener('h3-lang',render);
   render();fetch('/api/video-workflows').then(r=>r.ok?r.json():{}).then(data=>{caps=data;render();}).catch(()=>{});
 })();

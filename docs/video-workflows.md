@@ -58,3 +58,7 @@ Pinned source revisions (upstream licenses retained):
   `1ddcc33e9b674aaabbccc3808fe36e1a47bdd36d`; checkpoint from
   `LBH-123-AI/Minimax_h3_latent_Upscaler` at
   `3f941d5d182014dd5c0a5e16330420ee2d4aa0c6` (690.6 MB).
+
+## Scene Continuum controls
+
+Continuum uses an ON/OFF switch. Single prompt repeats the main prompt for the selected section count. Per section accepts one prompt card per new section; the server validates 1–16 non-empty cards, and existing sections count toward the 16-section run limit. New video starts a new run; Continue adds to the selected run. Duration and quality are selected once in the top Scene controls; Seed and Steps share a row.

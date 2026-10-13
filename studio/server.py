@@ -1242,6 +1242,7 @@ def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
 class GenerateBody(BaseModel):
     continuation_method: str = "standard"
     continuum_chunks: int = Field(1, ge=1, le=16)
+    continuum_segment_prompts: list[str] | None = None
     prepare_refine: bool = False
     scene_audio_file: Optional[str] = None
     scene_audio_mode: str = "reference"
@@ -2713,7 +2714,13 @@ async def generate(body: GenerateBody):
         if continue_from and not (parent and parent.get('continuum_run')):
             raise HTTPException(409, 'Source clip has no Continuum run record')
         prompts = list(parent.get('continuum_prompts') or []) if parent else []
-        prompts += [prompt_txt] * body.continuum_chunks
+        new_prompts = body.continuum_segment_prompts
+        if new_prompts is not None:
+            if not 1 <= len(new_prompts) <= 16 or any(not p.strip() for p in new_prompts):
+                raise HTTPException(400, 'Provide 1–16 non-empty Continuum segment prompts')
+            prompts += [p.strip() for p in new_prompts]
+        else:
+            prompts += [prompt_txt] * body.continuum_chunks
         if len(prompts) > 16:
             raise HTTPException(400, 'Continuum supports at most 16 chunks per run')
         continuum_data = {'continuum_run':parent['continuum_run'] if parent else 'studio_' + uuid.uuid4().hex,

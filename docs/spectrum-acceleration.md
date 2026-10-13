@@ -71,3 +71,7 @@ Source: https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3
 
 To revert, turn the switch off. This restores the native graph without a
 Spectrum node; installation does not replace model files or PyTorch packages.
+
+## Engine filename compatibility
+
+Spectrum model detection accepts native MiniMax H3, H3 Hybrid, and both installed and upstream Singularity filename variants. Native generation and continuation graphs route both guider and scheduler through the Spectrum patch when enabled. Model filename recognition is covered by automated graph tests; equivalent speed and quality across these engines have not been benchmarked. Restart Studio after updating when its queue is idle. Running jobs and saved Continuum model branches retain their original graph; toggling Spectrum or updating code does not retrofit them.

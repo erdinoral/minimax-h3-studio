@@ -1075,7 +1075,11 @@ def apply_sage_attention(
 def apply_spectrum(g: dict[str, Any]) -> dict[str, Any]:
     """Add the reviewed Spectrum defaults after LoRAs, only to native H3 graphs."""
     loaders = [n for n in g.values() if n.get("class_type") == "UNETLoader"]
-    if not any("minimax_h3" in str(n.get("inputs", {}).get("unet_name", "")).lower() for n in loaders):
+    def is_h3_loader(node):
+        filename = str(node.get("inputs", {}).get("unet_name", "")).replace("\\", "/").rsplit("/", 1)[-1]
+        normalized = "".join(char for char in filename.lower() if char.isalnum())
+        return normalized.startswith("minimaxh3")
+    if not any(is_h3_loader(n) for n in loaders):
         return g
     guider = next((n for n in g.values() if n.get("class_type") == "BasicGuider"), None)
     if not guider or "model" not in guider.get("inputs", {}):

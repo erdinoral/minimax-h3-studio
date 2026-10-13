@@ -8887,7 +8887,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function submitGenerate() {
-    const prompt = $("prompt").value.trim();
+    const prompt = window.getContinuumMainPrompt?.() ?? $("prompt").value.trim();
     if (!prompt) {
       tToast("toast.writePrompt");
       return false;

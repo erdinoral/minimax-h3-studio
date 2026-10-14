@@ -1071,7 +1071,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
         **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "character_manifest")},
-        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments")},
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
@@ -2752,6 +2752,8 @@ async def generate(body: GenerateBody):
                 else: h=value
             first_frame=parent.get('first_frame_name')
             ref_images=parent.get('ref_images') or []
+            if parent.get('continuum_ref_assignments'):
+                continuum_data['continuum_ref_assignments'] = {name:list(numbers)+list(range(len(previous)+1,len(prompts)+1)) for name,numbers in parent['continuum_ref_assignments'].items()}
         mode='continuum'
     job = {
         "id": str(uuid.uuid4()),
@@ -4356,8 +4358,9 @@ async def _queue_cinema_seamless(
     cinema_batch: str,
     silent: bool,
     purpose: str,
+    reference_plans: Optional[list[dict]] = None,
 ) -> dict:
-    """H3MultishotSampler jobs: packs of 8 shots (e.g. 8×5s = 40s). Extra shots = next take."""
+    """Queue native Multishot or Continuum takes with scoped scene references."""
     use_continuum = body.seamless_backend == 'continuum'
     if body.seamless_backend not in ('multishot', 'continuum'):
         raise HTTPException(400, 'Unknown seamless backend')
@@ -4385,25 +4388,35 @@ async def _queue_cinema_seamless(
     for take_i, (chunk_parsed, chunk_prompts) in enumerate(chunks, start=1):
         texts: list[str] = []
         bound_hits: list[dict] = []
-        for text in chunk_prompts:
-            bound = cinema.bind_prompt(
+        for local_i, text in enumerate(chunk_prompts):
+            bound = (reference_plans[shot_offset + local_i] if use_continuum and reference_plans else cinema.bind_prompt(
                 text,
                 existing_refs=[],
+                lib=lib,
                 lora_id=getattr(body, "lora_id", None) or "",
-            )
+            ))
             texts.append(bound["prompt"] if bound.get("hits") else text)
             bound_hits.append(bound)
         merged_hits = {"hits": []}
         for b in bound_hits:
             merged_hits["hits"].extend(b.get("hits") or [])
-        lora_src, _graph = _lora_src_for_shot(body, merged_hits, "t2v")
+        take_refs, ref_assignments = [], {}
+        if use_continuum:
+            try:
+                take_refs, ref_assignments = continuum.reference_plan(bound_hits)
+            except ValueError as error:
+                raise HTTPException(400, str(error))
+        reference_mode = 'ref' if take_refs else 't2v'
+        lora_src, _graph = _lora_src_for_shot(body, merged_hits, reference_mode)
         take_steps, take_sampler, take_scheduler = _with_lora_preset(
-            lora_src, steps, sampler, scheduler, graph="fl2va"
+            lora_src, steps, sampler, scheduler, graph="ref2va" if take_refs else "fl2va"
         )
         lora_bits = _lora_fields(lora_src)
         texts = [apply_selected_triggers(t,
             lora_id=lora_bits.get("lora_id") or "",
             file=lora_bits.get("lora_name") or "") for t in texts]
+        if take_refs:
+            texts = [continuum.align_reference_labels(text, bound.get("ref_images") or [], take_refs) for text,bound in zip(texts,bound_hits)]
         script = "\n---\n".join(texts)
         seed = (base_seed + take_i - 1) if body.seed >= 0 else (base_seed + take_i - 1) % (2**53)
         take_title = str((chunk_parsed[0] or {}).get("take_title") or "").strip()
@@ -4429,7 +4442,7 @@ async def _queue_cinema_seamless(
             "progress_label": label,
             "continue_from": None,
             "first_frame_name": None,
-            "ref_images": [],
+            "ref_images": take_refs,
             "progress": 0,
             "error": None,
             "output": None,
@@ -4437,7 +4450,8 @@ async def _queue_cinema_seamless(
             "mode": "continuum" if use_continuum else "multishot",
             **({'continuum_run':'studio_' + uuid.uuid4().hex,
                 'continuum_prompts':texts, 'continuum_chunk_seconds':body.duration,
-                'h3_models':h3_models.resolve('fl2va')} if use_continuum else {}),
+                'continuum_ref_assignments':ref_assignments,
+                'h3_models':h3_models.resolve('ref2va' if take_refs else 'fl2va')} if use_continuum else {}),
             "batch_index": take_i,
             "batch_total": take_total,
             "shot_count": len(chunk_parsed),
@@ -5839,11 +5853,11 @@ async def cinema_produce(body: CinemaProduceBody):
                       for p, shot in zip(prompts, to_queue)]
     # Multishot uses one adapter stack for the whole pack. Character identities
     # need separate per-shot stacks, including when all actors are LoRA-only.
-    if any(shot.get("first_frame_name") or plan["ref_images"]
+    if any(shot.get("first_frame_name") or (plan["ref_images"] and body.seamless_backend != "continuum")
            or any(cinema.uses_lora(a) for a in plan.get("hits", []))
            for shot, plan in zip(to_queue, identity_plans)):
         want_seamless = False
-    if want_seamless and still_lock:
+    if want_seamless and still_lock and body.seamless_backend != "continuum":
         want_seamless = False
     if want_seamless:
         queued = await _queue_cinema_seamless(
@@ -5855,6 +5869,7 @@ async def cinema_produce(body: CinemaProduceBody):
             cinema_batch=cinema_batch,
             silent=silent,
             purpose=purpose or "short_film",
+            reference_plans=identity_plans,
         )
     else:
         bb = BatchBody(
@@ -5892,7 +5907,7 @@ async def cinema_produce(body: CinemaProduceBody):
         )
         queued = await batch(bb)
     for i, job in enumerate(queued.get("jobs") or []):
-        if (job.get("mode") or "").lower() == "multishot":
+        if (job.get("mode") or "").lower() in ("multishot", "continuum"):
             continue
         if i < len(to_queue):
             job["shot_id"] = to_queue[i].get("id")

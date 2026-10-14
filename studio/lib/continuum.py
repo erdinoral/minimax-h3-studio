@@ -1,6 +1,7 @@
 """Pinned Continuum graph contract; native AV chunks, no MP4 last-frame chaining."""
 import json
 import copy
+import re
 from pathlib import Path
 from .comfy import build_t2v_prompt
 
@@ -17,6 +18,25 @@ def extend_prompts(previous, new_prompts, context=''):
         raise ValueError('Use separate section cards instead of --- separators inside a prompt')
     additions = [f"{context}\n\n{str(p).strip()}" if context else str(p).strip() for p in new_prompts]
     return list(previous) + additions
+
+
+def reference_plan(bindings):
+    refs=[]; assignments={}
+    for chunk,bound in enumerate(bindings,1):
+        for name in bound.get('ref_images') or []:
+            if name not in refs:
+                refs.append(name)
+            assignments.setdefault(name,[])
+            if chunk not in assignments[name]: assignments[name].append(chunk)
+    if len(refs)>9:
+        raise ValueError('A Continuum take supports at most 9 distinct reference images')
+    return refs,assignments
+
+
+def align_reference_labels(text, section_refs, take_refs):
+    active=[name for name in take_refs if name in section_refs]
+    mapping={i+1:active.index(name)+1 for i,name in enumerate(section_refs)}
+    return re.sub(r'<Picture\s+(\d+)>',lambda m:f"<Picture {mapping.get(int(m.group(1)),int(m.group(1)))}>",text)
 
 
 def has_spectrum(graph):
@@ -91,10 +111,13 @@ def build(job):
         inputs['first_frame']=['c_first',0]
     refs=job.get('ref_images') or []
     if refs:
-        ri={'reference_use':'All chunks', **{f'reference_r{i}_chunks':'off' for i in range(1,10)}}
+        assignments=job.get('continuum_ref_assignments')
+        ri={'reference_use':'Per chunk' if assignments else 'All chunks', **{f'reference_r{i}_chunks':'off' for i in range(1,10)}}
         for i, name in enumerate(refs[:9],1):
             graph[f'c_ref{i}']=dict(class_type='LoadImage',inputs={'image':name})
             ri[f'reference_image_{i}']=[f'c_ref{i}',0]
+            if assignments:
+                ri[f'reference_r{i}_chunks']=','.join(str(n) for n in assignments.get(name,[])) or 'off'
         graph['c_refs']=dict(class_type='H3ContinuumReferenceImagesV39',inputs=ri)
         inputs['reference_images']=['c_refs',0]
     graph['c_sample']=dict(class_type=SAMPLER,inputs=inputs)

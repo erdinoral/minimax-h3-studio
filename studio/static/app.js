@@ -4990,7 +4990,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         : "";
       toast(
         (scopeTxt ||
-          (data.still_lock && wantSeamless
+          (data.still_lock && wantSeamless && globalThis.getDirectorContinuumBackend?.() !== "continuum"
             ? tt("cinema.stillOverSeamless")
             : data.seamless
               ? tf("cinema.produceSeamless", {

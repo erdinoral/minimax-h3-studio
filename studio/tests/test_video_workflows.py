@@ -21,6 +21,20 @@ def broken_links(graph):
 
 
 class WorkflowContracts(unittest.TestCase):
+    def test_director_references_are_scoped_to_their_own_sections(self):
+        refs,assignments=continuum.reference_plan([{'ref_images':['actor.png','place.png']},{'ref_images':['place.png','other.png']}])
+        self.assertEqual(refs,['actor.png','place.png','other.png'])
+        self.assertEqual(continuum.align_reference_labels('<Picture 1> is B; <Picture 2> is the set.', ['other.png','place.png'], refs), '<Picture 2> is B; <Picture 1> is the set.')
+        self.assertEqual(assignments,{'actor.png':[1],'place.png':[1,2],'other.png':[2]})
+        job=dict(id='refs',prompt='Test',continuum_prompts=['One','Two'],duration=5,width=864,height=480,steps=12,seed=7,h3_models=DEFAULT_MODELS,continuum_run='refs',ref_images=refs,continuum_ref_assignments=assignments)
+        graph=continuum.build(job)
+        self.assertEqual(graph['c_refs']['inputs']['reference_use'],'Per chunk')
+        self.assertEqual(graph['c_refs']['inputs']['reference_r1_chunks'],'1')
+        self.assertEqual(graph['c_refs']['inputs']['reference_r2_chunks'],'1,2')
+        self.assertEqual(graph['c_refs']['inputs']['reference_r3_chunks'],'2')
+        self.assertEqual(graph['c_sample']['inputs']['reference_images'],['c_refs',0])
+        with self.assertRaises(ValueError): continuum.reference_plan([{'ref_images':[f'{i}.png' for i in range(10)]}])
+
     def test_continuum_removes_spectrum_without_dropping_model_dependencies(self):
         job=dict(id='draft',prompt='Test',duration=5,width=864,height=480,
                  steps=12,seed=7,h3_models=DEFAULT_MODELS,continuum_run='draft')
@@ -110,3 +124,32 @@ class RefineRequests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as rejected:
                 await env['refine_clip'](identifier,SimpleNamespace(quality='608'))
             self.assertEqual(rejected.exception.status_code,409)
+
+
+class DirectorContinuumQueue(unittest.IsolatedAsyncioTestCase):
+    async def test_resolved_scene_bindings_reach_director_job_and_reference_model(self):
+        from typing import Optional
+        async def capabilities(): return {'continuum_ready':True}
+        tree=ast.parse((Path(__file__).parents[1]/'server.py').read_text(encoding='utf-8'))
+        fn=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='_queue_cinema_seamless')
+        queued=[]
+        body=SimpleNamespace(seamless_backend='continuum',duration=5,quality='480',aspect='16:9',steps=12,seed=7,sampler='res_multistep',scheduler='simple')
+        ns={'CinemaProduceBody':SimpleNamespace,'Optional':Optional,'HTTPException':HTTPException,'workflow_capabilities':capabilities,
+            'continuum':continuum,'cinema':SimpleNamespace(group_seamless_takes=lambda parsed,prompts,pack:[(parsed,prompts)]),
+            'resolve_size':lambda *a:(864,480),'normalize_quality':lambda q:q,'time':time,'uuid':uuid,
+            '_lora_src_for_shot':lambda *a:({},None),'_with_lora_preset':lambda src,steps,sampler,scheduler,graph:(steps,sampler,scheduler),
+            '_lora_fields':lambda src:{},'apply_selected_triggers':lambda text,**kw:text,
+            'h3_models':SimpleNamespace(resolve=lambda mode:{'unet':mode}),'_sage_mode':lambda body:'disabled',
+            '_normalize_post_pass':lambda x:'','_voice_refs_from_hits':lambda hits:[],
+            '_lock':asyncio.Lock(),'_jobs':queued,'_save_jobs':lambda:None,'slog':SimpleNamespace(info=lambda *a,**kw:None)}
+        exec(compile(ast.Module(body=[fn],type_ignores=[]),'director-queue','exec'),ns)
+        plans=[{'prompt':'Actor enters','ref_images':['actor.png'],'hits':[]},
+               {'prompt':'Actor sits','ref_images':['actor.png','place.png'],'hits':[]}]
+        result=await ns['_queue_cinema_seamless'](body=body,parsed=[{},{}],prompts=['one','two'],lib={'film_id':'test'},audio={},cinema_batch='test',silent=True,purpose='test',reference_plans=plans)
+        job=result['jobs'][0]
+        self.assertEqual(job['mode'],'continuum')
+        self.assertEqual(job['lane'],'director')
+        self.assertEqual(job['h3_models']['unet'],'ref2va')
+        self.assertEqual(job['ref_images'],['actor.png','place.png'])
+        self.assertEqual(job['continuum_ref_assignments'],{'actor.png':[1,2],'place.png':[2]})
+        self.assertEqual(len(queued),1)

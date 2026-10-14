@@ -70,3 +70,7 @@ Optional Continuity settings include a shared character/setting prompt and Balan
 ### Spectrum and saved-run compatibility
 
 Continuum bypasses Spectrum because its mutable runtime binding is not observable by the pinned native storage contract: enabling it silently disabled prefix reuse and regenerated earlier sections. Ordinary native single-clip Spectrum remains available. Legacy Continuum runs saved with Spectrum are rejected for native continuation instead of rerendering their prefix. Originals remain untouched; begin a new Continuum run to use safe resume.
+
+### Director visual references
+
+Director Continuum now uses the resolved visual references from each scene, including explicit asset bindings. Unique images are collected per take (maximum 9) and assigned only to their relevant native chunks. Ref2VA is selected when visual references exist. Character portraits no longer force the ordinary per-shot fallback for Continuum; Multishot retains that fallback. Explicit scene first-frame guides and differing character LoRA stacks retain the separate per-shot route.

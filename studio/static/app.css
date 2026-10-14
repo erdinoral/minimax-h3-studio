@@ -4843,3 +4843,9 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 .sponsor-banner.is-showing { animation:sponsor-neon-wake .45s ease-out; }
 @keyframes sponsor-neon-wake { 0% { opacity:.55; } 25% { opacity:1; } 40% { opacity:.8; } 100% { opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .sponsor-banner.is-showing { animation:none; } }
+.cinema-library-modal { width:min(1100px,94vw); max-height:88vh; padding:18px; box-sizing:border-box; border:1px solid var(--border); border-radius:18px; background:var(--panel,#172338); color:var(--text); overflow:auto; }
+.cinema-library-modal::backdrop { background:#030914bc; backdrop-filter:blur(5px); }
+.cinema-library-modal > header { display:flex; align-items:center; justify-content:space-between; gap:12px; position:sticky; top:-18px; background:var(--panel,#172338); z-index:3; padding:10px 0; }
+.cinema-library-modal h2 { margin:0; font-size:1.1rem; }
+.cinema-library-modal #cinema-asset-stack { display:flex !important; width:100%; max-height:none; overflow:visible; }
+@media(max-width:600px) { .cinema-library-modal { padding:12px; width:96vw; max-height:92vh; } }

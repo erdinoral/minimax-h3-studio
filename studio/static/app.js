@@ -3778,7 +3778,36 @@ function setCinemaAssetTab(kind, tab, skipLibraryLoad = false) {
     if (t === "lora") void loadCinemaActorLoras();
   }
 
+  let cinemaLibraryModal = null;
+  let cinemaLibraryPlaceholder = null;
 function setCinemaLibraryView(open) {
+    const stack = $("cinema-asset-stack");
+    if (stack && !cinemaLibraryModal) {
+      cinemaLibraryPlaceholder = document.createComment("asset stack home");
+      stack.before(cinemaLibraryPlaceholder);
+      cinemaLibraryModal = document.createElement("dialog");
+      cinemaLibraryModal.className = "cinema-library-modal";
+      cinemaLibraryModal.setAttribute("aria-labelledby", "cinema-library-modal-title");
+      const header = document.createElement("header");
+      const title = document.createElement("h2");title.id = "cinema-library-modal-title";
+      const close = document.createElement("button");close.type = "button";close.className = "btn-secondary";close.textContent = "×";
+      close.setAttribute("aria-label", "Close library / Kütüphaneyi kapat");
+      close.onclick = () => setCinemaLibraryView(false);
+      header.append(title, close);cinemaLibraryModal.append(header);
+      document.querySelector("#view-cinema .cinema-panel").append(cinemaLibraryModal);
+      cinemaLibraryModal.addEventListener("cancel", event => {event.preventDefault();setCinemaLibraryView(false);});
+      cinemaLibraryModal.addEventListener("close", () => {if(state.cinemaLibraryView)setCinemaLibraryView(false);});
+      cinemaLibraryModal.addEventListener("click", event => {
+        const rect=cinemaLibraryModal.getBoundingClientRect();
+        if(event.target===cinemaLibraryModal && (event.clientX<rect.left || event.clientX>rect.right || event.clientY<rect.top || event.clientY>rect.bottom))setCinemaLibraryView(false);
+      });
+    }
+    if (cinemaLibraryModal) {
+      cinemaLibraryModal.querySelector("h2").textContent = tt("cinema.tabLibrary");
+      if(open){cinemaLibraryModal.append(stack);if(!cinemaLibraryModal.open)cinemaLibraryModal.showModal();}
+      else{if(cinemaLibraryModal.open)cinemaLibraryModal.close();if(stack)cinemaLibraryPlaceholder.after(stack);}
+    }
+
     state.cinemaLibraryView = !!open;
     document.querySelector("#view-cinema .cinema-panel")?.classList.toggle("is-library-view", !!open);
     const btn = $("btn-cinema-library-toggle");
@@ -4241,6 +4270,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function closeCinemaStudio() {
+    if(state.cinemaLibraryView)setCinemaLibraryView(false);
     $("view-cinema")?.classList.add("hidden");
     document.body.classList.remove("cinema-dock-open");
     state.cinemaDirector = false;

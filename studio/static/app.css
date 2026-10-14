@@ -3001,19 +3001,11 @@ body.ws-director .zone-player .player-actions .btn-ghost {
 .cinema-panel.is-mode-seamless .cinema-workspace-toolbar {
   grid-template-columns: 1fr;
 }
-.cinema-panel.is-mode-seamless .cinema-library-heading {
-  display: none;
-}
 .cinema-panel.is-mode-assets.is-music-video .cinema-workspace-toolbar {
   grid-template-columns: minmax(250px, 0.86fr) minmax(340px, 1.2fr) minmax(270px, 0.9fr);
 }
-.cinema-panel.is-mode-seamless .cinema-grid {
-  grid-template-columns: 1fr;
-}
+.cinema-panel.is-mode-assets .cinema-col-stack,
 .cinema-panel.is-mode-seamless .cinema-col-stack {
-  display: none;
-}
-.cinema-panel.is-mode-assets .cinema-col-stack {
   display: flex;
 }
 .cinema-panel.is-mode-assets.is-music-video .cinema-grid {

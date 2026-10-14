@@ -1071,7 +1071,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
         **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "character_manifest")},
-        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size")},
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
@@ -1391,7 +1391,7 @@ class CinemaProduceBody(BaseModel):
     append_to_chain: bool = False
     audio: Optional[dict[str, Any]] = None
     seamless: bool = False
-    seamless_backend: str = 'multishot'
+    seamless_backend: str = 'continuum'
     # First queue missing character/creature/vehicle/location sheets; scenes start after they finish
     prepare_sheets: bool = True
     # If true, queue sheets even when the card already has a still
@@ -2743,6 +2743,7 @@ async def generate(body: GenerateBody):
             sampler = parent['sampler']
             scheduler = parent['scheduler']
             continuum_data['continuum_chunk_seconds'] = body.duration
+            continuum_data['continuum_reference_size'] = parent.get('continuum_reference_size') or 'Match Output'
             continuum_data['h3_models'] = parent['h3_models']
             continuum_data['reference_manifest'] = parent.get('reference_manifest')
             lora_applied = {key: parent.get(key) for key in ('lora_name', 'lora_strength', 'lora_strengths')}
@@ -5851,6 +5852,10 @@ async def cinema_produce(body: CinemaProduceBody):
     still_lock = bool(cast_refs)
     identity_plans = [_asset_plan(p, shot.get("bindings"), lib)
                       for p, shot in zip(prompts, to_queue)]
+    if want_seamless and body.seamless_backend == 'continuum':
+        unsupported = any(shot.get('first_frame_name') or any(cinema.uses_lora(asset) for asset in plan.get('hits', [])) for shot,plan in zip(to_queue,identity_plans))
+        if unsupported:
+            raise HTTPException(400, 'Continuum supports visual asset references, but per-scene first-frame guides or separate character LoRA stacks require independent scene mode. Turn Continuum off for those scenes.')
     # Multishot uses one adapter stack for the whole pack. Character identities
     # need separate per-shot stacks, including when all actors are LoRA-only.
     if any(shot.get("first_frame_name") or (plan["ref_images"] and body.seamless_backend != "continuum")

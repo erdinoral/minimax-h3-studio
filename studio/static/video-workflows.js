@@ -1,13 +1,14 @@
 (() => {
   const $ = id => document.getElementById(id);
-  let caps = {}, clip = null, method = 'standard', chunks = 1, layout = 'single', segments = [''], context = '', continuity = 'balanced', directorBackend='multishot';
+  let caps = {}, clip = null, method = 'standard', chunks = 1, layout = 'single', segments = [''], context = '', continuity = 'balanced';
   let sourceId = null, sourceMeta = null;
   const text = (tr, en) => window.h3Lang?.() === 'en' ? en : tr;
   window.getVideoWorkflowPayload = () => ({continuation_method:method,
     continuum_context:context, continuum_continuity:continuity, continuum_chunks:layout==='segments'?segments.length:chunks,
     ...(method==='continuum' && layout==='segments'?{continuum_segment_prompts:segments.map(p=>p.trim())}:{}), prepare_refine:false});
   window.getContinuumMainPrompt = () => method==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
-  window.getDirectorContinuumBackend = () => directorBackend;
+  window.getDirectorContinuumBackend = () => "continuum";
+  window.isDirectorContinuumReady = () => caps.continuum_ready === true;
   function updateTotal() {
     const target=$('continuum-total');if(!target)return;
     const selected=document.querySelector('#dur-chips .chip.on');
@@ -33,13 +34,6 @@
   function render() {
     const legacyAudio=$('continue-audio-continuity')?.closest('label');
     if(legacyAudio)legacyAudio.hidden=method==='continuum';
-    const director=$('director-continuum-control');
-    if(director){
-      director.hidden = !$('cinema-seamless-toggle')?.checked;
-      director.innerHTML=`<label>${text('Kesintisiz motoru','Seamless engine')} <small>${text('Deneysel','Experimental')}</small></label><select><option value="multishot">${text('Mevcut Multishot','Existing Multishot')}</option><option value="continuum" ${caps.continuum_ready?'':'disabled'}>Continuum</option></select><p class="muted">${text('Continuum: take başına en fazla 16 bölüm. Mevcut Multishot seçeneği korunur; kalite testi tamamlanana kadar varsayılan değiştirilmez.','Continuum: up to 16 chunks per take. The default stays unchanged until quality validation is complete.')}</p>`;
-      director.querySelector('select').value=directorBackend;
-      director.querySelector('select').onchange=e=>{directorBackend=e.target.value;};
-    }
     const host = $('video-workflow-controls');
     if (!host) return;
     host.innerHTML = `<div class="continuum-heading"><strong>Continuum <small>${text('Deneysel','Experimental')}</small>${method==='continuum'?'<small>Spectrum OFF</small>':''}</strong>
@@ -112,5 +106,5 @@
   document.addEventListener('change',e=>{if(e.target.id==='continue-source')syncSource();});
   document.addEventListener('click',()=>requestAnimationFrame(()=>{syncSource();updateTotal();}));
   document.addEventListener('h3-lang',render);
-  render();fetch('/api/video-workflows').then(r=>r.ok?r.json():{}).then(data=>{caps=data;render();}).catch(()=>{});
+  render();fetch('/api/video-workflows').then(r=>r.ok?r.json():{}).then(data=>{caps=data;render();document.dispatchEvent(new Event("h3-video-workflows"));}).catch(()=>{});
 })();

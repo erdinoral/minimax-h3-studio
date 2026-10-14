@@ -33,6 +33,9 @@ class WorkflowContracts(unittest.TestCase):
         self.assertEqual(graph['c_refs']['inputs']['reference_r2_chunks'],'1,2')
         self.assertEqual(graph['c_refs']['inputs']['reference_r3_chunks'],'2')
         self.assertEqual(graph['c_sample']['inputs']['reference_images'],['c_refs',0])
+        self.assertEqual(graph['c_sample']['inputs']['reference_size'],'Max Identity')
+        job['continuum_reference_size']='Match Output'
+        self.assertEqual(continuum.build(job)['c_sample']['inputs']['reference_size'],'Match Output')
         with self.assertRaises(ValueError): continuum.reference_plan([{'ref_images':[f'{i}.png' for i in range(10)]}])
 
     def test_continuum_removes_spectrum_without_dropping_model_dependencies(self):

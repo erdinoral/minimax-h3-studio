@@ -1,8 +1,8 @@
 # Experimental video workflows
 
-Scene offers Standard H3 and Continuum. Director offers Existing Multishot and
-Continuum in its Seamless engine selector. Existing Multishot remains the default
-until the new workflow has passed real continuity/quality validation.
+Scene offers Standard H3 and Continuum. Director uses a Continuum ON/OFF switch.
+ON creates native combined takes with visual asset references; OFF uses independent
+scene production. The old Multishot selector is removed from the interface.
 
 ## Continuum
 
@@ -73,4 +73,8 @@ Continuum bypasses Spectrum because its mutable runtime binding is not observabl
 
 ### Director visual references
 
-Director Continuum now uses the resolved visual references from each scene, including explicit asset bindings. Unique images are collected per take (maximum 9) and assigned only to their relevant native chunks. Ref2VA is selected when visual references exist. Character portraits no longer force the ordinary per-shot fallback for Continuum; Multishot retains that fallback. Explicit scene first-frame guides and differing character LoRA stacks retain the separate per-shot route.
+Director Continuum now uses the resolved visual references from each scene, including explicit asset bindings. Unique images are collected per take (maximum 9) and assigned only to their relevant native chunks. Ref2VA is selected when visual references exist. Character portraits no longer force the ordinary per-shot fallback for Continuum; Multishot retains that fallback. Explicit scene first-frame guides and separate character LoRA stacks require Continuum OFF; they are rejected in Continuum mode rather than silently changing the requested method.
+
+### Director mode and reference detail defaults
+
+The Director Continuum switch replaces the old Seamless/Multishot selector in the interface. Visual asset cards remain accessible through the library. New native Continuum runs use Max Identity reference preprocessing. Continuations preserve their source setting; older runs fall back to their original Match Output setting so saved sections remain compatible. The legacy explicit Multishot API is retained for old integrations.

@@ -3610,6 +3610,8 @@
     }
   }
 
+  document.addEventListener("h3-video-workflows", () => syncCinemaStudioMode());
+
   function syncCinemaStudioMode() {
     const mode = cinemaStudioMode();
     const panel = document.querySelector("#view-cinema .cinema-panel");
@@ -3617,11 +3619,12 @@
     panel?.classList.toggle("is-mode-assets", mode === "assets");
     const seamToggle = $("cinema-seamless-toggle");
     if (seamToggle) seamToggle.checked = mode === "seamless";
+    const continuumReady = globalThis.isDirectorContinuumReady?.() ?? !!state.multishot;
     const seam = $("cinema-seamless");
     if (seam) {
       if (mode === "seamless") {
-        seam.checked = !!state.multishot;
-        seam.disabled = !state.multishot;
+        seam.checked = continuumReady;
+        seam.disabled = !continuumReady;
       } else {
         seam.checked = false;
         seam.disabled = true;
@@ -3631,9 +3634,9 @@
     if (modeHint) {
       modeHint.textContent =
         mode === "seamless"
-          ? state.multishot
+          ? continuumReady
             ? tt("cinema.modeSeamlessHint")
-            : tt("cinema.modeSeamlessNeedPack")
+            : ""
           : tt("cinema.modeAssetsHint");
     }
     const hint = $("cinema-hint");
@@ -4233,11 +4236,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     await loadCinema();
     void loadCinemaLibrary();
-    if (typeof filmHasStillCards === "function" && filmHasStillCards()) {
-      setCinemaStudioMode("assets", { persist: false });
-    } else {
-      syncCinemaStudioMode();
-    }
+    syncCinemaStudioMode();
     renderFilmWorkspace();
   }
 
@@ -4882,11 +4881,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const studioMode = cinemaStudioMode();
       const wantSeamless = studioMode === "seamless";
       if (wantSeamless) {
-        if (!state.multishot) {
+        if (!(globalThis.isDirectorContinuumReady?.() ?? !!state.multishot)) {
           toast(tt("cinema.modeSeamlessNeedPack"));
           return;
         }
-        /* JSON takes[] = one Multishot job each; unmarked shots still pack every 8 */
+        /* Continuum groups up to 16 sections per take. */
       }
       const audio = cinemaAudio();
       const filmMode = audio.mode !== "silent";
@@ -4939,7 +4938,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           silent_audio: !filmMode,
           link_continue: true,
           seamless: wantSeamless,
-          seamless_backend: globalThis.getDirectorContinuumBackend?.() || 'multishot',
+          seamless_backend: globalThis.getDirectorContinuumBackend?.() || 'continuum',
           prepare_sheets: !wantSeamless,
           force_sheets: !!$("cinema-force-sheets")?.checked,
           image_provider: normalizeCinemaImageProvider(cine.image_provider),

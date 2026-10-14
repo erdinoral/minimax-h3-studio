@@ -105,6 +105,7 @@ def build(job):
                   run_storage='Save + Auto Resume', run_name=job['continuum_run'],
                   project_id=job['continuum_run'], generation_mode='Full Run',
                   audio_continuity=not job.get('silent_audio',False),
+                  reference_size=job.setdefault('continuum_reference_size','Max Identity'),
                   continuity=('Strong — 39 frames (Experimental)' if job.get('continuum_continuity')=='strong' else 'Balanced — 22 frames'))
     if job.get('first_frame_name'):
         graph['c_first']=dict(class_type='LoadImage',inputs={'image':job['first_frame_name']})

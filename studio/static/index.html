@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=continuumassets269" />
+  <link rel="stylesheet" href="/static/app.css?v=directorswitches270" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -654,6 +654,11 @@
             </div>
           </div>
           <div class="cinema-post-switch" id="cinema-post-pass-chips">
+            <label class="cinema-seamless-switch" title="Continuum">
+              <span id="cinema-seamless-switch-label">Continuum</span>
+              <input type="checkbox" id="cinema-seamless-toggle" checked />
+              <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+            </label>
             <label class="cinema-seamless-switch">
               <span id="cinema-post-upscale-label">1.5× upscale</span>
               <input type="checkbox" id="cinema-post-upscale" />
@@ -686,11 +691,6 @@
                 <button type="button" class="btn-ghost" data-lora-guide="cinema-lora-select" >LoRA rehberi</button>
               </div>
             </div>
-            <label class="cinema-seamless-switch" title="Continuum">
-              <span id="cinema-seamless-switch-label">Continuum</span>
-              <input type="checkbox" id="cinema-seamless-toggle" checked />
-              <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
-            </label>
           </div>
           <input type="checkbox" id="cinema-seamless" class="hidden" tabindex="-1" aria-hidden="true" />
           <p class="muted mode-hint" id="cinema-mode-hint">JSON takes[] = sahne. 5 sahneli = 5 take × 8 shot, hikaye devam. Karakter/mekan kartı gerekmez</p>

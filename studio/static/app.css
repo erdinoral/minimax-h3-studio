@@ -4841,3 +4841,5 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 .cinema-library-modal h2 { margin:0; font-size:1.1rem; }
 .cinema-library-modal #cinema-asset-stack { display:flex !important; width:100%; max-height:none; overflow:visible; }
 @media(max-width:600px) { .cinema-library-modal { padding:12px; width:96vw; max-height:92vh; } }
+#cinema-post-pass-chips { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+#cinema-post-pass-chips .cinema-seamless-switch { margin:0; }

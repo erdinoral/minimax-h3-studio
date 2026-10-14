@@ -7,6 +7,38 @@ from .comfy import build_t2v_prompt
 SAMPLER = 'H3ContinuumSamplerV39'
 SCHEMA = json.loads(Path(__file__).with_name('continuum_schema.json').read_text(encoding='utf-8'))
 
+def extend_prompts(previous, new_prompts, context=''):
+    if not new_prompts or any(not str(p).strip() for p in new_prompts):
+        raise ValueError('Each Continuum section needs a non-empty prompt')
+    if len(previous) + len(new_prompts) > 16:
+        raise ValueError('Continuum supports at most 16 chunks per run')
+    context = str(context or '').strip()
+    if any(line.strip() == '---' for value in [context, *new_prompts] for line in str(value).splitlines()):
+        raise ValueError('Use separate section cards instead of --- separators inside a prompt')
+    additions = [f"{context}\n\n{str(p).strip()}" if context else str(p).strip() for p in new_prompts]
+    return list(previous) + additions
+
+
+def has_spectrum(graph):
+    return any(n.get('class_type') == 'SpectrumApplyMiniMaxH3' for n in graph.values())
+
+
+def remove_spectrum(graph):
+    # Continuum storage cannot observe Spectrum's mutable runtime binding.
+    # Keep native sampling and safe prefix reuse rather than rerendering old chunks.
+    for key in list(graph):
+        node=graph[key]
+        if node.get('class_type') != 'SpectrumApplyMiniMaxH3':
+            continue
+        source=node['inputs']['model']
+        for other in graph.values():
+            for name,value in other.get('inputs',{}).items():
+                if value == [key,0]:
+                    other['inputs'][name]=copy.deepcopy(source)
+        del graph[key]
+    return graph
+
+
 def build(job):
     prompts = job.get('continuum_prompts') or [job['prompt']]
     duration = int(job.get('continuum_chunk_seconds') or job['duration'])
@@ -19,6 +51,7 @@ def build(job):
                             sampler=job.get('sampler') or 'res_multistep',
                             scheduler=job.get('scheduler') or 'simple', sage_attention='disabled',
                             lora_name=job.get('lora_name'), lora_strength=job.get('lora_strength') or 0.75)
+    remove_spectrum(graph)
     # Retain the already-patched native model branch and scheduler.
     model = graph['16']['inputs']['model']
     sigmas = graph['14']['inputs']['sigmas']
@@ -32,6 +65,8 @@ def build(job):
     for key in (model[0],sigmas[0],'13','11','24','17'): visit(key)
     graph = {k:v for k,v in graph.items() if k in keep}
     if job.get('continuum_base_graph'):
+        if has_spectrum(job['continuum_base_graph']):
+            raise ValueError('Legacy Spectrum Continuum run cannot be safely resumed; start a new Continuum run')
         graph = copy.deepcopy(job['continuum_base_graph'])
         model = job['continuum_model_link']
         sigmas = job['continuum_sigma_link']
@@ -49,7 +84,8 @@ def build(job):
                   size_source='Manual', width=job['width'], height=job['height'],
                   run_storage='Save + Auto Resume', run_name=job['continuum_run'],
                   project_id=job['continuum_run'], generation_mode='Full Run',
-                  audio_continuity=not job.get('silent_audio',False))
+                  audio_continuity=not job.get('silent_audio',False),
+                  continuity=('Strong — 39 frames (Experimental)' if job.get('continuum_continuity')=='strong' else 'Balanced — 22 frames'))
     if job.get('first_frame_name'):
         graph['c_first']=dict(class_type='LoadImage',inputs={'image':job['first_frame_name']})
         inputs['first_frame']=['c_first',0]

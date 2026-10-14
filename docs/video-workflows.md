@@ -62,3 +62,11 @@ Pinned source revisions (upstream licenses retained):
 ## Scene Continuum controls
 
 Continuum uses an ON/OFF switch. Single prompt repeats the main prompt for the selected section count. Per section accepts one prompt card per new section; the server validates 1–16 non-empty cards, and existing sections count toward the 16-section run limit. New video starts a new run; Continue adds to the selected run. Duration and quality are selected once in the top Scene controls; Seed and Steps share a row.
+
+### Shared context and transition presets
+
+Optional Continuity settings include a shared character/setting prompt and Balanced (22 prior frames) or Strong (39 prior frames, experimental) context. Shared context is prepended to each newly added section. Continuations inherit the original shared context and preset; saved prefix prompts are never rewritten. Strong context is not an identity guarantee and may cost extra memory or affect motion. Balanced remains the default pending visual comparisons.
+
+### Spectrum and saved-run compatibility
+
+Continuum bypasses Spectrum because its mutable runtime binding is not observable by the pinned native storage contract: enabling it silently disabled prefix reuse and regenerated earlier sections. Ordinary native single-clip Spectrum remains available. Legacy Continuum runs saved with Spectrum are rejected for native continuation instead of rerendering their prefix. Originals remain untouched; begin a new Continuum run to use safe resume.

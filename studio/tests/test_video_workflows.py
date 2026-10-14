@@ -21,6 +21,27 @@ def broken_links(graph):
 
 
 class WorkflowContracts(unittest.TestCase):
+    def test_continuum_removes_spectrum_without_dropping_model_dependencies(self):
+        job=dict(id='draft',prompt='Test',duration=5,width=864,height=480,
+                 steps=12,seed=7,h3_models=DEFAULT_MODELS,continuum_run='draft')
+        with patch.object(Path,'read_text',return_value='{"spectrum_enabled": true}'):
+            graph=continuum.build(job)
+        self.assertFalse(continuum.has_spectrum(graph))
+        self.assertEqual(graph['c_sample']['inputs']['model'],['6',0])
+        self.assertEqual(graph['9']['inputs']['model'],['6',0])
+        job['continuum_base_graph']['legacy']={'class_type':'SpectrumApplyMiniMaxH3','inputs':{'model':['6',0]}}
+        with self.assertRaises(ValueError): continuum.build(job)
+
+    def test_section_context_does_not_rewrite_saved_prefix(self):
+        previous=['Original saved prompt']
+        result=continuum.extend_prompts(previous,['Blue enters','Both fight'],'Red remains on the left')
+        self.assertEqual(result[0],previous[0])
+        self.assertEqual(previous,['Original saved prompt'])
+        self.assertEqual(result[1:],["Red remains on the left\n\nBlue enters","Red remains on the left\n\nBoth fight"])
+        for additions in ([],['  '],['good',''],['one\n---\ntwo']):
+            with self.assertRaises(ValueError): continuum.extend_prompts([],additions)
+        with self.assertRaises(ValueError): continuum.extend_prompts(['old']*15,['one','two'])
+
     def test_continuum_keeps_model_patch_dependencies_and_audio_vae(self):
         job=dict(id='12345678',prompt='A cloud',width=864,height=480,duration=5,
                  steps=10,seed=7,h3_models=DEFAULT_MODELS,continuum_run='test',
@@ -31,6 +52,9 @@ class WorkflowContracts(unittest.TestCase):
         self.assertEqual(graph['c_audio']['inputs']['vae'],['24',0])
         self.assertEqual(graph['c_first']['inputs']['image'],'portrait.png')
         self.assertEqual(graph['c_sample']['inputs']['run_storage'],'Save + Auto Resume')
+        job['continuum_continuity']='strong'
+        with patch('lib.comfy.apply_spectrum',side_effect=lambda g:g): strong=continuum.build(job)
+        self.assertEqual(strong['c_sample']['inputs']['continuity'],'Strong — 39 frames (Experimental)')
         job['continuum_prompts']=['Scene']*17
         with self.assertRaises(ValueError): continuum.build(job)
 

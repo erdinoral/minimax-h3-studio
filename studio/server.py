@@ -1071,7 +1071,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
         **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "character_manifest")},
-        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity")},
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
@@ -1243,6 +1243,8 @@ class GenerateBody(BaseModel):
     continuation_method: str = "standard"
     continuum_chunks: int = Field(1, ge=1, le=16)
     continuum_segment_prompts: list[str] | None = None
+    continuum_context: str = Field("", max_length=8000)
+    continuum_continuity: str = "balanced"
     prepare_refine: bool = False
     scene_audio_file: Optional[str] = None
     scene_audio_mode: str = "reference"
@@ -2713,18 +2715,23 @@ async def generate(body: GenerateBody):
         parent = _clip_record(continue_from) if continue_from else None
         if continue_from and not (parent and parent.get('continuum_run')):
             raise HTTPException(409, 'Source clip has no Continuum run record')
-        prompts = list(parent.get('continuum_prompts') or []) if parent else []
+        if parent and continuum.has_spectrum(parent.get('continuum_base_graph') or {}):
+            raise HTTPException(409, 'This older Continuum run used Spectrum and cannot safely reuse its saved sections. Start a new Continuum video; the original is preserved.')
+        previous = list(parent.get('continuum_prompts') or []) if parent else []
+        context = parent.get('continuum_context', '') if parent else body.continuum_context
+        continuity_mode = parent.get('continuum_continuity', 'balanced') if parent else body.continuum_continuity
+        if continuity_mode not in ('balanced', 'strong'):
+            raise HTTPException(400, 'Unknown Continuum continuity preset')
         new_prompts = body.continuum_segment_prompts
-        if new_prompts is not None:
-            if not 1 <= len(new_prompts) <= 16 or any(not p.strip() for p in new_prompts):
-                raise HTTPException(400, 'Provide 1–16 non-empty Continuum segment prompts')
-            prompts += [p.strip() for p in new_prompts]
-        else:
-            prompts += [prompt_txt] * body.continuum_chunks
-        if len(prompts) > 16:
-            raise HTTPException(400, 'Continuum supports at most 16 chunks per run')
+        if new_prompts is None:
+            new_prompts = [prompt_txt] * body.continuum_chunks
+        try:
+            prompts = continuum.extend_prompts(previous, new_prompts, context)
+        except ValueError as error:
+            raise HTTPException(400, str(error))
         continuum_data = {'continuum_run':parent['continuum_run'] if parent else 'studio_' + uuid.uuid4().hex,
-                          'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration}
+                          'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration,
+                          'continuum_context':context, 'continuum_continuity':continuity_mode}
         if parent:
             continuum_data.update({key:parent[key] for key in (
                 'continuum_base_graph','continuum_model_link','continuum_sigma_link') if key in parent})

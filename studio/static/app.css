@@ -4827,6 +4827,10 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 .continuum-segment { display:grid; gap:6px; border-top:1px solid var(--border); padding:10px 0; }
 .continuum-segment textarea { width:100%; box-sizing:border-box; resize:vertical; }
 .continuum-segment button { justify-self:end; }
+.gallery-download { position:absolute; top:8px; right:42px; z-index:4; background:#102138; color:#fff; border:1px solid var(--border); border-radius:7px; padding:3px 10px; text-decoration:none; font-weight:bold; }
+.zone-prompt > #video-workflow-controls { flex-shrink: 0; }
+.zone-prompt #video-workflow-controls textarea { min-height: 90px; resize: vertical; flex: none; }
+.zone-prompt #prompt[hidden], .zone-prompt #btn-prompt-rewrite[hidden] { display: none; }
 /* Neon sponsor sign above the player. */
 .sponsor-banner { height:30px; flex-basis:30px; border:1px solid #ef444455; background:linear-gradient(180deg,#190c16,#080b13); box-shadow:inset 0 0 12px #ff304012,0 0 8px #ff304018; }
 .sponsor-banner.is-showing { border-color:#ff5366aa; box-shadow:inset 0 0 16px #ff304025,0 0 10px #ff304044; }

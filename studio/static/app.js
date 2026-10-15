@@ -26,6 +26,7 @@
     cinemaShotOpen: {},
     cinemaChapterOpen: {},
     refImages: [], // { name, url }
+    continueImages: [],
     faceImages: [],
     v2vVideos: [], // { name, url }
     v2vImages: [],
@@ -642,6 +643,8 @@
       steps: 20,
       seed: -1,
       seed_lock: false,
+      lora_selection: [],
+      lora_weights: {},
       image_provider: "minimax",
       audio: {
         mode: "film",
@@ -1193,8 +1196,9 @@
 
   function renderRefThumbs(kind) {
     const isFace = kind === "face";
-    const list = isFace ? state.faceImages : state.refImages;
-    const grid = $(isFace ? "face-thumbs" : "ref-thumbs");
+    const isContinue = kind === "continue";
+    const list = isContinue ? state.continueImages : isFace ? state.faceImages : state.refImages;
+    const grid = $(isContinue ? "continue-ref-thumbs" : isFace ? "face-thumbs" : "ref-thumbs");
     if (!grid) return;
     grid.innerHTML = "";
     list.forEach((item, i) => {
@@ -1207,7 +1211,7 @@
         list.splice(i, 1);
         renderRefThumbs(kind);
         if (!list.length) {
-          clearFilePickLabel($(isFace ? "face-files" : "ref-files"));
+          clearFilePickLabel($(isContinue ? "continue-ref-files" : isFace ? "face-files" : "ref-files"));
         }
       };
       grid.appendChild(card);
@@ -1216,7 +1220,7 @@
 
   async function uploadRefFiles(fileList, kind) {
     const isFace = kind === "face";
-    const target = isFace ? state.faceImages : state.refImages;
+    const target = kind === "continue" ? state.continueImages : isFace ? state.faceImages : state.refImages;
     const max = isFace ? 3 : 9;
     const files = Array.from(fileList || []);
     if (!files.length) return;
@@ -1508,6 +1512,8 @@
         steps: data.steps || 20,
         seed: data.seed != null ? data.seed : -1,
         seed_lock: !!data.seed_lock,
+        lora_selection: Array.isArray(data.lora_selection) ? data.lora_selection : [],
+        lora_weights: data.lora_weights || {},
         image_provider: normalizeCinemaImageProvider(data.image_provider),
         characters: Array.isArray(data.characters) ? data.characters : [],
         locations: Array.isArray(data.locations) ? data.locations : [],
@@ -1525,6 +1531,7 @@
       state.cinemaLoaded = true;
     }
     renderCinema();
+    if(state.loraCatalog?.length) fillLoraSelect();
     void fillCinemaFilms();
     void refreshCinemaPreview();
     syncFilmModeSummary();
@@ -1593,6 +1600,8 @@
       film_id: c.film_id || "",
       seed: Number.isFinite(Number(c.seed)) ? Number(c.seed) : -1,
       seed_lock: !!c.seed_lock,
+      lora_selection: c.lora_selection || [],
+      lora_weights: c.lora_weights || {},
       image_provider: normalizeCinemaImageProvider(c.image_provider),
       characters: c.characters || [],
       locations: c.locations || [],
@@ -1745,6 +1754,8 @@
         steps: data.steps || payload.steps,
         seed: data.seed != null ? data.seed : payload.seed,
         seed_lock: !!(data.seed_lock != null ? data.seed_lock : payload.seed_lock),
+        lora_selection: data.lora_selection ?? payload.lora_selection ?? [],
+        lora_weights: data.lora_weights ?? payload.lora_weights ?? {},
         image_provider: normalizeCinemaImageProvider(data.image_provider),
         characters: chars,
         locations: locs,
@@ -2682,8 +2693,8 @@
       htmlEsc(summary) +
       "</p>" +
       '<div class="cinema-shot-actions">' +
-      '<button type="button" class="cta cinema-shot-produce"' + (jobBusy ? " disabled" : "") + '>' +
-      tt(jobBusy ? "cinema.sectionQueued" : existingJob?.status === "done" ? "cinema.sectionReproduce" : "cinema.sectionProduce") +
+      '<button type="button" class="cta cinema-shot-produce">' +
+      tt(jobBusy ? "cinema.queueAnother" : existingJob?.status === "done" ? "cinema.sectionReproduce" : "cinema.sectionProduce") +
       "</button>" +
       '<button type="button" class="btn-secondary cinema-shot-edit">' +
       tt("cinema.sectionEdit") +
@@ -2779,6 +2790,38 @@
     if (preview) preview.textContent = composeH3Prompt(readCinemaSceneForm());
   }
 
+  function renderSceneAssetSuggestions() {
+    const modal=$('cinema-scene-modal');
+    if(!modal)return;
+    modal._assetSuggestionAbort?.abort(); modal._assetSuggestionAbort=new AbortController();
+    let tray=$('cinema-asset-suggestions');
+    if(!tray){tray=document.createElement('div');tray.id='cinema-asset-suggestions';tray.className='chips wrap';$('cinema-scene-character')?.parentElement.after(tray);}
+    const c=ensureCinema();
+    const assets=['characters','locations','vehicles','creatures'].flatMap(key=>(c[key] || []).map(a=>({name:a.name,kind:key}))).filter(a=>a.name);
+    let target=$('cinema-scene-character');
+    const fields=[...modal.querySelectorAll('textarea[data-scene-field]')];
+    const draw=()=>{
+      const token=(target.value || '').slice(0,target.selectionStart ?? target.value.length).split(/[,\n]/).pop().trim().toLowerCase();
+      const matching=assets.filter(a=>!token || a.name.toLowerCase().includes(token));
+      tray.replaceChildren();
+      for(const asset of (matching.length ? matching : assets)){
+        const button=document.createElement('button');button.type='button';button.className='chip';button.textContent=asset.name;
+        button.onmousedown=e=>e.preventDefault();
+        button.onclick=()=>{
+          const end=target.selectionStart ?? target.value.length;
+          const tail=target.value.slice(0,end).split(/[,\n]/).pop();
+          const replace=target.dataset.sceneField==='character' || (tail.trim() && asset.name.toLowerCase().startsWith(tail.trim().toLowerCase()));
+          const start=replace ? end-tail.length : end;
+          target.setRangeText((start && replace?' ':'')+asset.name+(target.dataset.sceneField==='character'?', ': ' '),start,target.selectionEnd ?? end,'end');
+          target.dispatchEvent(new Event('input',{bubbles:true}));target.focus();
+        };
+        tray.appendChild(button);
+      }
+    };
+    fields.forEach(field=>{field.onfocus=()=>{target=field;draw();};field.addEventListener('input',draw,{signal: (modal._assetSuggestionAbort ||= new AbortController()).signal});});
+    draw();
+  }
+
   function openCinemaSceneModal(shotId, mode) {
     const modal = $("cinema-scene-modal");
     if (!modal) return;
@@ -2826,6 +2869,7 @@
       if (duration) duration.value = String(ensureCinema().duration || 5);
     }
     refreshCinemaScenePreview();
+    renderSceneAssetSuggestions();
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
     $("cinema-scene-title")?.focus();
@@ -3439,6 +3483,7 @@
     };
     renderCinema();
     await fillCinemaFilms();
+    if(state.loraCatalog?.length) fillLoraSelect();
     void refreshCinemaPreview();
   }
 
@@ -8094,7 +8139,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         : "";
       const stName = tt("job." + j.status);
       const stText = stName.indexOf("job.") === 0 ? j.status : stName;
-      left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${(j.prompt || "").slice(0, 36)}${err}`;
+      left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${htmlEsc((j.scene_title || j.prompt || "").slice(0, 60))}${err}`;
       if (j.mode === "qwen_sheet" && j.status === "running") {
         const track = document.createElement("div");
         track.className = "job-inline-progress";
@@ -8346,6 +8391,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
     $("btn-gallery-concat")?.classList.toggle("hidden", state.galleryKind !== "video");
     $("btn-gallery-video-select")?.classList.toggle("hidden", state.galleryKind !== "video");
+    $("btn-gallery-download-zip")?.classList.toggle("hidden", state.galleryKind !== "video");
     $("btn-gallery-video-delete")?.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryVideoSelectMode);
     $("btn-gallery-photo-select")?.classList.toggle("hidden", state.galleryKind !== "photo");
     $("btn-gallery-photo-delete")?.classList.toggle("hidden", state.galleryKind !== "photo" || !state.galleryPhotoSelectMode);
@@ -8540,6 +8586,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       card.innerHTML = `
         <div class="gallery-ord">${i === 0 ? tt("gallery.newPrefix") : ""}${ord}</div>
         <button type="button" class="gallery-del" title="${tt("gallery.deleteTitle")}" aria-label="${tt("gallery.deleteAria")}">×</button>
+        <a class="gallery-download" href="/api/gallery/${encodeURIComponent(j.id)}/video?dl=1" download title="${tt('gallery.download')}" aria-label="${tt('gallery.download')}">↓</a>
         <div class="gallery-thumb">
           <video src="${url}" muted preload="metadata"></video>
           <button type="button" class="gallery-merge-pick${mergeOn || videoSelectOn ? "" : " hidden"}" aria-label="${tt("merge.pick")}">
@@ -8552,6 +8599,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         </div>
         <div class="meta">${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
       const pickBtn = card.querySelector(".gallery-merge-pick");
+      card.querySelector('.gallery-download').onclick = e => e.stopPropagation();
       if (pickBtn) {
         pickBtn.classList.toggle("hidden", !mergeOn && !videoSelectOn);
         pickBtn.onclick = (e) => {
@@ -8729,6 +8777,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await fetch("/api/jobs").then((r) => r.json());
       const prevStatus = state.jobStatusSnapshot || {};
       state.jobs = data.jobs || [];
+      state.queuePaused=!!data.queue_paused;
+      const pauseButton=$('btn-queue-pause');
+      if(pauseButton?.dataset){pauseButton.dataset.i18n=state.queuePaused?'queue.resume':'queue.pauseAfter';pauseButton.textContent=tt(pauseButton.dataset.i18n);}
       state.jobStatusSnapshot = Object.fromEntries(
         (state.jobs || []).map((j) => [j.id, j.status])
       );
@@ -9016,6 +9067,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (isContinue && faceLockOn) {
         body.ref_images = state.faceImages.map((x) => x.name);
         body.ref_image_size = "max";
+        body.ref_role = "face";
+      }
+      if (isContinue && state.continueImages.length && window.canSetContinueReferences?.() !== false) {
+        body.ref_images = state.continueImages.map((x) => x.name);
+        body.ref_image_size = "max";
+        body.ref_role = "face";
       }
       const r = await fetch(motionChain ? "/api/motion-transfer/chain" : "/api/generate", {
         method: "POST",
@@ -9120,23 +9177,23 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   function loraWeight(spec) {
     let weights = {};
     try { weights = JSON.parse(localStorage.getItem("h3-lora-weights") || "{}"); } catch {}
-    const value = Number(weights[spec.file] ?? spec.strength ?? 0.8);
+    const value = Number(state.cinema?.lora_weights?.[spec.file] ?? weights[spec.file] ?? spec.strength ?? 0.8);
     return Number.isFinite(value) ? value : 0.8;
   }
 
   function selectedLoraIds(selectId = "lora-select") {
-    return [...($(selectId)?.selectedOptions || [])].map((opt) => opt.value).filter(Boolean).slice(0, 3);
+    return [...($(selectId)?.selectedOptions || [])].map((opt) => opt.value).filter(Boolean).slice(0, 5);
   }
 
   function syncLoraSelection(ids) {
-    const selected = new Set(ids.filter(Boolean).slice(0, 3));
+    const selected = new Set(ids.filter(Boolean).slice(0, 5));
     ["lora-select", "cinema-lora-select"].forEach((id) => {
       [...($(id)?.options || [])].forEach((opt) => { opt.selected = selected.has(opt.value); });
     });
     ["lora-check-list", "cinema-lora-check-list"].forEach((id) => {
       $(id)?.querySelectorAll('input[type="checkbox"]').forEach((box) => {
         box.checked = selected.has(box.value);
-        box.disabled = !box.checked && selected.size >= 3;
+        box.disabled = !box.checked && selected.size >= 5;
       });
     });
     const presets = [...selected].map(id => (state.loraCatalog || []).find(item => item.id === id)).filter(item => item?.preset && item.file);
@@ -9159,6 +9216,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
     state.loraId = [...selected][0] || "";
     state.loraApplied = selected.size > 0;
+    if (state.cinemaLoaded && state.cinema) state.cinema.lora_selection = [...selected];
     updateLoraHint();
   }
 
@@ -9167,7 +9225,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const picked = selectedLoraIds(selectId)
       .map((id) => (state.loraCatalog || []).find((spec) => spec.id === id))
       .filter((spec) => spec && spec.file && spec.ready)
-      .slice(0, 3);
+      .slice(0, 5);
     const spec = picked[0] || appliedLoraSpec();
     if (!spec || !spec.file) return { lora_id: "", lora_name: "", lora_strength: null };
     return {
@@ -9195,7 +9253,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const sel = $("lora-select");
     if (!sel) return;
     const prev = state.loraApplied && state.loraId ? state.loraId : sel.value || state.loraId || "";
-    const previousIds = selectedLoraIds();
+    const previousIds = state.cinemaLoaded && Array.isArray(state.cinema?.lora_selection) ? state.cinema.lora_selection : selectedLoraIds();
     const catalog = videoLoraCatalog();
     sel.innerHTML = "";
     if (!catalog.length) {
@@ -9223,7 +9281,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     ["lora-check-list", "cinema-lora-check-list"].forEach((hostId) => {
       const checks = $(hostId);
       if (!checks) return;
-      const selected = new Set(previousIds.length ? previousIds : prev ? [prev] : []);
+      const selected = new Set(state.cinemaLoaded ? previousIds : previousIds.length ? previousIds : prev ? [prev] : []);
       const expanded = new Set([...checks.querySelectorAll("details[open][data-category]")].map(el => el.dataset.category));
       checks.innerHTML = LORA_CATEGORIES.map(category => {
         const items = catalog.filter(spec => spec.id && spec.file && spec.ready && loraCategory(spec) === category);
@@ -9250,12 +9308,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           try { weights = JSON.parse(localStorage.getItem("h3-lora-weights") || "{}"); } catch {}
           weights[box.dataset.loraWeight] = value;
           localStorage.setItem("h3-lora-weights", JSON.stringify(weights));
+          if(state.cinemaLoaded) { const c=ensureCinema(); c.lora_weights={...(c.lora_weights || {}),[box.dataset.loraWeight]:value}; }
           document.querySelectorAll('[data-lora-weight]').forEach(input => {
             if (input.dataset.loraWeight === box.dataset.loraWeight) input.value = value;
           });
           return;
         }
-        if (box.matches('input[type="checkbox"]') && box.checked && checks.querySelectorAll('input:checked').length > 3) {
+        if (box.matches('input[type="checkbox"]') && box.checked && checks.querySelectorAll('input:checked').length > 5) {
           box.checked = false;
         }
         syncLoraChecks();
@@ -9389,6 +9448,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     state.videoEngine = engine.active;
     syncHybridDuration();
     host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"], ["hybrid", "H3 Hybrid"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${(id === "singularity" && !engine.singularity_ready) || (id === "hybrid" && !engine.hybrid_ready) ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "hybrid" ? "H3 Hybrid b25–49" : engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
+    if(!engine.hybrid_ready){const hint=document.createElement('p');hint.className='muted';hint.textContent=en?'H3 Hybrid is unavailable: install the complete Hybrid INT8 model in models/diffusion_models or models/unet, then refresh.':'H3 Hybrid kullanılamıyor: tam Hybrid INT8 modelini models/diffusion_models veya models/unet klasörüne ekleyip yenileyin.';host.appendChild(hint);}
     host.onclick = async event => {
       const button = event.target.closest("button[data-engine]");
       if (!button || button.disabled) return;
@@ -9416,7 +9476,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         host.appendChild(panel);
       }
       panel.className = "h3-spectrum-control";
-      panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${data.spectrum_enabled ? "checked" : ""} ${data.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "Accelerates single-clip H3 videos, excluding Continuum. Can change motion and speech quality." : "Continuum hariç tek klip H3 videolarını hızlandırır. Hareket ve konuşma kalitesini değiştirebilir."}</p>`;
+      panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${data.spectrum_enabled ? "checked" : ""} ${data.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "Accelerates H3 videos, including new Continuum runs. Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Yeni Continuum üretimleri dahil H3 videolarını hızlandırır. Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir."}</p>`;
       const toggle = panel.querySelector("input");
       toggle.onchange = async () => {
         const previous = !toggle.checked;
@@ -9660,6 +9720,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (btn) btn.disabled = true;
     try {
       await applyLora();
+      const c = ensureCinema();
+      c.lora_selection = selectedLoraIds("cinema-lora-select");
+      c.lora_weights = collectLoraPayload().lora_strengths || {};
+      await saveCinema(false);
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -9979,6 +10043,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("ref-files")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     void uploadRefFiles(e.target.files, "ref");
+    e.target.value = "";
+  });
+  $("continue-ref-files")?.addEventListener("change", (e) => {
+    syncFilePickName(e.target);
+    void uploadRefFiles(e.target.files, "continue");
     e.target.value = "";
   });
   $("btn-image-studio-ref")?.addEventListener("click", () => void generateImageStudioReference());
@@ -11444,6 +11513,22 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void renderGalleryPhotos();
   });
   $("btn-gallery-photo-delete")?.addEventListener("click", () => void deletePickedGalleryPhotos());
+  $('btn-queue-pause')?.addEventListener('click',async e=>{
+    const button=e.currentTarget;button.disabled=true;
+    try{
+      const response=await fetch('/api/queue/pause',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!state.queuePaused})});
+      const result=await response.json();if(!response.ok)throw Error(errDetail(result));
+      state.queuePaused=result.paused; await refreshJobs();
+    }catch(error){toast(error.message);}finally{button.disabled=false;}
+  });
+  $("btn-gallery-download-zip")?.addEventListener("click", async e => {
+    const button=e.currentTarget; button.disabled=true;
+    try {
+      const ids=state.galleryVideoSelectMode ? state.galleryVideoPickIds || [] : [];
+      if(state.galleryVideoSelectMode && !ids.length) throw Error(tt('merge.pick'));
+      const link=document.createElement('a');link.href='/api/gallery-download?ids='+encodeURIComponent(ids.join(','));link.download='h3-studio-videos.zip';document.body.appendChild(link);link.click();link.remove();
+    }catch(error){toast(error.message);}finally{button.disabled=false;}
+  });
   $("btn-gallery-video-select")?.addEventListener("click", () => {
     if (!state.galleryVideoSelectMode && state.galleryMergeMode) exitGalleryMergeMode();
     state.galleryVideoSelectMode = !state.galleryVideoSelectMode;
@@ -11555,7 +11640,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         names = [];
       }
     }
-    setDonorRoll(["Diamond204a", ...names]);
+    setDonorRoll(["Diamond204a", "Corey", ...names]);
   }
 
   $("btn-donor-ticker")?.addEventListener("click", () => $("btn-support")?.click());

@@ -27,7 +27,8 @@ class WorkflowContracts(unittest.TestCase):
         self.assertEqual(continuum.align_reference_labels('<Picture 1> is B; <Picture 2> is the set.', ['other.png','place.png'], refs), '<Picture 2> is B; <Picture 1> is the set.')
         self.assertEqual(assignments,{'actor.png':[1],'place.png':[1,2],'other.png':[2]})
         job=dict(id='refs',prompt='Test',continuum_prompts=['One','Two'],duration=5,width=864,height=480,steps=12,seed=7,h3_models=DEFAULT_MODELS,continuum_run='refs',ref_images=refs,continuum_ref_assignments=assignments)
-        graph=continuum.build(job)
+        with patch('lib.comfy.apply_spectrum',side_effect=lambda g:g):
+            graph=continuum.build(job)
         self.assertEqual(graph['c_refs']['inputs']['reference_use'],'Per chunk')
         self.assertEqual(graph['c_refs']['inputs']['reference_r1_chunks'],'1')
         self.assertEqual(graph['c_refs']['inputs']['reference_r2_chunks'],'1,2')
@@ -38,14 +39,16 @@ class WorkflowContracts(unittest.TestCase):
         self.assertEqual(continuum.build(job)['c_sample']['inputs']['reference_size'],'Match Output')
         with self.assertRaises(ValueError): continuum.reference_plan([{'ref_images':[f'{i}.png' for i in range(10)]}])
 
-    def test_continuum_removes_spectrum_without_dropping_model_dependencies(self):
+    def test_continuum_preserves_spectrum_but_disables_unsafe_saved_prefix_reuse(self):
         job=dict(id='draft',prompt='Test',duration=5,width=864,height=480,
                  steps=12,seed=7,h3_models=DEFAULT_MODELS,continuum_run='draft')
         with patch.object(Path,'read_text',return_value='{"spectrum_enabled": true}'):
             graph=continuum.build(job)
-        self.assertFalse(continuum.has_spectrum(graph))
-        self.assertEqual(graph['c_sample']['inputs']['model'],['6',0])
-        self.assertEqual(graph['9']['inputs']['model'],['6',0])
+        self.assertTrue(continuum.has_spectrum(graph))
+        self.assertEqual(graph['c_sample']['inputs']['run_storage'],'Off')
+        model_node=graph[graph['c_sample']['inputs']['model'][0]]
+        self.assertEqual(model_node['class_type'],'SpectrumApplyMiniMaxH3')
+        self.assertEqual(graph['9']['inputs']['model'],graph['c_sample']['inputs']['model'])
         job['continuum_base_graph']['legacy']={'class_type':'SpectrumApplyMiniMaxH3','inputs':{'model':['6',0]}}
         with self.assertRaises(ValueError): continuum.build(job)
 

@@ -99,7 +99,7 @@ class DirectorMultiLoraTests(unittest.TestCase):
 
     def test_overflow_is_rejected_without_dropping_actor(self):
         with self.assertRaises(server.HTTPException) as caught:
-            self.select("a.safetensors|b.safetensors|c.safetensors", [self.actor()])
+            self.select("a.safetensors|b.safetensors|c.safetensors|d.safetensors|e.safetensors", [self.actor()])
         self.assertEqual(caught.exception.detail["code"], "lora.stackLimit")
 
     def test_missing_adapter_is_rejected(self):

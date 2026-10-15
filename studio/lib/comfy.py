@@ -1002,7 +1002,7 @@ def apply_lora(
     strength: float = 0.75,
 ) -> dict[str, Any]:
     """Patch UNET with the adapter's compatible loader; rewire model users."""
-    names = [Path(part).name.strip() for part in str(lora_name or "").split("|") if Path(part).name.strip()][:3]
+    names = [Path(part).name.strip() for part in str(lora_name or "").split("|") if Path(part).name.strip()][:5]
     if not names:
         return g
     try:

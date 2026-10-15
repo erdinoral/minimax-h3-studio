@@ -52,7 +52,7 @@ def save_guidance(name: str, guide: str, triggers: str) -> dict:
 
 def guidance_block(names: list[str]) -> str:
     records = []
-    for name in list(dict.fromkeys(names or []))[:3]:
+    for name in list(dict.fromkeys(names or []))[:5]:
         try:
             row = guidance(name)
         except (ValueError, OSError):

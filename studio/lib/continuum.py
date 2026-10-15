@@ -71,7 +71,8 @@ def build(job):
                             sampler=job.get('sampler') or 'res_multistep',
                             scheduler=job.get('scheduler') or 'simple', sage_attention='disabled',
                             lora_name=job.get('lora_name'), lora_strength=job.get('lora_strength') or 0.75)
-    remove_spectrum(graph)
+    # Preserve the user's acceleration choice for new runs. Spectrum's mutable
+    # binding cannot safely participate in persisted prefix reuse (see below).
     # Retain the already-patched native model branch and scheduler.
     model = graph['16']['inputs']['model']
     sigmas = graph['14']['inputs']['sigmas']
@@ -102,7 +103,7 @@ def build(job):
                   sequence_prompt='\n---\n'.join(prompts), prompt_mode='List',
                   chunks=len(prompts), chunk_seconds=duration, base_seed=job['seed'],
                   size_source='Manual', width=job['width'], height=job['height'],
-                  run_storage='Save + Auto Resume', run_name=job['continuum_run'],
+                  run_storage='Off' if has_spectrum(graph) else 'Save + Auto Resume', run_name=job['continuum_run'],
                   project_id=job['continuum_run'], generation_mode='Full Run',
                   audio_continuity=not job.get('silent_audio',False),
                   reference_size=job.setdefault('continuum_reference_size','Max Identity'),

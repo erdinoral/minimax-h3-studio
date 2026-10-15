@@ -13,6 +13,8 @@ import shutil
 import sys
 import time
 import uuid
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -673,7 +675,7 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
         h3_enhancements.selected_presets("|".join(chosen), graph)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if len(chosen) > 3:
+    if len(chosen) > 5:
         raise HTTPException(400, {"code": "lora.stackLimit"})
     if requested and not chosen and excluded_characters != len(requested):
         raise HTTPException(400, {"code": "lora.noCompatibleSelection"})
@@ -698,7 +700,7 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]
     if job.get("scene_audio_file") and job.get("scene_audio_mode") == "reference":
         graph = "ref2va"
     usable = []
-    for item in name.split("|")[:3]:
+    for item in name.split("|")[:5]:
         spec = find_spec(file=item)
         graphs = (spec or {}).get("graphs") or ["fl2va", "ref2va"]
         if job.get("sheet_job") and spec and is_still_lora(spec):
@@ -1075,6 +1077,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
+        "scene_title": job.get("scene_title"),
         "shot_index": job.get("shot_index"),
         "music_id": job.get("music_id"),
         "cinema_batch": job.get("cinema_batch"),
@@ -1472,7 +1475,7 @@ class StoryboardBody(BaseModel):
 
 
 class DirectorChatBody(BaseModel):
-    lora_names: list[str] = Field(default_factory=list, max_length=3)
+    lora_names: list[str] = Field(default_factory=list, max_length=5)
     session_id: Optional[str] = None
     message: str = ""
     model: Optional[str] = None
@@ -1514,7 +1517,7 @@ class DirectorRewriteShotsBody(BaseModel):
 
 
 class PromptRewriteBody(BaseModel):
-    lora_names: list[str] = Field(default_factory=list, max_length=3)
+    lora_names: list[str] = Field(default_factory=list, max_length=5)
     prompt: str = Field(..., min_length=1)
     context: Optional[str] = None
     prompt_rewriter_enabled: bool = True
@@ -2269,6 +2272,56 @@ async def system_stats():
     return out
 
 
+class GalleryDownloadBody(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=1000)
+
+
+@app.post("/api/gallery-download")
+def gallery_download(body: GalleryDownloadBody):
+    selected = set(body.ids)
+    entries = [g for g in _gallery if not selected or g.get('id') in selected]
+    if not entries or (selected and selected != {g.get('id') for g in entries}):
+        raise HTTPException(404, 'Selected gallery videos were not found')
+    archive = tempfile.SpooledTemporaryFile(max_size=8*1024*1024, mode='w+b')
+    try:
+        with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_STORED) as bundle:
+            for entry in entries:
+                path = GALLERY / f"{entry['id']}.mp4"
+                if not path.is_file():
+                    raise HTTPException(404, 'A selected gallery video is missing')
+                # Stable unique names prevent collisions and user-supplied paths.
+                bundle.write(path, f"{_slug_clip(entry.get('scene_title') or entry.get('prompt') or 'video')}_{entry['id']}.mp4")
+        archive.seek(0)
+    except BaseException:
+        archive.close()
+        raise
+    def stream():
+        try:
+            while block := archive.read(1024*1024):
+                yield block
+        finally:
+            archive.close()
+    return StreamingResponse(stream(), media_type='application/zip',
+        headers={'Content-Disposition':'attachment; filename="h3-studio-videos.zip"'})
+
+
+@app.get('/api/gallery-download')
+def gallery_download_link(ids: str = Query('', max_length=50000)):
+    return gallery_download(GalleryDownloadBody(ids=[value for value in ids.split(',') if value]))
+
+
+_queue_paused = False
+
+class QueuePauseBody(BaseModel):
+    paused: bool
+
+@app.post('/api/queue/pause')
+async def pause_queue(body: QueuePauseBody):
+    global _queue_paused
+    async with _lock:
+        _queue_paused = body.paused
+    return {'paused':_queue_paused, 'after_current':True}
+
 @app.get("/api/jobs")
 async def list_jobs():
     _ensure_queue_loop()
@@ -2278,7 +2331,7 @@ async def list_jobs():
         if row.get("status") == "done" and not row.get("download_name"):
             row["download_name"] = video_download_name(row, item_id=str(row.get("id") or ""))
         jobs.append(row)
-    return {"jobs": jobs}
+    return {"jobs": jobs, "queue_paused": _queue_paused}
 
 
 @app.get("/api/gallery")
@@ -3782,7 +3835,7 @@ class CinemaDirectorBody(BaseModel):
     logline: Optional[str] = None
     prompt_rewriter_enabled: bool = False
     stream: bool = True
-    lora_names: list[str] = Field(default_factory=list, max_length=3)
+    lora_names: list[str] = Field(default_factory=list, max_length=5)
 
 
 def _brief_from_cinema_board(
@@ -4467,6 +4520,7 @@ async def _queue_cinema_seamless(
             "voice_refs": _voice_refs_from_hits(merged_hits.get("hits") or []),
             "chain_normalize": True,
             "shot_id": (chunk_parsed[0] or {}).get("id") if chunk_parsed else None,
+            "scene_title": ' / '.join(str((s.get('structured') or {}).get('title') or s.get('title') or f"Scene {shot_offset+i+1}") for i,s in enumerate(chunk_parsed)),
             "shot_index": shot_offset + 1,
             "take_title": take_title,
             **_lora_fields(lora_src),
@@ -5541,6 +5595,7 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
     ))
     for job in queued.get("jobs") or []:
         job["shot_id"] = body.shot_id
+        job["scene_title"] = str((shot.get("structured") or {}).get("title") or shot.get("title") or f"Scene {index + 1}").strip()
         job["shot_index"] = index + 1
     if queued.get("jobs"):
         _save_jobs()
@@ -5916,6 +5971,8 @@ async def cinema_produce(body: CinemaProduceBody):
             continue
         if i < len(to_queue):
             job["shot_id"] = to_queue[i].get("id")
+            scene = to_queue[i]
+            job["scene_title"] = str((scene.get("structured") or {}).get("title") or scene.get("title") or scene.get("name") or f"Scene {i + 1}").strip()
             # Preserve original scene number in the full film list
             full_ids = [str(s.get("id") or "") for s in (lib.get("shots") or [])]
             sid = str(to_queue[i].get("id") or "")
@@ -9336,7 +9393,7 @@ async def _queue_loop():
         try:
             job = None
             async with _lock:
-                job = _pick_next_job()
+                job = None if _queue_paused else _pick_next_job()
             if not job:
                 await asyncio.sleep(0.4)
                 continue

@@ -9,7 +9,9 @@
   window.getContinuumMainPrompt = () => method==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
   window.getDirectorContinuumBackend = () => "continuum";
   window.isDirectorContinuumReady = () => caps.continuum_ready === true;
+  window.canSetContinueReferences = () => !(method==='continuum' && sourceMeta?.continuum_run);
   function updateTotal() {
+    if($('continue-reference-inputs')) $('continue-reference-inputs').hidden=!window.canSetContinueReferences();
     const target=$('continuum-total');if(!target)return;
     const selected=document.querySelector('#dur-chips .chip.on');
     let seconds=Number(selected?.dataset.dur)||5;
@@ -36,7 +38,11 @@
     if(legacyAudio)legacyAudio.hidden=method==='continuum';
     const host = $('video-workflow-controls');
     if (!host) return;
-    host.innerHTML = `<div class="continuum-heading"><strong>Continuum <small>${text('Deneysel','Experimental')}</small>${method==='continuum'?'<small>Spectrum OFF</small>':''}</strong>
+    const sectionMode = method==='continuum' && layout==='segments';
+    if ($('prompt')) $('prompt').hidden=sectionMode;
+    if ($('btn-prompt-rewrite')) $('btn-prompt-rewrite').hidden=sectionMode;
+    host.closest('.zone-prompt')?.classList.toggle('has-continuum-sections',sectionMode);
+    host.innerHTML = `<div class="continuum-heading"><strong>Continuum <small>${text('Deneysel','Experimental')}</small></strong>
       <label class="continuum-toggle"><input id="h3-continuum-toggle" type="checkbox" ${method==='continuum'?'checked':''} ${caps.continuum_ready?'':'disabled'}><span>${method==='continuum'?'ON':'OFF'}</span></label></div>
       <div ${method==='continuum'?'':'hidden'}>
         <div class="continuum-layout"><button type="button" data-layout="single" class="chip ${layout==='single'?'on':''}">${text('Tek prompt','Single prompt')}</button><button type="button" data-layout="segments" class="chip ${layout==='segments'?'on':''}">${text('Bölüm bölüm','Per section')}</button></div>
@@ -49,7 +55,10 @@
       </div>
       `;
     $('h3-continuum-toggle').onchange=e=>{method=e.target.checked?'continuum':'standard';render();};
-    host.querySelectorAll('[data-layout]').forEach(b=>b.onclick=()=>{layout=b.dataset.layout;render();});
+    host.querySelectorAll('[data-layout]').forEach(b=>b.onclick=()=>{
+      if(b.dataset.layout==='segments' && layout==='single' && segments.length===1 && !segments[0].trim()) segments[0]=$('prompt')?.value || '';
+      layout=b.dataset.layout;render();
+    });
     const count=$('h3-continuum-chunks');
     if(count)count.onchange=e=>{chunks=Math.max(1,Math.min(16,Number(e.target.value)||1));e.target.value=chunks;updateTotal();};
     const cards=$('continuum-segments');

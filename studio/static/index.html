@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=directorswitches270" />
+  <link rel="stylesheet" href="/static/app.css?v=issues274" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -263,6 +263,15 @@
           </div>
           <label id="cont-which-label">Hangi videodan devam?</label>
           <select id="continue-source"></select>
+          <div id="continue-reference-inputs">
+            <label data-i18n="continue.referenceImages">Karakter referans görselleri (isteğe bağlı)</label>
+            <label class="file-pick">
+              <input type="file" id="continue-ref-files" class="file-pick-input" accept="image/*" multiple />
+              <span class="file-pick-btn" data-i18n="pick.images">Görseller seç</span>
+              <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
+            </label>
+            <div class="ref-thumbs" id="continue-ref-thumbs"></div>
+          </div>
           <label class="check"><input type="checkbox" id="continue-audio-continuity" checked /> <span data-i18n="ui.label1">Önceki klibin ses atmosferini devam ettir</span> <small>(beta)</small></label>
           <div class="continue-preview hidden" id="continue-box">
             <span id="continue-label">Son kare</span>
@@ -270,7 +279,6 @@
           </div>
         </div>
         <div class="scene-generation-settings">
-        <div class="h3-workflow-card" id="video-workflow-controls"></div>
         <label><span id="ayar-seed-label">Seed</span> <input type="number" id="seed" value="-1" /> <small id="ayar-seed-rand">(-1 = random)</small></label>
         <label><span id="ayar-steps-label">Adım</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
         <label id="ayar-speed-label">Hız</label>
@@ -320,6 +328,7 @@
           <div class="prod-top">
             <div id="prod-text">Hazır</div>
             <button type="button" class="btn-ghost" id="btn-stop">Durdur</button>
+            <button type="button" class="btn-ghost" id="btn-queue-pause" data-i18n="queue.pauseAfter">Bu üretimden sonra beklet</button>
           </div>
           <div class="progress-box hidden" id="progress-wrap">
             <div class="progress-wrap">
@@ -334,6 +343,7 @@
 
     <section class="zone zone-prompt panel prompt">
       <h2>Prompt</h2>
+      <div class="h3-workflow-card" id="video-workflow-controls"></div>
       <textarea id="prompt" rows="3" placeholder="Sahneyi, kamerayı, diyalogu ve sesi anlat… (Ctrl+Enter = sıraya ekle)"></textarea>
       <div class="gen-actions">
         <button type="button" class="btn-ghost" id="btn-prompt-rewrite" title="LLM ile prompt düzenle (üretmeden)" data-i18n-title="ui.btn-prompt-rewrite.title">Rewrite</button>
@@ -614,7 +624,7 @@
           <h2>Direktör · Sinema stüdyosu</h2>
           <select id="cinema-film-select" title="Film"></select>
           <button type="button" class="btn-ghost" id="btn-cinema-film-new">Yeni film</button>
-          <button type="button" class="btn-ghost" id="btn-cinema-film-delete">Filmi sil</button>
+          <button type="button" class="btn-ghost" id="btn-cinema-film-delete" data-i18n="cinema.deleteFilmButton">Filmi sil</button>
         </div>
         <label class="cinema-film-name">
           <span id="cinema-film-name-label">Film adı</span>
@@ -1088,6 +1098,7 @@
         <span class="muted gallery-merge-hint hidden" id="gallery-merge-hint"></span>
         <span class="muted gallery-merge-count hidden" id="gallery-merge-count"></span>
         <button type="button" class="btn-secondary" id="btn-gallery-video-select">Video seç</button>
+        <button type="button" class="btn-secondary" id="btn-gallery-download-zip" data-i18n="gallery.downloadZip">Tümünü / seçilenleri ZIP indir</button>
         <button type="button" class="btn-secondary hidden" id="btn-gallery-video-delete">Seçilenleri sil</button>
         <button type="button" class="btn-secondary hidden" id="btn-gallery-photo-select">Fotoğraf seç</button>
         <button type="button" class="btn-secondary hidden" id="btn-gallery-photo-delete">Seçilenleri sil</button>
@@ -1316,19 +1327,19 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=continuum-scene258" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=issues274" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
-  <script src="/static/app.js?v=librarymodal268" charset="utf-8"></script>
+  <script src="/static/app.js?v=issues274" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>
   <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
 <script src="/static/h3-enhancements.js?v=2"></script>
-  <script src="/static/video-workflows.js?v=9"></script>
+  <script src="/static/video-workflows.js?v=12"></script>
   <script src="/static/scene-selectors.js?v=3"></script>
   <script src="/static/scene-settings.js?v=2"></script>
   <script src="/static/sponsor-banner.js?v=1"></script>

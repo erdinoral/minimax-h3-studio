@@ -13,6 +13,17 @@ def function_from(file, name, env):
     return env[name]
 
 class IndependentWeights(unittest.TestCase):
+    def test_five_adapter_stack_reaches_guider_with_all_independent_weights(self):
+        apply=function_from("lib/comfy.py","apply_lora",dict(Any=Any,Optional=Optional,Path=Path))
+        graph={"6":{"inputs":{}},"guider":{"inputs":{"model":["6",0]}}}
+        weights={f'{name}.safetensors':i/4 for i,name in enumerate('abcde')}
+        apply(graph,'|'.join(weights),weights)
+        self.assertEqual(graph['guider']['inputs']['model'],['lora_stack_5',0])
+        for index,(name,weight) in enumerate(weights.items(),1):
+            node=graph['7' if index==1 else f'lora_stack_{index}']['inputs']
+            self.assertEqual(node['lora_name'],name)
+            self.assertEqual(node['strength_model'],weight)
+
     def test_model_loaders_receive_different_weights_and_zero(self):
         apply=function_from("lib/comfy.py","apply_lora",dict(Any=Any,Optional=Optional,Path=Path))
         graph={"6":{"inputs":{}},"guider":{"inputs":{"model":["6",0]}}}

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import shutil
 import time
@@ -163,6 +164,8 @@ _EMPTY: dict[str, Any] = {
     "duration": 5,
     "quality": "720",
     "steps": 20,
+    "lora_selection": [],
+    "lora_weights": {},
     "seed": -1,
     "seed_lock": False,
     "image_provider": "minimax",
@@ -1199,6 +1202,8 @@ def save(data: dict[str, Any], *, preserve_stills: bool = True,
         "steps": steps,
         "seed": seed,
         "seed_lock": seed_lock,
+        "lora_selection": list(dict.fromkeys(str(x) for x in data.get("lora_selection", prev.get("lora_selection", [])) if str(x)))[:5],
+        "lora_weights": {str(k): max(-6.0, min(6.0, float(v))) for k,v in data.get("lora_weights", prev.get("lora_weights", {})).items() if isinstance(v, (int,float)) and math.isfinite(v)},
         "image_provider": "image_studio" if data.get("image_provider") == "image_studio" else "minimax",
         "characters": [
             _clean_asset(x, "character")

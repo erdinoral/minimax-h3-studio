@@ -8780,6 +8780,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.queuePaused=!!data.queue_paused;
       const pauseButton=$('btn-queue-pause');
       if(pauseButton?.dataset){pauseButton.dataset.i18n=state.queuePaused?'queue.resume':'queue.pauseAfter';pauseButton.textContent=tt(pauseButton.dataset.i18n);}
+      const running=state.jobs.some(job=>job.status==='running');
+      const pending=state.jobs.some(job=>job.status==='queued');
+      $('btn-stop')?.classList.toggle?.('hidden',!running);
+      pauseButton?.classList.toggle?.('hidden',!running && !pending && !state.queuePaused);
       state.jobStatusSnapshot = Object.fromEntries(
         (state.jobs || []).map((j) => [j.id, j.status])
       );

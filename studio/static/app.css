@@ -4834,8 +4834,7 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 /* Neon sponsor sign above the player. */
 .sponsor-banner { height:30px; flex-basis:30px; border:1px solid #ef444455; background:linear-gradient(180deg,#190c16,#080b13); box-shadow:inset 0 0 12px #ff304012,0 0 8px #ff304018; }
 .sponsor-banner.is-showing { border-color:#ff5366aa; box-shadow:inset 0 0 16px #ff304025,0 0 10px #ff304044; }
-.sponsor-banner-message { color:#ffb1b8; font-weight:700; line-height:30px; letter-spacing:.09em; text-shadow:0 0 2px #fff,0 0 5px #ff6579,0 0 12px #ff3048,0 0 22px #f51739; }
-.sponsor-banner.is-showing::after { content:''; position:absolute; inset:0; pointer-events:none; background:repeating-linear-gradient(0deg,transparent 0 3px,#0002 3px 4px); border-radius:inherit; }
+.sponsor-banner-message { color:#ffd9dd; font-weight:700; line-height:30px; letter-spacing:.04em; text-shadow:0 0 3px #ff304833; }
 .sponsor-banner.is-showing { animation:sponsor-neon-wake .45s ease-out; }
 @keyframes sponsor-neon-wake { 0% { opacity:.55; } 25% { opacity:1; } 40% { opacity:.8; } 100% { opacity:1; } }
 @media (prefers-reduced-motion:reduce) { .sponsor-banner.is-showing { animation:none; } }

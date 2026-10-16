@@ -14,8 +14,10 @@
     const name = names[position];
     text.textContent = sponsorTurn
       ? name === "Diamond204a"
-        ? english() ? "THANK YOU · Diamond204a · Our first sponsor · $25 support + valuable feedback" : "TEŞEKKÜRLER · Diamond204a · İlk sponsorumuz · $25 destek ve değerli geri bildirimler"
-        : `${english() ? "THANK YOU" : "TEŞEKKÜRLER"} · ${name}`
+        ? english() ? "THANK YOU · Diamond204a · Our first sponsor · $25 support" : "TEŞEKKÜRLER · Diamond204a · İlk sponsorumuz · $25 destek"
+        : name === "Corey"
+          ? english() ? "THANK YOU · Corey · Our second sponsor · $5 support" : "TEŞEKKÜRLER · Corey · İkinci sponsorumuz · $5 destek"
+          : `${english() ? "THANK YOU" : "TEŞEKKÜRLER"} · ${name}`
       : english() ? "Support H3 Studio · Become a sponsor on Buy me a coffee ☕" : "H3 Studio’ya destek ol · Buy me a coffee üzerinden sponsor olun ☕";
     banner.classList.remove("is-showing");
     void banner.offsetWidth;

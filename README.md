@@ -720,4 +720,6 @@ Settings → Video engine includes an opt-in Spectrum switch. It is off by defau
 
 ## Sponsors
 
+Enjoying H3 Studio? [Buy Erdin a coffee](https://buymeacoffee.com/erdindev) to support ongoing development, bug fixes, and new features.
+
 **Diamond204a** — our first sponsor, with **$25** in support. Their feedback also helps improve H3 Studio. Thank you!

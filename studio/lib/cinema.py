@@ -793,7 +793,11 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
         parts.append(f"Action: {s['action']}")
     if s.get("beats"):
         beats = "; ".join(line.strip() for line in s["beats"].splitlines() if line.strip())
-        parts.append(f"Chronological action beats: {beats}" + ("" if beats.endswith((".", "!", "?")) else "."))
+        # AI-authored plans often repeat Action verbatim in Beats. Keep distinct
+        # chronology, but do not ask the model to perform the same action twice.
+        normalized = lambda value: ' '.join(str(value).split()).rstrip('.!?').casefold()
+        if normalized(beats) != normalized(s.get('action') or ''):
+            parts.append(f"Chronological action beats: {beats}" + ("" if beats.endswith((".", "!", "?")) else "."))
     if s.get("camera_framing"):
         parts.append(f"Framing: {s['camera_framing']}.")
     if s.get("camera_angle"):

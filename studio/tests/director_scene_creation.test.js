@@ -87,4 +87,14 @@ test('Produce all queues both chapters; chapter production queues only its chapt
   assert.equal(requests.length, 2, errors.join('\n'));
   assert.deepEqual(requests[0].shots.map(s => s.id), ['a', 'b']);
   assert.deepEqual(requests[1].shots.map(s => s.id), ['b']);
+  context.cinemaStudioMode = () => 'seamless';
+  context.state.multishot = true;
+  cinema.shots[0].take_index = 1;
+  cinema.shots[0].structured = {ending_frame: 'At the foot of the mountain'};
+  cinema.shots[1].mode = 't2v';
+  cinema.shots[1].take_index = 2;
+  await context.produceCinema({all:true});
+  assert.equal(requests[2].shots[0].structured.ending_frame,'At the foot of the mountain');
+  assert.equal(requests[2].shots[1].take_index,2);
+  assert.equal(requests[2].shots[1].mode,'t2v');
 });

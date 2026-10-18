@@ -24,14 +24,26 @@ def hybrid_installed():
     for sub in ('diffusion_models','unet'):
         folder=MODELS_ROOT/sub
         if not folder.is_dir(): continue
-        for path in sorted(folder.iterdir(),key=lambda p:(p.name != HYBRID_FILE,p.name.lower())):
+        for path in sorted(folder.rglob('*'),key=lambda p:(p.name != HYBRID_FILE,p.as_posix().lower())):
             normalized=''.join(c for c in path.stem.lower() if c.isalnum())
             if path.is_file() and path.suffix.lower()=='.safetensors' and 'hybrid' in normalized and ('minimax' in normalized or 'h3' in normalized) and path.stat().st_size==HYBRID_BYTES:
                 return path
     return None
 
+
+def _loader_name(path):
+    for sub in ('diffusion_models', 'unet'):
+        try:
+            return path.relative_to(MODELS_ROOT/sub).as_posix()
+        except ValueError:
+            continue
+    raise ValueError('Model is outside the configured model folders')
+
 def supports_long_reference(duration, mode, model):
-    return duration == 30 and mode == "ref" and model == HYBRID_FILE
+    if duration != 30 or mode != 'ref':
+        return False
+    path = hybrid_installed()
+    return model == HYBRID_FILE or bool(path and model == _loader_name(path))
 _status: dict = {}
 _task = None
 
@@ -49,9 +61,11 @@ def engine_status():
     active = "singularity" if all(n in ALIASES for n in names) else (
         "minimax" if all(resolved[g]["unet"] == h3_models.defaults()["unet_ref2va" if g == "ref2va" else "unet"] for g in resolved) else "custom")
     hybrid=hybrid_installed()
-    if all(n == HYBRID_FILE or (hybrid and n == hybrid.name) for n in names):
+    if hybrid and all(n == _loader_name(hybrid) for n in names):
         active = "hybrid"
-    return {"active": active, "hybrid_ready": bool(hybrid_installed()), "singularity_ready": bool(installed()), "resolved": resolved}
+    return {"active": active, "hybrid_ready": bool(hybrid), "singularity_ready": bool(installed()), "resolved": resolved,
+            "hybrid_file": _loader_name(hybrid) if hybrid else None,
+            "hybrid_expected_bytes": HYBRID_BYTES}
 
 def select_engine(engine):
     if engine not in ("minimax", "singularity", "hybrid"):
@@ -59,7 +73,7 @@ def select_engine(engine):
     path = hybrid_installed() if engine == "hybrid" else installed() if engine == "singularity" else None
     if engine != "minimax" and not path:
         raise ValueError(f"{engine} model is not installed")
-    name = path.name if path else ""
+    name = _loader_name(path) if path else ""
     h3_models.save({"unet": name, "unet_ref2va": name})
     state = engine_status()
     if state["active"] != engine:

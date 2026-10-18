@@ -51,3 +51,33 @@ Kalan: **UI shell (Higgsfield)** — en son iş.
 - Storyboard `/api/storyboard`
 - Süre 4/5/6/8/10/15 + Fast preset
 - Direktör sekmesi + `/api/director/bible/generate`
+
+
+## Güncel açık işler — 2026-10-15
+
+Bu bölüm mevcut uygulama için geçerli plandır. Ağustos listesindeki UI shell maddesi tarihsel bir hedeftir; güncel arayüz geliştirmeleri sonrası yeniden değerlendirilmeden aktif işe çevrilmeyecek. Eski LoRA araştırma listesi yeni indirme veya geliştirme emri değildir; kullanıcının yeni LoRA istememe tercihi geçerlidir.
+
+### Öncelikli: Continuum üretimini kurtarma
+- [ ] Her iş için tamamlanan bölüm sayısını ve güvenilir kayıt durumunu göster.
+- [ ] Hata, uygulama kapanması veya bilgisayarın yeniden açılması sonrası son doğrulanmış bölümden devam et.
+- [ ] Model, referans, seed, sampler ve kaynak kayıt uyumunu doğrula; önceki bölümleri sessizce yeniden üretme.
+- [ ] Eksik/bozuk/uyumsuz kayıtları açıkça belirt. Standart MP4 veya eski Spectrum’lu Continuum kaydını kurtarılabilir native kayıt gibi sunma.
+
+### Sonraki: Seçilen bölümden itibaren yeniden üretim
+- [ ] Kullanıcı yeniden üretimin başlayacağı bölümü seçebilsin.
+- [ ] Önceki bölümler aynen korunsun; seçilen bölüm ve sonrası yeniden üretilsin.
+- [ ] Yeni sonuç ayrı galeri kaydı olsun; önceki video korunmaya devam etsin.
+- [ ] Yeni dalın kaynak revision bilgisini sakla; başka bir dalın kaydını yanlışlıkla kullanma.
+
+### Açık kalite ve doğrulama işleri
+- [ ] Devam tutarlılığı: karakter/yüz, kadraj, ışık ve hareket kaymasını azaltacak yöntemleri karşılaştırmalı test et. Mevcut iyileştirmeler kusursuz tutarlılık sağlamıyor.
+- [ ] Max Identity ile Match Output farkını aynı kaynak ve ayarlarla karşılaştır; maksimum ayarın bellek/süre/kalite etkisi henüz ölçülmedi.
+- [ ] Uzun Continuum dizileri ve ses/müzik geçişleri için gerçek testler yap. Şu ana kadarki kısa görsel kontroller ses doğrulaması değildir.
+- [ ] Spectrum’un Singularity ve Hybrid’de gerçek hız/kalite karşılaştırmasını yap. Graph bağlantı testleri geçti; motor başına GPU hız kazancı doğrulanmadı.
+- [ ] Continuum + Spectrum kayıt uyumluluğu: yeni çalışmalarda Spectrum kullanılabilir, fakat Spectrum varken native kayıt depolaması kapalıdır. Eski Spectrum’lu kayıttan devam güvenilir runtime imzası doğrulanmadan açılmayacak.
+
+### Kullanıcı isteğiyle sonraya bırakılanlar
+- [ ] API/LLM gerektirmeyen üretim öncesi referans etiketi ve teknik devam kontrolü.
+- [ ] Süreye uygun prompt/konuşma uyarısı ve isteğe bağlı anlamsal devam kontrolü.
+
+Bu liste uygulama planıdır; bu turda üretim kuyruğu veya yeni model indirmesi başlatılmadı.

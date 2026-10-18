@@ -7,3 +7,18 @@ test('Prompt details display effective adapter weights and recorded model, not c
   assert.match(meta,/recorded-model/);assert.match(meta,/mara \(1.05\)/);assert.match(meta,/detail \(0\)/);assert.doesNotMatch(meta,/wrong/);assert.match(meta,/Cast: Mara/);
   assert.match(ctx.jobProductionMeta({lora_name:'wrong',effective_lora_name:''}),/LoRA: none/);
 });
+
+test('Continuum metadata separates native chunks from last-frame handoff',()=>{
+  const source=fs.readFileSync('studio/static/app.js','utf8');
+  const ctx=vm.createContext({window:{h3Lang:()=> 'en'},tt:()=> 's'});
+  vm.runInContext(source.slice(source.indexOf('  function jobProductionMeta('),source.indexOf('  function setClipPrompt(')),ctx);
+  const meta=ctx.jobProductionMeta({mode:'continuum',duration:5,continuum_prompts:['one','two'],continue_from:'previous',continuum_reference_size:'Match Output'});
+  assert.match(meta,/Native sequence: 2 × 5s/);
+  assert.match(meta,/Between jobs: previous last frame/);
+  assert.match(meta,/Reference size: Match Output/);
+  const resumed=ctx.jobProductionMeta({mode:'continuum',duration:5,continue_from:'previous',continuum_resume:true});
+  assert.match(resumed,/saved native context/);
+  assert.doesNotMatch(resumed,/previous last frame/);
+  assert.match(ctx.jobProductionMeta({effective_spectrum:{enabled:true,video_blend_weight:0.6}}),/Spectrum: 60%/);
+  assert.match(ctx.jobProductionMeta({effective_spectrum:{enabled:false}}),/Spectrum: off/);
+});

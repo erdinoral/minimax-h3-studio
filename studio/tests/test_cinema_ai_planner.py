@@ -97,3 +97,31 @@ class Planner(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context["existing_assets"]["characters"][0]["lora_file"],"nea.safetensors")
         self.assertEqual(context["clip_seconds"],5)
         self.assertIn("opening_frame",context["section_shape"])
+
+    def test_continuum_plans_ordered_actions_with_explicit_state_handoffs(self):
+        current,_=sample()
+        messages=planner.planning_messages(current,{},"A climber approaches a mountain",6,5,"en",continuum=True)
+        system=messages[0]['content']
+        context=json.loads(messages[1]['content'])
+        self.assertEqual(context['production_mode'],'continuum')
+        self.assertEqual(context['sections_count'],6)
+        self.assertEqual(context['clip_seconds'],5)
+        self.assertIn('SAME ordered sections JSON contract',system)
+        self.assertIn('copy the previous ending_frame',system)
+        self.assertIn('not a new story',system)
+        self.assertIn('Never replay the story introduction',system)
+        ordinary=planner.planning_messages(current,{},'Story',6,5,'en')
+        self.assertEqual(json.loads(ordinary[1]['content'])['production_mode'],'independent_scenes')
+
+    async def test_continuum_ai_plan_links_opening_to_previous_ending_without_changing_action(self):
+        current, package=sample()
+        package['sections'][1]['action']='NEA turns away from the pillar and walks toward the stairs.'
+        package['sections'][1]['opening_frame']='An unrelated starting composition.'
+        router=type('Router',(),{})()
+        router.chat=AsyncMock(return_value=json.dumps(package))
+        result=await planner.generate_package(router,'model',[],current,2,continuum=True)
+        self.assertEqual(result['sections'][1]['opening_frame'],result['sections'][0]['ending_frame'])
+        self.assertEqual(result['sections'][1]['action'],package['sections'][1]['action'])
+        package['sections'][1]['mode']='t2v'
+        cut=planner.validate_package(package,current,2,continuum=True)
+        self.assertEqual(cut['sections'][1]['opening_frame'],'An unrelated starting composition.')

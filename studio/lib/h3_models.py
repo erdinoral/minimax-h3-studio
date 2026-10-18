@@ -49,9 +49,9 @@ def _list_dir(*rel: str) -> list[str]:
         folder = MODELS_ROOT / r
         if not folder.is_dir():
             continue
-        for p in folder.iterdir():
+        for p in folder.rglob('*'):
             if p.is_file() and p.suffix.lower() in (".safetensors", ".sft", ".ckpt", ".pt", ".pth", ".gguf"):
-                names.add(p.name)
+                names.add(p.relative_to(folder).as_posix())
     return sorted(names, key=str.lower)
 
 

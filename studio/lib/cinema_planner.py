@@ -29,7 +29,7 @@ SECTION_FIELDS = (
 )
 
 
-def planning_messages(current, template, story, count, clip, ui_lang, guidance=""):
+def planning_messages(current, template, story, count, clip, ui_lang, guidance="", *, continuum=False):
     assets = {group: [
         {key: asset.get(key, "") for key in ("name", "notes", "voice", "use_lora", "lora_id", "lora_file")}
         for asset in current.get(group, []) if isinstance(asset, dict)
@@ -42,11 +42,17 @@ def planning_messages(current, template, story, count, clip, ui_lang, guidance="
         "Use the author fields in the provided template, including reference, opening/ending frame and camera fields. "
         "Do not return just a prose outline, shot titles, or a single prompt field. "
         "Each action needs specific visible body/prop/light details; camera needs framing and movement. "
+        "Plan one chronological story, not independent variations of the same scene. "
+        "Each section advances one achievable action within its clip duration. Never replay the story introduction "
+        "or restart completed actions in a later section. Keep geography, direction of travel, props and injuries consistent. "
+        "For continue, copy the previous ending_frame into this section's opening_frame, then advance from that state. "
+        "Opening/action/ending must describe the same physical progression; no unexplained teleporting between locations. "
         "Reuse existing asset names EXACTLY when relevant. Preserve the learned identity of LoRA characters; "
         "do not invent another face for them or select/change LoRAs. Only invent new assets required by the story. "
         "Each new asset needs a name and detailed English notes for reference-image generation. "
         "Character names in sections must be exact asset names, comma-separated; location must be an exact location name. "
-        "The first section must be t2v. Use continue only for the SAME uninterrupted shot, location and action; "
+        "The first section must be t2v. Use continue for the SAME uninterrupted shot, location and physical moment; "
+        "the action may progress naturally from looking to turning, walking or climbing without restarting the shot. "
         "use t2v for camera cuts, new locations or time jumps. Characters retain identity across both modes. "
         "Write diegetic sound in audio; music defaults to N/A. Do not generate or queue videos. "
         "Never output images, URLs, file paths, asset IDs or production settings. "
@@ -55,19 +61,31 @@ def planning_messages(current, template, story, count, clip, ui_lang, guidance="
     )
     sample = {"mode": "t2v", **{key: "" for key in SECTION_FIELDS}}
     context = {"story": story, "sections_count": count, "clip_seconds": clip,
+               "production_mode": "continuum" if continuum else "independent_scenes",
                "setup": current.get("setup", {}), "audio_policy": current.get("audio", {}).get("mode"),
                "existing_assets": assets, "section_shape": sample,
                "package_shape": {"schema": "h3-cinema/v1", "title": "", "logline": "",
                    "characters": [{"name": "", "notes": "", "voice": ""}],
                    "locations": [{"name": "", "notes": ""}], "creatures": [], "vehicles": [], "sections": [sample]},
                "field_guide": template.get("_instructions", {}).get("field_guide", {})}
+    if continuum:
+        system += (
+            "\nCONTINUUM: use the SAME ordered sections JSON contract as ordinary Director. "
+            "Shared references describe identity and setting only; every section still needs its own next action. "
+            "Prefer continue while physical action proceeds through the same shot and location. "
+            "Use t2v only for an intentional new shot, location or time; camera cuts must not reset the plot. "
+            "A take boundary is a storage/render boundary, not a new story or a reason to repeat exposition. "
+            "Example progression: observe a distant mountain, turn onto its visible path, walk to its foot, "
+            "then climb the first rocks. Do not jump directly from watching the mountain to climbing elsewhere. "
+            "Do not repeat that example unless it matches the user's story."
+        )
     if context["audio_policy"] == "silent" or context["setup"].get("purpose") == "music_video":
         system += "\nSilent production: dialogue and audio must be empty; music=N/A."
     return [{"role": "system", "content": system},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
 
 
-def validate_package(raw, current, count):
+def validate_package(raw, current, count, *, continuum=False):
     data = extract_package(raw) if isinstance(raw, str) else raw
     if not isinstance(data, dict) or data.get("schema") not in (None, "", "h3-cinema/v1"):
         raise ValueError("aiDirector.invalidPackage")
@@ -116,18 +134,20 @@ def validate_package(raw, current, count):
             raise ValueError("aiDirector.unknownAsset")
         if index and row["mode"] == "continue" and row["location"] != out["sections"][-1]["location"]:
             raise ValueError("aiDirector.invalidContinuity")
+        if continuum and index and row['mode'] == 'continue':
+            row['opening_frame'] = out['sections'][-1]['ending_frame']
         if current.get("audio", {}).get("mode") == "silent" or current.get("setup", {}).get("purpose") == "music_video":
             row.update(dialogue="", audio="", music="N/A")
         out["sections"].append(row)
     return out
 
 
-async def generate_package(router, model, messages, current, count):
+async def generate_package(router, model, messages, current, count, *, continuum=False):
     for attempt in range(2):
         raw = await router.chat(model, messages, temperature=0.4, format_json=True,
                                 num_predict=min(32768, max(8192, count * 1100)), retries=1)
         try:
-            return validate_package(raw, current, count)
+            return validate_package(raw, current, count, continuum=continuum)
         except ValueError as exc:
             parsed = extract_package(raw)
             logging.getLogger("h3.cinema_planner").warning(

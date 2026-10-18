@@ -16,7 +16,7 @@ import uuid
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 import httpx
 import psutil  # Moved from _acquire_single_instance for consistency
@@ -31,6 +31,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
 )
 
 from lib import h3_enhancements, continuum, flow_refine
+from lib import h3_acceleration
 from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
@@ -1032,6 +1033,35 @@ async def _recover_saved_comfy_video(job: dict, source: Path) -> None:
     _archive_job_to_gallery(job)
     slog.info_job(job, "saved Comfy output recovered", file=source.name)
 
+
+async def _reattach_completed_legacy_cancel(job: dict) -> bool:
+    """Repair an old status only from confirmed successful engine history.
+
+    A file alone may be partial. Explicit new cancellations carry provenance
+    and must never be silently resumed or reclassified.
+    """
+    if job.get('status') != 'cancelled' or job.get('cancel_requested_at') or not job.get('prompt_id'):
+        return False
+    pid = str(job['prompt_id'])
+    try:
+        entry = (await comfy.history(pid)).get(pid) or {}
+        status = entry.get('status') or {}
+        if (status.get('completed') is not True or status.get('status_str') != 'success'
+                or not comfy.extract_video_meta(entry.get('outputs') or {})):
+            return False
+    except Exception as exc:
+        slog.warn_job(job, 'legacy cancelled output verification failed', err=exc)
+        return False
+    job.update(status='queued', error=None, _reattach=True,
+               progress_label='Comfy çıktısı doğrulandı — galeriye alınıyor',
+               recovered_from_status='cancelled')
+    return True
+
+
+def _mark_user_cancelled(job: dict, source: str) -> None:
+    job.update(status='cancelled', error='iptal', progress_label='iptal',
+               cancel_requested_at=time.time(), cancel_source=source)
+
 def _archive_job_to_gallery(job: dict) -> None:
     """Copy finished clip into permanent gallery. Survives wipe / clear jobs."""
     global _gallery
@@ -1072,8 +1102,8 @@ def _archive_job_to_gallery(job: dict) -> None:
         "seed": job.get("seed"),
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
-        **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "character_manifest")},
-        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size")},
+        **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "effective_spectrum", "character_manifest")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size","continuum_resume","continuity_method","native_context_chunks")},
         "batch_index": job.get("batch_index"),
         "batch_total": job.get("batch_total"),
         "shot_id": job.get("shot_id"),
@@ -1395,6 +1425,8 @@ class CinemaProduceBody(BaseModel):
     audio: Optional[dict[str, Any]] = None
     seamless: bool = False
     seamless_backend: str = 'continuum'
+    continuum_max_chunks: int = Field(default=16, ge=1, le=16)
+    continuum_reference_size: Literal['Match Output', 'Max Identity'] = 'Match Output'
     # First queue missing character/creature/vehicle/location sheets; scenes start after they finish
     prepare_sheets: bool = True
     # If true, queue sheets even when the card already has a still
@@ -1996,7 +2028,9 @@ async def startup():
         slog.exception("startup Comfy queue peek failed", e)
     for j in _jobs:
         pid = j.get("prompt_id")
-        if pid and pid in live_pids:
+        if await _reattach_completed_legacy_cancel(j):
+            slog.info_job(j, 'startup recover confirmed completed output')
+        elif pid and pid in live_pids and not j.get('cancel_requested_at'):
             # Orphaned watch — Studio died/false-error while Comfy still generating
             j["status"] = "queued"
             j["progress_label"] = "Comfy’de sürüyor — yeniden bağlanılacak"
@@ -2087,23 +2121,24 @@ async def get_donors():
 
 
 class H3AccelerationBody(BaseModel):
-    spectrum_enabled: bool = False
+    spectrum_enabled: Optional[bool] = None
+    spectrum_preset: Optional[Literal["light", "balanced", "strong", "custom"]] = None
+    spectrum_blend_weight: Optional[float] = Field(default=None, ge=0, le=1, allow_inf_nan=False)
 
 
 @app.get("/api/h3-acceleration")
 async def get_h3_acceleration():
-    path = DATA / "h3_acceleration.json"
-    try:
-        enabled = json.loads(path.read_text(encoding="utf-8")).get("spectrum_enabled") is True
-    except (OSError, ValueError, AttributeError):
-        enabled = False
+    settings = h3_acceleration.load_settings(DATA / "h3_acceleration.json")
     installed = (COMFY_ROOT / "custom_nodes" / "ComfyUI-Spectrum-MiniMax-H3" / "__init__.py").is_file()
-    return {"spectrum_enabled": enabled, "spectrum_installed": installed}
+    return {**settings, "spectrum_installed": installed,
+            "spectrum_presets": [{"id": key, "blend_weight": value} for key, value in h3_acceleration.PRESETS.items()]}
 
 
 @app.post("/api/h3-acceleration")
 async def set_h3_acceleration(body: H3AccelerationBody):
-    if body.spectrum_enabled:
+    path = DATA / "h3_acceleration.json"
+    settings = h3_acceleration.update_settings(h3_acceleration.load_settings(path), body.model_dump(exclude_none=True))
+    if settings["spectrum_enabled"]:
         try:
             async with httpx.AsyncClient(timeout=10) as c:
                 r = await c.get(f"{COMFY_URL}/object_info/SpectrumApplyMiniMaxH3")
@@ -2113,10 +2148,7 @@ async def set_h3_acceleration(body: H3AccelerationBody):
             loaded = False
         if not loaded:
             raise HTTPException(409, "Spectrum düğümü yüklenmedi; ComfyUI'yi yeniden başlatın.")
-    path = DATA / "h3_acceleration.json"
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(body.model_dump(), indent=2), encoding="utf-8")
-    temporary.replace(path)
+    h3_acceleration.save_settings(settings, path)
     return await get_h3_acceleration()
 
 
@@ -2187,7 +2219,7 @@ async def reset_production(body: ResetBody = ResetBody()):
             # Allow wipe anyway if user wants clean restart — cancel first
             for j in _jobs:
                 if j.get("status") in ("running", "queued"):
-                    j["status"] = "cancelled"
+                    _mark_user_cancelled(j, 'reset')
                     j["error"] = "reset"
             try:
                 await comfy.interrupt()
@@ -2320,7 +2352,7 @@ async def pause_queue(body: QueuePauseBody):
     global _queue_paused
     async with _lock:
         _queue_paused = body.paused
-    return {'paused':_queue_paused, 'after_current':True}
+    return {'paused':_queue_paused, 'after_current':True, 'mid_render_pause':False}
 
 @app.get("/api/jobs")
 async def list_jobs():
@@ -2331,7 +2363,8 @@ async def list_jobs():
         if row.get("status") == "done" and not row.get("download_name"):
             row["download_name"] = video_download_name(row, item_id=str(row.get("id") or ""))
         jobs.append(row)
-    return {"jobs": jobs, "queue_paused": _queue_paused}
+    return {"jobs": jobs, "queue_paused": _queue_paused,
+            "queue_pause_capability": "after_current"}
 
 
 @app.get("/api/gallery")
@@ -2402,26 +2435,20 @@ async def cancel_job(job_id: str):
             raise HTTPException(400, "yalnızca sıradaki veya üretilen iş durdurulabilir")
         # A queued job has not reached ComfyUI yet, so it can be cancelled alone.
         if status == "queued":
-            job["status"] = "cancelled"
-            job["error"] = "iptal"
-            job["progress_label"] = "iptal"
+            _mark_user_cancelled(job, 'job_stop')
             _save_jobs()
             slog.info_job(job, "queued job cancelled")
             return {"ok": True, "id": job_id, "status": "cancelled"}
 
-    # Studio runs one active render at a time. Interrupting here leaves every
-    # other queued job intact; the queue loop will continue with the next one.
-    try:
-        await comfy.interrupt()
-    except Exception as e:
-        raise HTTPException(500, str(e))
-    async with _lock:
-        job = next((j for j in _jobs if j["id"] == job_id), None)
-        if not job or job.get("status") != "running":
-            raise HTTPException(409, "iş artık üretimde değil")
-        job["status"] = "cancelled"
-        job["error"] = "iptal"
-        job["progress_label"] = "iptal"
+        # Keep the queue from starting a successor while the engine processes
+        # Stop. A completed job must not be overwritten after the HTTP await.
+        try:
+            await comfy.interrupt()
+        except Exception as e:
+            raise HTTPException(500, str(e))
+        if job.get('status') != 'running':
+            return {'ok': True, 'id': job_id, 'status': job.get('status')}
+        _mark_user_cancelled(job, 'job_stop')
         _save_jobs()
     slog.info_job(job, "running job cancelled")
     return {"ok": True, "id": job_id, "status": "cancelled"}
@@ -2784,6 +2811,7 @@ async def generate(body: GenerateBody):
             raise HTTPException(400, str(error))
         continuum_data = {'continuum_run':parent['continuum_run'] if parent else 'studio_' + uuid.uuid4().hex,
                           'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration,
+                          'continuum_resume':bool(parent),
                           'continuum_context':context, 'continuum_continuity':continuity_mode}
         if parent:
             continuum_data.update({key:parent[key] for key in (
@@ -3188,11 +3216,14 @@ async def retry_job(job_id: str):
         job["output"] = None
         job["prompt_id"] = None
         job["local_path"] = None
-        job["first_frame_name"] = None
+        if job.get('continue_from') and not job.get('continuum_resume'):
+            job["first_frame_name"] = None
         job.pop("comfy_step", None)
         job.pop("comfy_step_max", None)
         job.pop("progress_source", None)
         job.pop("_ws_progress_at", None)
+        for key in ('cancel_requested_at', 'cancel_source', 'recovered_from_status', '_reattach'):
+            job.pop(key, None)
         job["retried_at"] = time.time()
         job["retry_count"] = int(job.get("retry_count") or 0) + 1
         _save_jobs()
@@ -3224,11 +3255,14 @@ async def retry_all_errors():
             job["output"] = None
             job["prompt_id"] = None
             job["local_path"] = None
-            job["first_frame_name"] = None
+            if job.get('continue_from') and not job.get('continuum_resume'):
+                job["first_frame_name"] = None
             job.pop("comfy_step", None)
             job.pop("comfy_step_max", None)
             job.pop("progress_source", None)
             job.pop("_ws_progress_at", None)
+            for key in ('cancel_requested_at', 'cancel_source', 'recovered_from_status', '_reattach'):
+                job.pop(key, None)
             job["retried_at"] = time.time()
             job["retry_count"] = int(job.get("retry_count") or 0) + 1
             queued.append(job["id"])
@@ -3345,22 +3379,18 @@ async def clear_jobs(body: ClearJobsBody):
 @app.post("/api/interrupt")
 async def interrupt(cancel_queued: bool = False):
     """Stop the running Comfy job. Queued batch stays unless cancel_queued=true."""
-    try:
-        await comfy.interrupt()
-    except Exception as e:
-        raise HTTPException(500, str(e))
     cancelled = []
     async with _lock:
-        for j in _jobs:
-            if j["status"] == "running":
-                j["status"] = "cancelled"
-                j["error"] = "iptal"
-                j["progress_label"] = "iptal"
-                cancelled.append(j["id"])
-            elif cancel_queued and j["status"] == "queued":
-                j["status"] = "cancelled"
-                j["error"] = "iptal"
-                j["progress_label"] = "iptal"
+        targets = [j for j in _jobs if j.get('status') == 'running'
+                   or (cancel_queued and j.get('status') == 'queued')]
+        if any(j.get('status') == 'running' for j in targets):
+            try:
+                await comfy.interrupt()
+            except Exception as e:
+                raise HTTPException(500, str(e))
+        for j in targets:
+            if j.get('status') in ('queued', 'running'):
+                _mark_user_cancelled(j, 'queue_stop' if cancel_queued else 'stop')
                 cancelled.append(j["id"])
         _save_jobs()
     return {"ok": True, "cancelled": cancelled, "cancel_queued": cancel_queued}
@@ -4413,6 +4443,7 @@ async def _queue_cinema_seamless(
     silent: bool,
     purpose: str,
     reference_plans: Optional[list[dict]] = None,
+    parent_job_ids: Optional[list[Optional[str]]] = None,
 ) -> dict:
     """Queue native Multishot or Continuum takes with scoped scene references."""
     use_continuum = body.seamless_backend == 'continuum'
@@ -4429,8 +4460,9 @@ async def _queue_cinema_seamless(
         )
     if not parsed:
         raise HTTPException(400, "Senaryo / shot yok")
-    pack = 16 if use_continuum else max(1, int(MULTISHOT_MAX_SHOTS))
-    chunks = cinema.group_seamless_takes(parsed, prompts, pack=pack)
+    pack = body.continuum_max_chunks if use_continuum else max(1, int(MULTISHOT_MAX_SHOTS))
+    chunks = (continuum.director_takes(parsed, prompts, pack=pack) if use_continuum
+              else cinema.group_seamless_takes(parsed, prompts, pack=pack))
     take_total = len(chunks)
     w, h = resolve_size(body.aspect, body.quality)
     steps = body.steps if body.steps and body.steps > 0 else 20
@@ -4495,7 +4527,7 @@ async def _queue_cinema_seamless(
             "scheduler": take_scheduler,
             "progress_label": label,
             "continue_from": None,
-            "first_frame_name": None,
+            "first_frame_name": chunk_parsed[0].get("first_frame_name") or None,
             "ref_images": take_refs,
             "progress": 0,
             "error": None,
@@ -4505,6 +4537,7 @@ async def _queue_cinema_seamless(
             **({'continuum_run':'studio_' + uuid.uuid4().hex,
                 'continuum_prompts':texts, 'continuum_chunk_seconds':body.duration,
                 'continuum_ref_assignments':ref_assignments,
+                'continuum_reference_size':getattr(body, 'continuum_reference_size', 'Match Output'),
                 'h3_models':h3_models.resolve('ref2va' if take_refs else 'fl2va')} if use_continuum else {}),
             "batch_index": take_i,
             "batch_total": take_total,
@@ -4525,6 +4558,16 @@ async def _queue_cinema_seamless(
             "take_title": take_title,
             **_lora_fields(lora_src),
         }
+        if use_continuum:
+            job['continuum_scene_ids'] = [s.get('id') for s in chunk_parsed]
+            if chunk_parsed[0].get('mode') == 'continue':
+                parent = (parent_job_ids or [])[shot_offset:shot_offset + 1]
+                job['continue_from'] = (parent[0] if parent else None) or (jobs[-1]['id'] if jobs else None)
+                if not job['continue_from']:
+                    raise HTTPException(400, 'Continuum continuation needs the previous scene clip; produce it first')
+            job['continuity_method'] = ('last_frame_handoff' if job.get('continue_from')
+                                        else 'first_frame' if job.get('first_frame_name') else 'new_shot')
+            job['native_context_chunks'] = len(texts)
         if audio.get("score_id"):
             job["score_id"] = audio.get("score_id")
         jobs.append(job)
@@ -5908,12 +5951,12 @@ async def cinema_produce(body: CinemaProduceBody):
     identity_plans = [_asset_plan(p, shot.get("bindings"), lib)
                       for p, shot in zip(prompts, to_queue)]
     if want_seamless and body.seamless_backend == 'continuum':
-        unsupported = any(shot.get('first_frame_name') or any(cinema.uses_lora(asset) for asset in plan.get('hits', [])) for shot,plan in zip(to_queue,identity_plans))
+        unsupported = any((shot.get('first_frame_name') and shot.get('mode') != 't2v') or any(cinema.uses_lora(asset) for asset in plan.get('hits', [])) for shot,plan in zip(to_queue,identity_plans))
         if unsupported:
-            raise HTTPException(400, 'Continuum supports visual asset references, but per-scene first-frame guides or separate character LoRA stacks require independent scene mode. Turn Continuum off for those scenes.')
+            raise HTTPException(400, 'Continuum supports a first-frame guide on New shots; guided Continue shots or separate character LoRA stacks require independent scene mode.')
     # Multishot uses one adapter stack for the whole pack. Character identities
     # need separate per-shot stacks, including when all actors are LoRA-only.
-    if any(shot.get("first_frame_name") or (plan["ref_images"] and body.seamless_backend != "continuum")
+    if any((shot.get("first_frame_name") and not (want_seamless and body.seamless_backend == "continuum" and shot.get("mode") == "t2v")) or (plan["ref_images"] and body.seamless_backend != "continuum")
            or any(cinema.uses_lora(a) for a in plan.get("hits", []))
            for shot, plan in zip(to_queue, identity_plans)):
         want_seamless = False
@@ -5930,6 +5973,7 @@ async def cinema_produce(body: CinemaProduceBody):
             silent=silent,
             purpose=purpose or "short_film",
             reference_plans=identity_plans,
+            parent_job_ids=parent_job_ids,
         )
     else:
         bb = BatchBody(
@@ -6479,6 +6523,7 @@ class CinemaAIPlanBody(BaseModel):
     film_id: str
     ui_lang: str = "tr"
     model: Optional[str] = None
+    continuum: Optional[bool] = None
 
 
 _cinema_ai_plan_lock = asyncio.Lock()
@@ -6499,10 +6544,12 @@ async def cinema_ai_plan(body: CinemaAIPlanBody):
         model = await llm.resolve_model(body.model or _director_model)
         clip = int(current.get("duration") or 5)
         names = [a.get("lora_file") for a in current.get("characters", []) if a.get("use_lora") and a.get("lora_file")]
+        continuum_mode = body.continuum if body.continuum is not None else current.get('studio_mode') == 'seamless'
         messages = cinema_planner.planning_messages(current, cinema.project_json_template(),
-            body.story.strip(), body.shot_count, clip, body.ui_lang, guidance_block(names))
+            body.story.strip(), body.shot_count, clip, body.ui_lang, guidance_block(names),
+            continuum=continuum_mode)
         try:
-            package = await cinema_planner.generate_package(llm, model, messages, current, body.shot_count)
+            package = await cinema_planner.generate_package(llm, model, messages, current, body.shot_count, continuum=continuum_mode)
         except ValueError as exc:
             raise HTTPException(502, str(exc)) from exc
         except Exception as exc:
@@ -8782,6 +8829,7 @@ async def _run_job(job: dict):
         job["progress_label"] = "frame / graph"
         _save_jobs()
         first = None
+        await continuum.prepare_director_handoff(job, _resolve_first_frame)
         if (job.get("mode") or "").lower() not in ("multishot", "continuum", "flow_refine"):
             first = await _resolve_first_frame(job)
             if job.get("mode") == "continue" or job.get("continue_from"):
@@ -9030,6 +9078,7 @@ async def _run_job(job: dict):
         prompt = h3_enhancements.patch_graph(prompt, job)
         if job.get('prepare_refine'):
             prompt = flow_refine.capture(prompt, job)
+        job['effective_spectrum'] = h3_acceleration.graph_settings(prompt)
         prompt_id = await comfy.queue_prompt(prompt)
         job["prompt_id"] = prompt_id
         job["progress"] = 12

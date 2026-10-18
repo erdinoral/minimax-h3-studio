@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 import httpx
+from . import h3_acceleration
 
 DEFAULT_MODELS = {
     "unet": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
@@ -1064,15 +1065,11 @@ def apply_sage_attention(
     comfy_root: Optional[Path] = None,
 ) -> dict[str, Any]:
     """Sage remains disabled; independently apply opt-in Spectrum acceleration."""
-    settings = Path(__file__).resolve().parents[1] / "data" / "h3_acceleration.json"
-    try:
-        enabled = json.loads(settings.read_text(encoding="utf-8")).get("spectrum_enabled") is True
-    except (OSError, ValueError, AttributeError):
-        enabled = False
-    return apply_spectrum(g) if enabled else g
+    settings = h3_acceleration.load_settings()
+    return apply_spectrum(g, blend_weight=settings["spectrum_blend_weight"]) if settings["spectrum_enabled"] else g
 
 
-def apply_spectrum(g: dict[str, Any]) -> dict[str, Any]:
+def apply_spectrum(g: dict[str, Any], *, blend_weight: float = 0.5) -> dict[str, Any]:
     """Add the reviewed Spectrum defaults after LoRAs, only to native H3 graphs."""
     loaders = [n for n in g.values() if n.get("class_type") == "UNETLoader"]
     def is_h3_loader(node):
@@ -1092,7 +1089,7 @@ def apply_spectrum(g: dict[str, Any]) -> dict[str, Any]:
     g[node_id] = {
         "class_type": "SpectrumApplyMiniMaxH3",
         "inputs": {
-            "model": source, "enabled": True, "blend_weight": 0.5,
+            "model": source, "enabled": True, "blend_weight": blend_weight,
             "degree": 1, "ridge_lambda": 0.1, "window_size": 2.0,
             "flex_window": 0.75, "warmup_steps": 1, "tail_actual_steps": 1,
             "max_history": 8, "debug": False, "history_storage": "system_ram",

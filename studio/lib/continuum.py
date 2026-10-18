@@ -1,4 +1,4 @@
-"""Pinned Continuum graph contract; native AV chunks, no MP4 last-frame chaining."""
+"""Native AV context within a run; explicit last-frame handoff across Director runs."""
 import json
 import copy
 import re
@@ -7,6 +7,38 @@ from .comfy import build_t2v_prompt
 
 SAMPLER = 'H3ContinuumSamplerV39'
 SCHEMA = json.loads(Path(__file__).with_name('continuum_schema.json').read_text(encoding='utf-8'))
+
+def director_takes(shots, prompts, pack=16):
+    """Keep JSON story order; cuts/take boundaries start a separate sampler run."""
+    if len(shots) != len(prompts) or any(not str(p).strip() for p in prompts):
+        raise ValueError('Each Director scene needs its own non-empty Continuum prompt')
+    groups = []
+    rows, texts = [], []
+    for shot, prompt in zip(shots, prompts):
+        cut = shot.get('mode') == 't2v'
+        take_changed = rows and shot.get('take_index') != rows[-1].get('take_index')
+        if rows and (cut or take_changed or len(rows) >= pack):
+            groups.append((rows, texts))
+            rows, texts = [], []
+        rows.append(shot)
+        texts.append(prompt)
+    if rows:
+        groups.append((rows, texts))
+    return groups
+
+
+async def prepare_director_handoff(job, resolve_first_frame):
+    """Independent Continuum runs need an explicit visual handoff to continue."""
+    if job.get('mode') != 'continuum' or not job.get('continue_from'):
+        return
+    if job.get('continuum_resume'):
+        # Saved-prefix continuation must retain its original keyframe. Replacing
+        # it with the parent MP4's last frame changes the native run contract.
+        return
+    first = await resolve_first_frame(job)
+    if not first:
+        raise RuntimeError('Continuum continuation requires the previous clip last frame')
+    job['first_frame_name'] = first
 
 def extend_prompts(previous, new_prompts, context=''):
     if not new_prompts or any(not str(p).strip() for p in new_prompts):
@@ -34,9 +66,16 @@ def reference_plan(bindings):
 
 
 def align_reference_labels(text, section_refs, take_refs):
-    active=[name for name in take_refs if name in section_refs]
-    mapping={i+1:active.index(name)+1 for i,name in enumerate(section_refs)}
-    return re.sub(r'<Picture\s+(\d+)>',lambda m:f"<Picture {mapping.get(int(m.group(1)),int(m.group(1)))}>",text)
+    """Map section-local references to fixed V39 slots, not Qwen pictures.
+
+    First/last frames and each chunk's active reference subset change Picture
+    numbering. The native sampler resolves @R slots after those inputs exist.
+    """
+    mapping={i+1:take_refs.index(name)+1 for i,name in enumerate(section_refs)}
+    def replace(match):
+        number=int(match.group(1) or match.group(2))
+        return f'@R{mapping[number]}' if number in mapping else match.group(0)
+    return re.sub(r'<Picture\s+(\d+)>|@R(\d+)\b',replace,text)
 
 
 def has_spectrum(graph):
@@ -61,6 +100,10 @@ def remove_spectrum(graph):
 
 def build(job):
     prompts = job.get('continuum_prompts') or [job['prompt']]
+    job['native_context_chunks'] = len(prompts)
+    job['continuity_method'] = ('native_prefix' if job.get('continuum_resume')
+                                else 'last_frame_handoff' if job.get('continue_from')
+                                else 'first_frame' if job.get('first_frame_name') else 'new_shot')
     duration = int(job.get('continuum_chunk_seconds') or job['duration'])
     if not 1 <= len(prompts) <= 16:
         raise ValueError('Continuum supports 1–16 chunks per run')
@@ -100,13 +143,13 @@ def build(job):
         if len(spec) > 1 and 'default' in spec[1]:
             inputs[key] = spec[1]['default']
     inputs.update(model=model, clip=['13',0], video_vae=['11',0], sampler=['17',0], sigmas=sigmas,
-                  sequence_prompt='\n---\n'.join(prompts), prompt_mode='List',
+                  sequence_prompt=json.dumps(prompts, ensure_ascii=False), prompt_mode='List',
                   chunks=len(prompts), chunk_seconds=duration, base_seed=job['seed'],
                   size_source='Manual', width=job['width'], height=job['height'],
                   run_storage='Off' if has_spectrum(graph) else 'Save + Auto Resume', run_name=job['continuum_run'],
                   project_id=job['continuum_run'], generation_mode='Full Run',
                   audio_continuity=not job.get('silent_audio',False),
-                  reference_size=job.setdefault('continuum_reference_size','Max Identity'),
+                  reference_size=job.setdefault('continuum_reference_size','Match Output'),
                   continuity=('Strong — 39 frames (Experimental)' if job.get('continuum_continuity')=='strong' else 'Balanced — 22 frames'))
     if job.get('first_frame_name'):
         graph['c_first']=dict(class_type='LoadImage',inputs={'image':job['first_frame_name']})

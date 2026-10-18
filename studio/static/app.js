@@ -793,6 +793,15 @@
     const bits = [`${job.duration || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`];
     if (job.h3_models?.unet) bits.push(`Model: ${job.h3_models.unet}`);
     if (job.steps != null) bits.push(`${en ? "Steps" : "Adım"}: ${job.steps} · ${job.sampler || ""}`);
+    const spectrum = job.effective_spectrum;
+    if (spectrum) bits.push(spectrum.enabled ? `Spectrum: ${spectrum.video_blend_weight != null && Number.isFinite(Number(spectrum.video_blend_weight)) ? Math.round(Number(spectrum.video_blend_weight)*100)+'%' : (en?'on':'açık')}` : `Spectrum: ${en?'off':'kapalı'}`);
+    if (job.mode === 'continuum') {
+      const chunks = job.native_context_chunks || job.continuum_prompts?.length || 1;
+      bits.push(`${en ? 'Native sequence' : 'Native sekans'}: ${chunks} × ${job.continuum_chunk_seconds || job.duration || '?'}${tt('sec')}`);
+      if (job.continuity_method === 'native_prefix' || job.continuum_resume) bits.push(en ? 'Continuation: saved native context' : 'Devam: kaydedilmiş native bağlam');
+      else if (job.continue_from) bits.push(en ? 'Between jobs: previous last frame' : 'İşler arası: önceki son kare');
+      if (job.continuum_reference_size) bits.push(`${en ? 'Reference size' : 'Referans boyutu'}: ${job.continuum_reference_size}`);
+    }
     const names = String(job.effective_lora_name ?? job.lora_name ?? "").split("|").filter(Boolean);
     const strengths = job.effective_lora_strength;
     if (names.length) bits.push("LoRA: " + names.map(name => {
@@ -3702,7 +3711,7 @@
     const count = Math.ceil(total / clip);
     $("cinema-ai-total").min = String(clip);
     $("cinema-ai-total").max = String(40 * clip);
-    $("cinema-ai-count").textContent = tf("aiDirector.count", {count, clip, total:count * clip});
+    $("cinema-ai-count").textContent = tf(cinemaStudioMode() === "seamless" ? "aiDirector.countContinuum" : "aiDirector.count", {count, clip, total:count * clip});
   }
   async function planCinemaWithDirector() {
     const modal = $("cinema-ai-modal");
@@ -3739,7 +3748,7 @@
       if (!await saveCinema(true)) throw Error(tt("ui.saveFailed"));
       const filmId = ensureCinema().film_id;
       const response = await fetch("/api/cinema/ai-plan", {method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({story, shot_count:count, film_id:filmId, ui_lang:window.h3Lang?.() || "tr", model:$("director-model")?.value || null})});
+        body:JSON.stringify({story, shot_count:count, film_id:filmId, continuum:cinemaStudioMode() === "seamless", ui_lang:window.h3Lang?.() || "tr", model:$("director-model")?.value || null})});
       const plan = await response.json();
       if (!response.ok) throw Error(tt(errDetail(plan)));
       if (ensureCinema().film_id !== filmId) throw Error(tt("aiDirector.filmChanged"));
@@ -4931,6 +4940,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         : null;
       const shots = (ensureCinema().shots || [])
         .map((s) => ({
+          ...s,
           id: s.id,
           text: (s.text || "").trim(),
           mode: s.mode === "continue" ? "continue" : "t2v",
@@ -4990,12 +5000,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       }
       const cine = ensureCinema();
       cine.seed = seed;
-      const queueShots = wantSeamless
-        ? shots.map((s, i) => ({
-            ...s,
-            mode: i === 0 ? "t2v" : "continue",
-          }))
-        : shots;
+      const queueShots = shots;
       const r = await fetch("/api/cinema/produce", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -9452,7 +9457,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     state.videoEngine = engine.active;
     syncHybridDuration();
     host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"], ["hybrid", "H3 Hybrid"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${(id === "singularity" && !engine.singularity_ready) || (id === "hybrid" && !engine.hybrid_ready) ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "hybrid" ? "H3 Hybrid b25–49" : engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
-    if(!engine.hybrid_ready){const hint=document.createElement('p');hint.className='muted';hint.textContent=en?'H3 Hybrid is unavailable: install the complete Hybrid INT8 model in models/diffusion_models or models/unet, then refresh.':'H3 Hybrid kullanılamıyor: tam Hybrid INT8 modelini models/diffusion_models veya models/unet klasörüne ekleyip yenileyin.';host.appendChild(hint);}
+    if(!engine.hybrid_ready){const hint=document.createElement('p');hint.className='muted';const size=engine.hybrid_expected_bytes?` (${(engine.hybrid_expected_bytes/1e9).toFixed(2)} GB)`:'';hint.textContent=en?`H3 Hybrid is unavailable: install the complete Hybrid INT8 model${size} in models/diffusion_models or models/unet, including subfolders, then refresh.`:`H3 Hybrid kullanılamıyor: tam Hybrid INT8 modelini${size} models/diffusion_models veya models/unet altına ekleyip yenileyin; alt klasörler desteklenir.`;host.appendChild(hint);}
     host.onclick = async event => {
       const button = event.target.closest("button[data-engine]");
       if (!button || button.disabled) return;
@@ -9480,21 +9485,44 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         host.appendChild(panel);
       }
       panel.className = "h3-spectrum-control";
-      panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${data.spectrum_enabled ? "checked" : ""} ${data.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "Accelerates H3 videos, including new Continuum runs. Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Yeni Continuum üretimleri dahil H3 videolarını hızlandırır. Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir."}</p>`;
-      const toggle = panel.querySelector("input");
-      toggle.onchange = async () => {
-        const previous = !toggle.checked;
-        toggle.disabled = true;
-        toggle.setAttribute("disabled", "");
-        toggle.toggleAttribute("checked", toggle.checked);
+      let current = data;
+      const labels = en ? {light:"Light", balanced:"Balanced", strong:"Strong", custom:"Custom"} : {light:"Hafif", balanced:"Dengeli", strong:"Güçlü", custom:"Özel"};
+      const paint = () => {
+        const weight = Number(current.spectrum_blend_weight ?? 0.5);
+        const presets = current.spectrum_presets || [{id:"light",blend_weight:0.25},{id:"balanced",blend_weight:0.5},{id:"strong",blend_weight:0.75}];
+        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend><div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><p class="muted">${en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0."}</p><p class="muted">${en ? "Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir."}</p>`;
+      };
+      const save = async changes => {
+        panel.querySelectorAll("button, input").forEach(control => control.disabled = true);
         try {
-          const r = await fetch("/api/h3-acceleration", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({spectrum_enabled:toggle.checked})});
+          const r = await fetch("/api/h3-acceleration", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(changes)});
           const result = await r.json();
           if (!r.ok) throw Error(errDetail(result));
-          toggle.checked = result.spectrum_enabled;
-        } catch (error) { toggle.checked = previous; toast(error.message); }
-        finally { toggle.disabled = false; toggle.removeAttribute("disabled"); toggle.toggleAttribute("checked", toggle.checked); }
+          current = result;
+        } catch (error) { toast(error.message); }
+        finally { paint(); }
       };
+      panel.onclick = event => {
+        const button = event.target.closest("button[data-spectrum-preset]");
+        if (button && !button.disabled) void save({spectrum_preset:button.dataset.spectrumPreset});
+      };
+      panel.oninput = event => {
+        const target = event.target;
+        if (target.matches("[data-spectrum-range]")) panel.querySelector("[data-spectrum-weight]").value = target.value;
+        if (target.matches("[data-spectrum-weight]") && target.validity.valid) panel.querySelector("[data-spectrum-range]").value = target.value;
+      };
+      panel.onchange = async event => {
+        const target = event.target;
+        if (target.matches("[data-acceleration]")) return save({spectrum_enabled:target.checked});
+        if (!target.matches("[data-spectrum-range], [data-spectrum-weight]")) return;
+        const value = Number(target.value);
+        if (!target.value.trim() || !target.validity.valid || !Number.isFinite(value) || value < 0 || value > 1) {
+          toast(en ? "Enter a value between 0 and 1." : "0 ile 1 arasında bir değer gir.");
+          paint(); return;
+        }
+        await save({spectrum_preset:"custom", spectrum_blend_weight:value});
+      };
+      paint();
     } catch { /* optional acceleration controls must not block model settings */ }
   }
 

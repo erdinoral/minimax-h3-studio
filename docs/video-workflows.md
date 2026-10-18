@@ -17,6 +17,10 @@ not overwrite its predecessor. More than 16 Director scenes are separate takes;
 continuity across takes is not claimed. Duration/resolution remain subject to
 available RAM/VRAM. Test at 480p before larger runs.
 
+## Director chapter grouping and duration
+
+Continuum's **Sequence grouping** can retain New-cut boundaries or process a whole chapter as one sequence. In chapter mode, each scene supplies its next chunk prompt; only the first scene's starting image is used. Intermediate guides are retained in the project but not applied. The 16-chunk / nine-reference limits remain. Across a split sequence, continuation uses a last-frame handoff rather than native motion/audio history. Running jobs show the complete planned sequence duration. See [9.3.2](releases/v9.3.2.md) for pause and diagnostic-report behavior.
+
 ## H3 Refine
 
 Enable **Prepare H3 Refine recording** before a standard single-clip render.

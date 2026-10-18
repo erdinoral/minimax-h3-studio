@@ -8,6 +8,7 @@ before main.py loads. Studio already tracks progress via its own API.
 from __future__ import annotations
 
 import runpy
+import shutil
 import sys
 from pathlib import Path
 
@@ -29,6 +30,12 @@ def _disable_tqdm() -> None:
 
 def main() -> None:
     app_dir = Path(__file__).resolve().parent / "app"
+    # Ship our own small control node with Studio; no external node/core patch.
+    source = app_dir.parent / 'studio' / 'comfy_nodes' / 'h3_studio_render_control'
+    destination = app_dir / 'custom_nodes' / 'h3_studio_render_control'
+    destination.mkdir(parents=True, exist_ok=True)
+    for module in source.glob('*.py'):
+        shutil.copy2(module, destination / module.name)
     sys.path.insert(0, str(app_dir))
     sys.argv[0] = str(app_dir / "main.py")
     _disable_tqdm()

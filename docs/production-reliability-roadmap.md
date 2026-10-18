@@ -1,5 +1,15 @@
 # Production reliability roadmap — 2026-10-18
 
+## 9.3.2 completion checkpoint
+
+The user authorized completing issue work and requested one native sequence per Director chapter. They required waiting until the entire queue was empty before installing. Studio and Comfy queues were verified empty before the Pinokio-managed restart; no queued production was cancelled. Destination resolution remains D:/pinokio from ~/.pinokio/config.json. Launcher JS files and URL capture blocks were not edited; the existing Python boot shim only copies the bundled control integration. The mochi start.js reference was reviewed; no Pinokio API or launcher capture change was needed.
+
+Render pause uses job-scoped Comfy extra_data and a progress-registry handler, not a model wrapper: model wrappers are part of native prefix signatures and would break safe continuation. Model/graph/tensors/seeds remain unchanged. A real two-section render paused with the same prompt ID and unchanged step for six seconds, resumed and completed as 8s/192 frames with done status. Lease expiry, Stop while paused, completion races and unrelated job isolation have regression tests. Mid-render pause therefore supersedes the earlier after-current-only limitation for supported new jobs, while queue pause still means after current. VRAM remains allocated.
+
+Hybrid selection was verified live and original settings restored. The original #28 reporter environment and drift remain unconfirmed; a minimal opt-in local diagnostic download supplies cancellation and engine-completion evidence without prompt/images/paths/secrets. No issue comments or personal media are published. The feature film and its heartbeat remain paused. The original film's grouping was set to chapter as the user approved; existing queued requests were not rewritten.
+
+Exit checks: 239 Python / 46 JavaScript tests, syntax and whitespace checks; real pause/resume and native assembly; original model/Spectrum settings restored. Final idle reload passed. Live UI retained chapter grouping through load/save, displayed six scenes / 30 seconds and sequence-section labels, and the diagnostic endpoint returned unavailable engine history truthfully after restart. No launcher JS/API/capture edits were made. The selected chapter grouping applies to future requests; the feature production and heartbeat remain paused.
+
 ## Evidence and review rules
 
 Repository AGENTS snapshot: inspect logs before fixes; preserve app/launcher separation; keep existing user changes; validate changes with relevant tests. Scope is Studio application code and documentation. No launcher scripts, dependencies or downloaded models will be changed, so launcher destination/example requirements do not apply. Read logs/api/start.js/latest and ComfyUI logs. Preserve the paused film production, its files and settings; do not resume it for code verification.

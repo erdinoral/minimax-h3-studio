@@ -639,6 +639,7 @@
         style: "auto",
       },
       duration: 5,
+      continuum_grouping: 'cuts',
       quality: "736",
       steps: 20,
       seed: -1,
@@ -788,9 +789,17 @@
     return true;
   }
 
+  function jobVideoSeconds(job) {
+    if (job.mode === 'continuum' && Number(job.continuum_chunk_seconds) > 0) {
+      const count = job.continuum_prompts?.length || job.native_context_chunks || 1;
+      return Number(job.continuum_chunk_seconds) * count;
+    }
+    return job.duration;
+  }
+
   function jobProductionMeta(job) {
     const en = window.h3Lang?.() === "en";
-    const bits = [`${job.duration || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`];
+    const bits = [`${jobVideoSeconds(job) || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`];
     if (job.h3_models?.unet) bits.push(`Model: ${job.h3_models.unet}`);
     if (job.steps != null) bits.push(`${en ? "Steps" : "Adım"}: ${job.steps} · ${job.sampler || ""}`);
     const spectrum = job.effective_spectrum;
@@ -801,6 +810,7 @@
       if (job.continuity_method === 'native_prefix' || job.continuum_resume) bits.push(en ? 'Continuation: saved native context' : 'Devam: kaydedilmiş native bağlam');
       else if (job.continue_from) bits.push(en ? 'Between jobs: previous last frame' : 'İşler arası: önceki son kare');
       if (job.continuum_reference_size) bits.push(`${en ? 'Reference size' : 'Referans boyutu'}: ${job.continuum_reference_size}`);
+      if (job.continuum_grouping === 'chapter') bits.push(en ? 'One sequence per chapter' : 'Bölüm başına tek sekans');
     }
     const names = String(job.effective_lora_name ?? job.lora_name ?? "").split("|").filter(Boolean);
     const strengths = job.effective_lora_strength;
@@ -840,7 +850,7 @@
     $("btn-open-prompt")?.classList.toggle("hidden", !has);
   }
 
-  function openPromptView(text, meta, seed) {
+  function openPromptView(text, meta, seed, jobId) {
     if (text !== undefined) setClipPrompt(text, meta, seed);
     const t = (state.clipPrompt || "").trim();
     if (!t) {
@@ -849,6 +859,12 @@
     }
     const pre = $("clip-prompt-text");
     if (pre) pre.textContent = t;
+    const report = $('clip-diagnostics-link');
+    const reportJobId = jobId || (text === undefined ? state.selectedJobId : null);
+    if (report) {
+      report.classList.toggle('hidden', !reportJobId);
+      report.href = reportJobId ? `/api/jobs/${encodeURIComponent(reportJobId)}/diagnostics` : '';
+    }
     $("view-clip-prompt")?.classList.remove("hidden");
   }
 
@@ -1517,6 +1533,7 @@
         setup: { ...base.setup, ...(data.setup || {}) },
         audio: { ...base.audio, ...(data.audio || {}) },
         duration: data.duration || 5,
+        continuum_grouping: data.continuum_grouping === 'chapter' ? 'chapter' : 'cuts',
         quality: normalizeQuality(data.quality || "736"),
         steps: data.steps || 20,
         seed: data.seed != null ? data.seed : -1,
@@ -1604,6 +1621,7 @@
       setup: c.setup || {},
       audio: c.audio || {},
       duration: c.duration || 5,
+      continuum_grouping: c.continuum_grouping || 'cuts',
       quality: normalizeQuality(c.quality || "736"),
       steps: c.steps || 20,
       film_id: c.film_id || "",
@@ -1759,6 +1777,7 @@
         setup: { ...base.setup, ...(data.setup || payload.setup || {}) },
         audio: { ...base.audio, ...(data.audio || payload.audio || {}) },
         duration: data.duration || payload.duration,
+        continuum_grouping: data.continuum_grouping ?? payload.continuum_grouping ?? 'cuts',
         quality: String(data.quality || payload.quality),
         steps: data.steps || payload.steps,
         seed: data.seed != null ? data.seed : payload.seed,
@@ -2659,7 +2678,8 @@
     const modeHtml =
       cinemaStudioMode() === "seamless"
         ? '<span class="cinema-shot-link muted">' +
-          (mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
+          (ensureCinema().continuum_grouping === 'chapter' ? tt('cinema.sequencePart')
+            : mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
           "</span>"
         : '<div class="cinema-shot-mode">' +
           '<button type="button" class="t2v' +
@@ -2678,7 +2698,7 @@
       '" data-id="' +
       htmlEsc(shot.id) +
       '"><div class="cinema-shot-head"><span class="idx">' +
-      htmlEsc(tf("cinema.sectionLabel", { n: String(sceneIndex + 1) })) +
+      htmlEsc(tf("cinema.sectionLabel", { n: String(sceneIndex + 1), duration: String(ensureCinema().duration || 5) })) +
       "</span>" +
       modeHtml +
       (jobLabel
@@ -2725,6 +2745,8 @@
   function cinemaChapterHtml(chapterName, shots, globalIndexStart) {
     const open = cinemaChapterOpen(chapterName);
     const n = shots.length;
+    const active = shots.filter(s => s.enabled !== false && String(s.text || '').trim()).length;
+    const total = active ? active * Number(ensureCinema().duration || 5) : 0;
     const body =
       n > 0
         ? shots
@@ -2754,6 +2776,7 @@
       "</span>" +
       '<span class="cinema-chapter-meta muted">' +
       htmlEsc(tf("cinema.chapterSceneCount", { n: String(n) })) +
+      (total ? ' · ' + htmlEsc(String(total) + tt('sec')) : '') +
       "</span>" +
       '<button type="button" class="btn-ghost cinema-chapter-del" title="' +
       htmlEsc(tt("cinema.chapterDelete")) +
@@ -3076,6 +3099,9 @@
 
   function renderCinemaKnobs() {
     const c = ensureCinema();
+    const grouping = $('cinema-continuum-grouping');
+    if (grouping && document.activeElement !== grouping) grouping.value = c.continuum_grouping || 'cuts';
+    $('cinema-continuum-grouping-wrap')?.classList.toggle('hidden', cinemaStudioMode() !== 'seamless');
     const dur = $("cinema-duration");
     if (dur && document.activeElement !== dur) dur.value = String(c.duration || 5);
     syncFilmModeSummary();
@@ -5019,6 +5045,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           link_continue: true,
           seamless: wantSeamless,
           seamless_backend: globalThis.getDirectorContinuumBackend?.() || 'continuum',
+          continuum_grouping: cine.continuum_grouping || 'cuts',
           prepare_sheets: !wantSeamless,
           force_sheets: !!$("cinema-force-sheets")?.checked,
           image_provider: normalizeCinemaImageProvider(cine.image_provider),
@@ -5568,7 +5595,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         opt.textContent = tf("cont.sourceOption", {
           i: String(i + 1),
           tag: x.tag,
-          dur: String(j.duration || "?"),
+          dur: String(jobVideoSeconds(j) || "?"),
           sec: tt("sec"),
           label: label || j.id.slice(0, 8),
         });
@@ -8006,7 +8033,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!quiet) {
       toast(
         job.status === "done"
-          ? tf("job.metaReady", { dur: String(job.duration), sec: tt("sec"), seed: String(job.seed) })
+          ? tf("job.metaReady", { dur: String(jobVideoSeconds(job)), sec: tt("sec"), seed: String(job.seed) })
           : tf("job.metaProgress", { status: job.status, pct: String(job.progress || 0) })
       );
     }
@@ -8169,7 +8196,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           openPromptView(
             j.prompt,
             jobProductionMeta(j),
-            j.seed
+            j.seed, j.id
           );
         };
       }
@@ -8185,7 +8212,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           openPromptView(
             j.prompt,
             jobProductionMeta(j),
-            j.seed
+            j.seed, j.id
           );
         };
         right.appendChild(cp);
@@ -8354,7 +8381,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         }
         if (j?.status === "done") {
           toast(
-            tf("job.metaReady", { dur: String(j.duration), sec: tt("sec"), seed: String(j.seed) }) + (j.width ? ` · ${j.width}×${j.height}` : "")
+            tf("job.metaReady", { dur: String(jobVideoSeconds(j)), sec: tt("sec"), seed: String(j.seed) }) + (j.width ? ` · ${j.width}×${j.height}` : "")
           );
           setProgress(100, tt("prod.done"), true);
           scheduleHideProgress(2200);
@@ -8602,7 +8629,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           <button type="button" class="gallery-cont" title="${tt("gallery.contTitle")}">${tt("gallery.contBtn")}</button>
           <button type="button" class="gallery-still btn-ghost" title="${tt("gallery.stillTitle")}">${tt("gallery.stillBtn")}</button>
         </div>
-        <div class="meta">${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
+        <div class="meta">${j.duration != null ? jobVideoSeconds(j) + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"} · ${j.mode || "t2v"}${renderLabel ? " · " + renderLabel : ""}${clock ? " · " + clock : ""}</div>`;
       const pickBtn = card.querySelector(".gallery-merge-pick");
       card.querySelector('.gallery-download').onclick = e => e.stopPropagation();
       if (pickBtn) {
@@ -8630,7 +8657,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           openPromptView(
             j.prompt,
             jobProductionMeta(j),
-            j.seed
+            j.seed, j.id
           );
         };
       }
@@ -8660,7 +8687,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           return;
         }
         const live = state.jobs.find((x) => x.id === j.id && x.status === "done");
-        const meta = `${j.duration != null ? j.duration + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`;
+        const meta = `${j.duration != null ? jobVideoSeconds(j) + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`;
         if (live) {
           selectJob(live);
         } else {
@@ -8786,6 +8813,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const pauseButton=$('btn-queue-pause');
       if(pauseButton?.dataset){pauseButton.dataset.i18n=state.queuePaused?'queue.resume':'queue.pauseAfter';pauseButton.textContent=tt(pauseButton.dataset.i18n);}
       const running=state.jobs.some(job=>job.status==='running');
+      const pauseRender=$('btn-render-pause');
+      const activeRender=state.jobs.find(job=>job.status==='running' && job.render_control_ready && job.render_control_token);
+      if(pauseRender?.dataset){
+        pauseRender.classList.toggle?.('hidden',!activeRender);
+        pauseRender.dataset.jobId=activeRender?.id || '';
+        pauseRender.dataset.i18n=activeRender?.render_pause_requested?'render.resume':'render.pause';
+        pauseRender.textContent=tt(pauseRender.dataset.i18n);
+        pauseRender.title=tt('render.pauseHelp');
+        pauseRender.setAttribute?.('aria-pressed',String(!!activeRender?.render_pause_requested));
+      }
       const pending=state.jobs.some(job=>job.status==='queued');
       $('btn-stop')?.classList.toggle?.('hidden',!running);
       pauseButton?.classList.toggle?.('hidden',!running && !pending && !state.queuePaused);
@@ -10265,6 +10302,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   document.addEventListener("keydown", event => { if (event.key === "Escape" && !$("cinema-ai-modal")?.classList.contains("hidden")) closeCinemaAiDirector(); });
   $("cinema-seamless-toggle")?.addEventListener("change", () => {
     setCinemaStudioMode($("cinema-seamless-toggle").checked ? "seamless" : "assets");
+    renderCinemaKnobs();
+  });
+  $('cinema-continuum-grouping')?.addEventListener('change', event => {
+    ensureCinema().continuum_grouping = event.target.value === 'chapter' ? 'chapter' : 'cuts';
+    renderCinemaShots();
+    void saveCinema(true);
   });
   $("prompt-rewriter-enabled")?.addEventListener("change", () => {
     void saveProduction({ quiet: true });
@@ -11545,6 +11588,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void renderGalleryPhotos();
   });
   $("btn-gallery-photo-delete")?.addEventListener("click", () => void deletePickedGalleryPhotos());
+  $('btn-render-pause')?.addEventListener('click',async e=>{
+    const button=e.currentTarget;
+    const job=state.jobs.find(row=>row.id===button.dataset.jobId && row.status==='running');
+    if(!job)return;
+    button.disabled=true;
+    try{
+      const response=await fetch(`/api/jobs/${encodeURIComponent(job.id)}/pause`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused:!job.render_pause_requested})});
+      const result=await response.json();if(!response.ok)throw Error(errDetail(result));
+      await refreshJobs();
+    }catch(error){toast(error.message);}finally{button.disabled=false;}
+  });
   $('btn-queue-pause')?.addEventListener('click',async e=>{
     const button=e.currentTarget;button.disabled=true;
     try{

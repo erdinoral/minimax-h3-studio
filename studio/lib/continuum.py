@@ -8,16 +8,20 @@ from .comfy import build_t2v_prompt
 SAMPLER = 'H3ContinuumSamplerV39'
 SCHEMA = json.loads(Path(__file__).with_name('continuum_schema.json').read_text(encoding='utf-8'))
 
-def director_takes(shots, prompts, pack=16):
+def director_takes(shots, prompts, pack=16, grouping='cuts'):
     """Keep JSON story order; cuts/take boundaries start a separate sampler run."""
     if len(shots) != len(prompts) or any(not str(p).strip() for p in prompts):
         raise ValueError('Each Director scene needs its own non-empty Continuum prompt')
+    if grouping not in ('cuts', 'chapter'):
+        raise ValueError('Unknown Continuum grouping')
     groups = []
     rows, texts = [], []
     for shot, prompt in zip(shots, prompts):
         cut = shot.get('mode') == 't2v'
         take_changed = rows and shot.get('take_index') != rows[-1].get('take_index')
-        if rows and (cut or take_changed or len(rows) >= pack):
+        chapter_changed = rows and (shot.get('chapter') or 'Bölüm 1') != (rows[-1].get('chapter') or 'Bölüm 1')
+        split = chapter_changed or (grouping == 'cuts' and (cut or take_changed))
+        if rows and (split or len(rows) >= pack):
             groups.append((rows, texts))
             rows, texts = [], []
         rows.append(shot)

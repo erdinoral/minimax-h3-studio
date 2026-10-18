@@ -250,3 +250,43 @@ class DirectorContinuumQueue(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([len(s) for s,p in groups],[16,2])
         self.assertEqual([p for s,ps in groups for p in ps],prompts)
         with self.assertRaises(ValueError): continuum.director_takes(shots,prompts[:-1])
+
+    async def test_chapter_sequence_keeps_six_distinct_prompts_and_only_first_starting_image(self):
+        ns, body, _ = self.env()
+        body.continuum_grouping = 'chapter'
+        shots = [dict(id=str(i), chapter='Heaven', take_index=i+1, mode='t2v', first_frame_name=f'guide{i}.png') for i in range(6)]
+        prompts = [f'Unique action {i}.' for i in range(6)]
+        result = await ns['_queue_cinema_seamless'](body=body, parsed=shots, prompts=prompts,
+            lib={}, audio={}, cinema_batch='chapter', silent=False, purpose='test',
+            reference_plans=[dict(prompt=p,ref_images=[],hits=[]) for p in prompts])
+        self.assertEqual(len(result['jobs']), 1)
+        job = result['jobs'][0]
+        self.assertEqual(job['planned_duration'], 30)
+        self.assertEqual(job['native_context_chunks'], 6)
+        self.assertEqual(job['first_frame_name'], 'guide0.png')
+        self.assertEqual(job['continuum_ignored_guides'], ['1','2','3','4','5'])
+        self.assertEqual(job['continuum_scene_ids'], [str(i) for i in range(6)])
+        for i, prompt in enumerate(job['continuum_prompts']):
+            self.assertIn(prompts[i], prompt)
+        self.assertEqual(shots[5]['first_frame_name'], 'guide5.png')  # no saved-scene mutation
+
+    def test_chapter_grouping_never_merges_chapters_and_keeps_sixteen_chunk_limit(self):
+        shots = [dict(chapter='A',mode='t2v',take_index=i) for i in range(17)] + [dict(chapter='B',mode='t2v')]
+        prompts = [f'Action {i}' for i in range(18)]
+        groups = continuum.director_takes(shots, prompts, grouping='chapter')
+        self.assertEqual([len(s) for s,p in groups], [16,1,1])
+        self.assertEqual([p for s,ps in groups for p in ps], prompts)
+
+    async def test_long_chapter_split_continues_previous_sequence_instead_of_restarting_from_another_guide(self):
+        ns, body, _ = self.env()
+        body.continuum_grouping = 'chapter'
+        body.continuum_max_chunks = 2
+        shots = [dict(id=str(i),chapter='A',mode='t2v',first_frame_name=f'guide{i}.png') for i in range(3)]
+        prompts = ['first','second','third']
+        result = await ns['_queue_cinema_seamless'](body=body,parsed=shots,prompts=prompts,
+            lib={},audio={},cinema_batch='chapter-limit',silent=True,purpose='test',
+            reference_plans=[dict(prompt=p,ref_images=[],hits=[]) for p in prompts])
+        first,second = result['jobs']
+        self.assertEqual(second['continue_from'],first['id'])
+        self.assertIsNone(second['first_frame_name'])
+        self.assertIn('2',second['continuum_ignored_guides'])

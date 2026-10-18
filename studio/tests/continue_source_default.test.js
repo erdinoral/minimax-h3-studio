@@ -37,7 +37,7 @@ test("continue source defaults to the first visible video and preserves manual p
     setContinueMode: async (id) => { selected.push(id); },
     clearContinueMode: () => { state.continueFrom = null; },
   };
-  vm.runInNewContext(source.slice(start, end), context);
+  vm.runInNewContext(source.slice(source.indexOf('  function jobVideoSeconds('), source.indexOf('  function jobProductionMeta(')) + source.slice(start, end), context);
 
   await context.fillContinueSource();
   assert.deepEqual(sel.options.map((option) => option.value), ["first", "second", "older"]);

@@ -1,5 +1,9 @@
 # MiniMax H3 Studio
 
+## 9.3.2 — Chapter sequences and render pause
+
+Director can process each chapter as one ordered Continuum sequence. Each scene keeps its own prompt; only the sequence's first starting image is used. Sampling can pause at a progress checkpoint and resume the same render, while model memory remains allocated. Video details also provide a minimal diagnostic report. See [9.3.2 release notes](docs/releases/v9.3.2.md).
+
 ## 9.3.1 — Director continuity and production reliability
 
 Director references now use fixed Continuum slots, new reference preprocessing defaults to Match Output, and production details distinguish native context from last-frame handoffs. Stop/completion races are guarded, Hybrid models can be selected from subfolders, and Spectrum has presets plus a manual video blend control. See [9.3.1 release notes](docs/releases/v9.3.1.md).

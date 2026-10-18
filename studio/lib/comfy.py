@@ -149,8 +149,10 @@ class ComfyClient:
             r.raise_for_status()
             return r.json()
 
-    async def queue_prompt(self, prompt: dict) -> str:
+    async def queue_prompt(self, prompt: dict, *, render_control_token: Optional[str] = None) -> str:
         payload = {"prompt": prompt, "client_id": self.client_id}
+        if render_control_token:
+            payload['extra_data'] = {'h3_studio_render_token': render_control_token}
         last_err: Exception | None = None
         for attempt in range(4):
             try:

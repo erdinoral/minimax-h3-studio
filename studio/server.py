@@ -31,7 +31,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
 )
 
 from lib import h3_enhancements, continuum, flow_refine
-from lib import h3_acceleration
+from lib import h3_acceleration, render_control, diagnostics
 from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
@@ -1060,7 +1060,8 @@ async def _reattach_completed_legacy_cancel(job: dict) -> bool:
 
 def _mark_user_cancelled(job: dict, source: str) -> None:
     job.update(status='cancelled', error='iptal', progress_label='iptal',
-               cancel_requested_at=time.time(), cancel_source=source)
+               cancel_requested_at=time.time(), cancel_source=source,
+               render_pause_requested=False, render_paused=False, render_control_ready=False)
 
 def _archive_job_to_gallery(job: dict) -> None:
     """Copy finished clip into permanent gallery. Survives wipe / clear jobs."""
@@ -1116,6 +1117,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "created_at": job.get("created_at"),
         "started_at": job.get("started_at"),
         "done_at": done_at,
+        **{key:job.get(key) for key in ('prompt_id','cancel_requested_at','cancel_source','recovered_from_status','continuum_grouping')},
         "render_sec": render_sec,
         "url": f"/api/gallery/{jid}/video",
         "local_path": str(dest),
@@ -1426,6 +1428,7 @@ class CinemaProduceBody(BaseModel):
     seamless: bool = False
     seamless_backend: str = 'continuum'
     continuum_max_chunks: int = Field(default=16, ge=1, le=16)
+    continuum_grouping: Literal['cuts', 'chapter'] = 'cuts'
     continuum_reference_size: Literal['Match Output', 'Max Identity'] = 'Match Output'
     # First queue missing character/creature/vehicle/location sheets; scenes start after they finish
     prepare_sheets: bool = True
@@ -2347,6 +2350,43 @@ _queue_paused = False
 class QueuePauseBody(BaseModel):
     paused: bool
 
+
+@app.post('/api/jobs/{job_id}/pause')
+async def pause_render(job_id: str, body: QueuePauseBody):
+    async with _lock:
+        job = next((row for row in _jobs if row['id'] == job_id), None)
+        if not job:
+            raise HTTPException(404, 'job yok')
+        token = job.get('render_control_token')
+        if job.get('status') != 'running' or not token or not job.get('render_control_ready'):
+            raise HTTPException(409, 'Bu üretim henüz duraklatılamıyor / render is not ready to pause')
+        try:
+            result = await render_control.command(COMFY_URL, token, body.paused)
+        except httpx.HTTPError as exc:
+            raise HTTPException(409, 'Render durumu değişti; yenileyip tekrar deneyin / refresh render status') from exc
+        if job.get('status') != 'running':
+            return job
+        job.update(render_pause_requested=result['requested'], render_paused=result['paused'])
+        _save_jobs()
+        return job
+
+
+async def _sync_render_pause(job: dict):
+    token = job.get('render_control_token')
+    if not token:
+        return
+    async with _lock:
+        if job.get('status') != 'running':
+            return
+        try:
+            result = await render_control.command(COMFY_URL, token)
+            if result['requested']:
+                result = await render_control.command(COMFY_URL, token, True)
+            job.update(render_control_ready=True, render_pause_requested=result['requested'], render_paused=result['paused'])
+        except httpx.HTTPError:
+            job['render_control_ready'] = False
+            # Engine lease expires automatically if Studio can no longer renew it.
+
 @app.post('/api/queue/pause')
 async def pause_queue(body: QueuePauseBody):
     global _queue_paused
@@ -2421,6 +2461,23 @@ async def get_job(job_id: str):
         if j["id"] == job_id:
             return j
     raise HTTPException(404, "job yok")
+
+
+@app.get('/api/jobs/{job_id}/diagnostics')
+async def job_diagnostics(job_id: str):
+    job = _clip_record(job_id)
+    if not job:
+        raise HTTPException(404, 'job yok')
+    entry = None
+    if job.get('prompt_id'):
+        try:
+            entry = (await comfy.history(str(job['prompt_id']))).get(str(job['prompt_id']))
+        except Exception:
+            pass  # Missing history is unavailable evidence, never success.
+    report = diagnostics.render_report(job, entry)
+    safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', job_id)[:80]
+    return Response(json.dumps(report, ensure_ascii=False, indent=2), media_type='application/json',
+                    headers={'Content-Disposition':f'attachment; filename="h3-studio-{safe_id}-diagnostics.json"'})
 
 
 @app.post("/api/jobs/{job_id}/cancel")
@@ -4461,7 +4518,8 @@ async def _queue_cinema_seamless(
     if not parsed:
         raise HTTPException(400, "Senaryo / shot yok")
     pack = body.continuum_max_chunks if use_continuum else max(1, int(MULTISHOT_MAX_SHOTS))
-    chunks = (continuum.director_takes(parsed, prompts, pack=pack) if use_continuum
+    grouping = getattr(body, 'continuum_grouping', 'cuts')
+    chunks = (continuum.director_takes(parsed, prompts, pack=pack, grouping=grouping) if use_continuum
               else cinema.group_seamless_takes(parsed, prompts, pack=pack))
     take_total = len(chunks)
     w, h = resolve_size(body.aspect, body.quality)
@@ -4503,6 +4561,15 @@ async def _queue_cinema_seamless(
             file=lora_bits.get("lora_name") or "") for t in texts]
         if take_refs:
             texts = [continuum.align_reference_labels(text, bound.get("ref_images") or [], take_refs) for text,bound in zip(texts,bound_hits)]
+        chapter_sequence = use_continuum and grouping == 'chapter'
+        ignored_guides = []
+        if chapter_sequence:
+            ignored_guides = [s.get('id') for s in chunk_parsed[1:] if s.get('first_frame_name')]
+            texts = [(
+                f'CHAPTER SECTION {i+1}/{len(texts)}. Advance to this section action in story order. '
+                + ('The starting image is used only at the beginning of section 1. No separate starting image is supplied at this section boundary. '
+                   if i else '') + '\n\n' + text
+            ) for i, text in enumerate(texts)]
         script = "\n---\n".join(texts)
         seed = (base_seed + take_i - 1) if body.seed >= 0 else (base_seed + take_i - 1) % (2**53)
         take_title = str((chunk_parsed[0] or {}).get("take_title") or "").strip()
@@ -4560,7 +4627,17 @@ async def _queue_cinema_seamless(
         }
         if use_continuum:
             job['continuum_scene_ids'] = [s.get('id') for s in chunk_parsed]
-            if chunk_parsed[0].get('mode') == 'continue':
+            job['continuum_grouping'] = grouping
+            job['continuum_ignored_guides'] = ignored_guides
+            job['planned_duration'] = body.duration * len(texts)
+            continuing_chapter = (chapter_sequence and take_i > 1 and
+                                  (chunk_parsed[0].get('chapter') or 'Bölüm 1') == (chunks[take_i-2][0][-1].get('chapter') or 'Bölüm 1'))
+            if continuing_chapter:
+                if chunk_parsed[0].get('first_frame_name'):
+                    job['continuum_ignored_guides'].insert(0, chunk_parsed[0].get('id'))
+                job['first_frame_name'] = None
+                job['continue_from'] = jobs[-1]['id']
+            elif chunk_parsed[0].get('mode') == 'continue':
                 parent = (parent_job_ids or [])[shot_offset:shot_offset + 1]
                 job['continue_from'] = (parent[0] if parent else None) or (jobs[-1]['id'] if jobs else None)
                 if not job['continue_from']:
@@ -9079,7 +9156,8 @@ async def _run_job(job: dict):
         if job.get('prepare_refine'):
             prompt = flow_refine.capture(prompt, job)
         job['effective_spectrum'] = h3_acceleration.graph_settings(prompt)
-        prompt_id = await comfy.queue_prompt(prompt)
+        await render_control.prepare(COMFY_URL, prompt, job)
+        prompt_id = await comfy.queue_prompt(prompt, render_control_token=job.get('render_control_token'))
         job["prompt_id"] = prompt_id
         job["progress"] = 12
         job["progress_label"] = "Comfy çalışıyor"
@@ -9131,6 +9209,8 @@ async def _run_job(job: dict):
         while True:
             if job["status"] == "cancelled":
                 return
+            if tick % 3 == 0:
+                await _sync_render_pause(job)
             try:
                 hist = await comfy.history(prompt_id)
             except Exception as e:
@@ -9268,6 +9348,13 @@ async def _run_job(job: dict):
             clock = f"{mins}m{secs:02d}s" if mins else f"{secs}s"
 
             ws_fresh = (time.time() - float(job.get("_ws_progress_at") or 0)) < 8.0
+            if job.get('render_pause_requested'):
+                job['progress_label'] = ('Duraklatıldı — bellek korunuyor' if job.get('render_paused')
+                                         else 'Geçerli adım bitince duraklatılacak')
+                _save_jobs_throttled(2.0)
+                await asyncio.sleep(1)
+                tick += 1
+                continue
             if in_running:
                 saw_running = True
                 absent_ticks = 0
@@ -9324,6 +9411,7 @@ async def _run_job(job: dict):
             await asyncio.sleep(1)
             tick += 1
     finally:
+        job.update(render_pause_requested=False, render_paused=False, render_control_ready=False)
         # Detach WS quietly — do not cancel()/await (CancelledError killed the queue).
         stop_ws.set()
         if ws_task is not None and not ws_task.done():

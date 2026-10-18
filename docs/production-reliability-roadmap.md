@@ -62,4 +62,8 @@ Three draft results completed at 480p/8 steps: native Spectrum OFF, native Spect
 
 ## Completed exact-prompt control
 
+### Scene settings mirror follow-up
+
+The Scene settings mirror copied Spectrum blend controls but forwarded only engine/theme/style clicks and the Spectrum toggle. Preset buttons and manual/range changes therefore had no persistence handler in Scene. Forward those controls to the existing global handlers and synchronize paired input values without replacing the slider during dragging. Bump the mirror script cache revision. All 43 JavaScript tests pass, including four mirror regressions. Live Scene preset selection (Light/Strong) and a custom slider value were verified; the original Spectrum 0.60 setting was restored. No render or backend restart was needed.
+
 After the user reopened Pinokio, a fresh exact-prompt OFF control completed: the actual prompt/chunk prompts, seed, steps, dimensions, references, guide and reference sizing matched the Spectrum 0.60 case. Both outputs contain 192 frames / 8 seconds and 32 kHz audio. Recorded wall time was 344.45 s OFF versus 272.86 s ON; OFF followed a restart with different loading/cache conditions, so this single draft pair is not an isolated Spectrum speedup benchmark or a 1088p prediction. The sampled OFF frames did not show the conspicuous translucent double-body trails seen in ON, but walking/fixed-camera compliance still failed full acceptance. This is a limited observation, not a universal causal conclusion. The interrupted attempt remains preserved. Original active film and Spectrum 0.60 settings were restored, the queue is idle and feature production remains paused. Audio listening and an equivalent 1088p benchmark remain outstanding.

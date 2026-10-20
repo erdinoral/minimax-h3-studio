@@ -120,18 +120,18 @@ class RefineRequests(unittest.IsolatedAsyncioTestCase):
                        and n.name in ('snap32','snap_h3_size','refine_clip')]
             for function in functions: function.decorator_list=[]
             exec(compile(ast.Module(body=functions,type_ignores=[]),'server.py','exec'),env)
-            job=await env['refine_clip'](identifier,SimpleNamespace(quality='608'))
+            job=await env['refine_clip'](identifier,SimpleNamespace(quality='608',method='flow'))
             self.assertEqual((job['width'],job['height']),(1088,608))
             self.assertEqual(job['refine_source_id'],identifier)
             self.assertNotEqual(job['id'],identifier)
             self.assertEqual((source['width'],source['height']),(864,480))
             for quality in ('480','999'):
                 with self.assertRaises(HTTPException) as rejected:
-                    await env['refine_clip'](identifier,SimpleNamespace(quality=quality))
+                    await env['refine_clip'](identifier,SimpleNamespace(quality=quality,method='flow'))
                 self.assertEqual(rejected.exception.status_code,400)
             source['prepare_refine']=False
             with self.assertRaises(HTTPException) as rejected:
-                await env['refine_clip'](identifier,SimpleNamespace(quality='608'))
+                await env['refine_clip'](identifier,SimpleNamespace(quality='608',method='flow'))
             self.assertEqual(rejected.exception.status_code,409)
 
 

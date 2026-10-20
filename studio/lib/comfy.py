@@ -262,10 +262,10 @@ class ComfyClient:
 
     @staticmethod
     def extract_video_meta(outputs: dict) -> Optional[dict]:
-        """Find first video-like file in Comfy history outputs."""
+        """Prefer a saved video; loader previews are inputs, never results."""
         if not outputs:
             return None
-        # Prefer explicit video containers
+        candidates = []
         for node_out in outputs.values():
             if not isinstance(node_out, dict):
                 continue
@@ -273,21 +273,16 @@ class ComfyClient:
                 for item in node_out.get(key) or []:
                     if not isinstance(item, dict):
                         continue
+                    if item.get('type') == 'input':
+                        continue
                     name = str(item.get("filename") or "")
                     low = name.lower()
                     if key in ("gifs", "videos") or low.endswith(
                         (".mp4", ".webm", ".mkv", ".mov", ".gif", ".webp")
                     ):
-                        return item
-        # Fallback: any file-like output
-        for node_out in outputs.values():
-            if not isinstance(node_out, dict):
-                continue
-            for key in ("gifs", "videos", "images"):
-                items = node_out.get(key) or []
-                if items and isinstance(items[0], dict) and items[0].get("filename"):
-                    return items[0]
-        return None
+                        candidates.append(item)
+        return next((item for item in candidates if item.get('type') == 'output'),
+                    candidates[0] if candidates else None)
 
     @staticmethod
     def format_execution_error(messages: Any) -> str:

@@ -8,6 +8,23 @@ from .comfy import build_t2v_prompt
 SAMPLER = 'H3ContinuumSamplerV39'
 SCHEMA = json.loads(Path(__file__).with_name('continuum_schema.json').read_text(encoding='utf-8'))
 
+def director_chain_groups(shots, prompts):
+    """A normal New clip owns the following native Continuum sections."""
+    if len(shots) != len(prompts) or any(not str(p).strip() for p in prompts):
+        raise ValueError('Each Director scene needs a non-empty prompt')
+    groups = []
+    for index, (shot, prompt) in enumerate(zip(shots, prompts)):
+        continuing = shot.get('mode') == 'continue'
+        chapter = shot.get('chapter') or 'Bölüm 1'
+        if (continuing and groups and groups[-1]['kind'] == 'continue'
+                and groups[-1]['chapter'] == chapter):
+            groups[-1]['shots'].append(shot)
+            groups[-1]['prompts'].append(prompt)
+        else:
+            groups.append(dict(kind='continue' if continuing else 'new', chapter=chapter,
+                               offset=index, shots=[shot], prompts=[prompt]))
+    return groups
+
 def director_takes(shots, prompts, pack=16, grouping='cuts'):
     """Keep JSON story order; cuts/take boundaries start a separate sampler run."""
     if len(shots) != len(prompts) or any(not str(p).strip() for p in prompts):

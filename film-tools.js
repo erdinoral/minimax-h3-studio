@@ -2,6 +2,12 @@
 module.exports = {
   requires: { bundle: "ai" },
   run: [{
+    method: "shell.run",
+    params: { venv: "env", path: "app", message: "python ../studio/tools/install_h3_extras.py --check-stopped" }
+  }, {
+    method: "shell.run",
+    params: { venv: "env", path: "app", message: "uv pip install -r requirements.txt" }
+  }, {
     when: "{{!exists('app/custom_nodes/ComfyUI-Minimax-H3-Reference-Library')}}",
     method: "shell.run",
     params: { path: "app/custom_nodes", message: "git clone https://github.com/nikaskeba/ComfyUI-Minimax-H3-Reference-Library.git" }
@@ -20,5 +26,8 @@ module.exports = {
   }, {
     method: "shell.run",
     params: { venv: "env", path: "app", message: "python ../studio/tools/install_film_workflows.py" }
+  }, {
+    method: "shell.run",
+    params: { venv: "env", path: "app", message: "python ../studio/tools/install_h3_extras.py" }
   }]
 };

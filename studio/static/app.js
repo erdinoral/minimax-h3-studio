@@ -808,6 +808,7 @@
       const chunks = job.native_context_chunks || job.continuum_prompts?.length || 1;
       bits.push(`${en ? 'Native sequence' : 'Native sekans'}: ${chunks} × ${job.continuum_chunk_seconds || job.duration || '?'}${tt('sec')}`);
       if (job.continuity_method === 'native_prefix' || job.continuum_resume) bits.push(en ? 'Continuation: saved native context' : 'Devam: kaydedilmiş native bağlam');
+      else if (job.continuity_method === 'native_latent_tail') bits.push(en ? 'Native video/audio tail · 22 frames' : 'Doğal görüntü/ses bağlamı · 22 kare');
       else if (job.continue_from) bits.push(en ? 'Between jobs: previous last frame' : 'İşler arası: önceki son kare');
       if (job.continuum_reference_size) bits.push(`${en ? 'Reference size' : 'Referans boyutu'}: ${job.continuum_reference_size}`);
       if (job.continuum_grouping === 'chapter') bits.push(en ? 'One sequence per chapter' : 'Bölüm başına tek sekans');
@@ -2232,7 +2233,8 @@
   function cinemaJobForShot(shotId, index) {
     const batch = (ensureCinema().audio || {}).last_batch || "";
     const jobs = state.jobs || [];
-    const byId = jobs.find((j) => j.shot_id && j.shot_id === shotId);
+    const byId = jobs.filter((j) => j.shot_id === shotId || (j.continuum_scene_ids || []).includes(shotId))
+      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0];
     if (byId) return byId;
     if (!batch) return null;
     const multi = jobs.find(
@@ -2665,6 +2667,7 @@
 
   function cinemaShotHtml(shot, globalIndex, sceneIndex) {
     const mode = shot.mode === "continue" ? "continue" : "t2v";
+    const chainParent = globalThis.H3DirectorChains?.sceneParents(ensureCinema().shots || []).get(shot.id);
     const enabled = shot.enabled !== false;
     const calls = cinemaShotCalls(shot.text);
     const jobMeta = cinemaShotJobMeta(shot.id, globalIndex);
@@ -2678,8 +2681,7 @@
     const modeHtml =
       cinemaStudioMode() === "seamless"
         ? '<span class="cinema-shot-link muted">' +
-          (ensureCinema().continuum_grouping === 'chapter' ? tt('cinema.sequencePart')
-            : mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
+          (mode === "continue" ? tt("filmMode.linkCont") : tt("filmMode.linkNew")) +
           "</span>"
         : '<div class="cinema-shot-mode">' +
           '<button type="button" class="t2v' +
@@ -2694,13 +2696,14 @@
           "</button></div>";
     return (
       '<article class="cinema-shot' +
+      (chainParent ? ' cinema-shot-child' : '') +
       (enabled ? "" : " is-disabled") +
       '" data-id="' +
       htmlEsc(shot.id) +
       '"><div class="cinema-shot-head"><span class="idx">' +
       htmlEsc(tf("cinema.sectionLabel", { n: String(sceneIndex + 1), duration: String(ensureCinema().duration || 5) })) +
       "</span>" +
-      modeHtml +
+      modeHtml + (chainParent ? '<span class="director-chain-badge">↳ Continuum</span>' : '') +
       (jobLabel
         ? '<span class="cinema-shot-job' + jobCls + '">' + htmlEsc(jobLabel) + "</span>"
         : "") +
@@ -4991,7 +4994,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       }
       const studioMode = cinemaStudioMode();
       const wantSeamless = studioMode === "seamless";
-      if (wantSeamless) {
+      if (shots.some(s => s.mode === 'continue')) {
         if (!(globalThis.isDirectorContinuumReady?.() ?? !!state.multishot)) {
           toast(tt("cinema.modeSeamlessNeedPack"));
           return;
@@ -5046,7 +5049,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           seamless: wantSeamless,
           seamless_backend: globalThis.getDirectorContinuumBackend?.() || 'continuum',
           continuum_grouping: cine.continuum_grouping || 'cuts',
-          prepare_sheets: !wantSeamless,
+          prepare_sheets: true,
           force_sheets: !!$("cinema-force-sheets")?.checked,
           image_provider: normalizeCinemaImageProvider(cine.image_provider),
           post_pass: state.postPass || "",
@@ -8140,7 +8143,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       .filter((j) => j.status !== "running" && j.status !== "queued")
       .sort(byFinishedThenRecent)
       .slice(0, 40);
-    const jobs = active.concat(finished);
+    const jobs = state.prodLane === 'director'
+      ? globalThis.H3DirectorChains.orderJobs(active.concat(finished), laneJobs)
+      : active.concat(finished);
     const head = document.querySelector(".job-queue-head");
     if (head) {
       const qn = active.filter((j) => j.status === "queued").length;
@@ -8155,6 +8160,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const activeOrder = new Map(active.map((j, i) => [j.id, i + 1]));
     for (const j of jobs) {
       const li = document.createElement("li");
+      if (j.director_parent_id) li.classList.add('job-director-child');
       if (j.status === "running") li.classList.add("job-running");
       const left = document.createElement("div");
       const st =
@@ -8172,6 +8178,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const stName = tt("job." + j.status);
       const stText = stName.indexOf("job.") === 0 ? j.status : stName;
       left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${htmlEsc((j.scene_title || j.prompt || "").slice(0, 60))}${err}`;
+      if (j.director_chain_role) {
+        const badge = document.createElement('small');
+        badge.className = 'director-chain-badge';
+        badge.textContent = j.director_parent_id ? '↳ Continuum' : tt('mode.t2v');
+        left.prepend(badge);
+      }
       if (j.mode === "qwen_sheet" && j.status === "running") {
         const track = document.createElement("div");
         track.className = "job-inline-progress";
@@ -9607,6 +9619,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         ["h3-clip", "clip"],
         ["h3-vae", "vae"],
         ["h3-audio-vae", "audio_vae"],
+        ["h3-video-decoder", "video_decoder"],
       ];
       slots.forEach(([elId, key]) => {
         const sel = $(elId);
@@ -9648,6 +9661,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             clip: $("h3-clip")?.value || "",
             vae: $("h3-vae")?.value || "",
             audio_vae: $("h3-audio-vae")?.value || "",
+            video_decoder: $("h3-video-decoder")?.value || "",
           };
       const r = await fetch("/api/h3-models", {
         method: "POST",

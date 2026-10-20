@@ -1,8 +1,14 @@
 # MiniMax H3 Studio
 
+Optional H3 tools: [LightVAE decoder, ColorAnchor, Spectrum and Meridian prerequisites](studio/docs/OPTIONAL_H3_EXTRAS.md).
+
 ## 9.3.2 — Chapter sequences and render pause
 
 Director can process each chapter as one ordered Continuum sequence. Each scene keeps its own prompt; only the sequence's first starting image is used. Sampling can pause at a progress checkpoint and resume the same render, while model memory remains allocated. Video details also provide a minimal diagnostic report. See [9.3.2 release notes](docs/releases/v9.3.2.md).
+
+### Director: New Video and Continuum children
+
+Director JSON keeps `mode: "t2v"` as a normal standalone main clip. Consecutive `mode: "continue"` scenes become Continuum children beneath that clip in the production list; each scene retains its ordered prompt. With the Studio native-tail bridge installed, New clips save a bounded AV latent tail and continuations carry 22 frames of motion/audio context, including between memory-bounded child groups. Older clips without this state retain the explicitly reported last-frame handoff. Another New Video creates another main clip. Scene cards show the same parent/child arrangement. Existing jobs are preserved; changing scene modes affects future production only. See [native continuation details and limits](studio/docs/NATIVE_CONTINUATION.md).
 
 ## 9.3.1 — Director continuity and production reliability
 

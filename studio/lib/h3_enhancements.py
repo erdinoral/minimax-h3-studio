@@ -40,6 +40,14 @@ def preset(names, steps, sampler, scheduler, graph):
 
 
 def patch_graph(graph, job):
+    # Keep keyframe/reference encoding on the original VAE. Only replace the
+    # final video decoder; never touch AudioVAE or the draft-only tiny decoder.
+    decoder = (job.get('h3_models') or {}).get('video_decoder')
+    if decoder and any(n.get('class_type') in ('VAEDecode', 'VAEDecodeTiled') for n in graph.values()):
+        graph['studio_video_decoder'] = {'class_type': 'VAELoader', 'inputs': {'vae_name': decoder}}
+        for node in graph.values():
+            if node.get('class_type') in ('VAEDecode', 'VAEDecodeTiled'):
+                node['inputs']['vae'] = ['studio_video_decoder', 0]
     if job.get('refmod_enabled') and not job.get('sheet_job'):
         for nid, node in list(graph.items()):
             if node.get('class_type') != 'MiniMaxH3ReferenceToVideo':

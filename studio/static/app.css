@@ -1638,6 +1638,9 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   font-size: 0.8rem;
 }
 .job-list li:first-child { border-top: none; }
+.job-list li.job-director-child { margin-left: 22px; border-left: 2px solid var(--accent); padding-left: 12px; }
+.cinema-shot.cinema-shot-child { margin-left: 24px; border-left: 2px solid var(--accent); }
+.director-chain-badge { display: inline-block; color: var(--accent); font-size: .72rem; margin-right: 8px; }
 .job-list li.job-running {
   background: rgba(196, 92, 38, 0.12);
   margin: 0 -8px;

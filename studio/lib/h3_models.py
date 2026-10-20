@@ -12,7 +12,7 @@ MODELS_ROOT = STUDIO_ROOT.parent / "app" / "models"
 SETTINGS_PATH = STUDIO_ROOT / "data" / "h3_models.json"
 
 # Empty string = use Studio default for that slot
-SLOT_KEYS = ("unet", "unet_ref2va", "clip", "vae", "audio_vae")
+SLOT_KEYS = ("unet", "unet_ref2va", "clip", "vae", "audio_vae", "video_decoder")
 AUTO_INT8_VAE = "__auto_int8__"
 INT8_VIDEO_VAE = "minimax_h3_video_vae_int8_convrot.safetensors"
 
@@ -22,6 +22,7 @@ FOLDER_MAP: dict[str, tuple[str, ...]] = {
     "clip": ("text_encoders", "clip"),
     "vae": ("vae",),
     "audio_vae": ("vae",),
+    "video_decoder": ("vae",),
 }
 
 HINT_RE: dict[str, tuple[str, ...]] = {
@@ -30,6 +31,7 @@ HINT_RE: dict[str, tuple[str, ...]] = {
     "clip": ("qwen", "minimax", "h3"),
     "vae": ("video", "h3", "minimax"),
     "audio_vae": ("audio", "h3", "minimax"),
+    "video_decoder": ("lightvae", "video", "h3", "minimax"),
 }
 
 
@@ -40,6 +42,7 @@ def defaults() -> dict[str, str]:
         "clip": DEFAULT_MODELS["clip"],
         "vae": DEFAULT_MODELS["vae"],
         "audio_vae": DEFAULT_MODELS["audio_vae"],
+        "video_decoder": "",
     }
 
 
@@ -68,6 +71,10 @@ def list_catalog() -> dict[str, Any]:
     for key in SLOT_KEYS:
         folders = FOLDER_MAP[key]
         files = _list_dir(*folders)
+        if key == 'video_decoder':
+            files = [name for name in files if 'audio' not in name.lower()
+                     and 'encoder' not in name.lower()
+                     and any(h in name.lower() for h in ('minimax', 'h3', 'lightvae'))]
         hints = HINT_RE.get(key, ())
         files = sorted(files, key=lambda n: _rank(n, hints))
         out["options"][key] = files
@@ -143,6 +150,8 @@ def resolve(graph: str = "fl2va", overrides: Optional[dict[str, Any]] = None) ->
         base["vae"] = saved["vae"]
     if saved.get("audio_vae"):
         base["audio_vae"] = saved["audio_vae"]
+    if saved.get("video_decoder"):
+        base["video_decoder"] = saved["video_decoder"]
 
     if g in ("ref2va", "ref", "face", "v2v", "face_continue", "audio_continue"):
         if saved.get("unet_ref2va"):

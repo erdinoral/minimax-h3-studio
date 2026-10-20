@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=spectrum-blend279" />
+  <link rel="stylesheet" href="/static/app.css?v=director-chains285" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -678,13 +678,7 @@
             </label>
             <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
-          <label id="cinema-continuum-grouping-wrap">
-            <span data-i18n="cinema.sequenceGrouping">Sekans düzeni</span>
-            <select id="cinema-continuum-grouping" data-i18n-title="cinema.sequenceHelp" title="Bölüm başına tek sekans ilk başlangıç görselini kullanır; ara başlangıç görselleri uygulanmaz. En fazla 16 sahne/sekans.">
-              <option value="cuts" data-i18n="cinema.sequenceCuts">Yeni keslerde ayır</option>
-              <option value="chapter" data-i18n="cinema.sequenceChapter">Bölüm başına tek video</option>
-            </select>
-          </label>
+          <p class="muted mode-hint" data-i18n="cinema.chainHelp">Yeni video ana kliptir. Ardışık Devam sahneleri, onun altında bir Continuum sekansı olarak üretilir.</p>
           <label><span id="cinema-steps-label">Adım</span>
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
           </label>
@@ -1315,6 +1309,10 @@
           <label><span id="h3-audio-vae-label">Audio VAE</span>
             <select id="h3-audio-vae"></select>
           </label>
+          <label><span id="h3-video-decoder-label">Video çözücü · deneysel LightVAE</span>
+            <select id="h3-video-decoder"></select>
+            <small class="muted" id="h3-video-decoder-hint">Boş = mevcut VAE. Yalnızca çıkış videosunu çözer; referans kodlaması değişmez.</small>
+          </label>
           <div class="chips wrap" style="margin-top:8px;gap:8px">
             <button type="button" class="btn-secondary" id="btn-h3-models-save">Model seçimini kaydet</button>
             <button type="button" class="btn-ghost" id="btn-h3-models-reset">Varsayılana dön</button>
@@ -1336,13 +1334,14 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=chapter-pause284" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=director-chains285" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
-  <script src="/static/app.js?v=chapter-pause284" charset="utf-8"></script>
+  <script src="/static/director-chains.js?v=1" charset="utf-8"></script>
+  <script src="/static/app.js?v=native-tail286" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>

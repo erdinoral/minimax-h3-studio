@@ -6,9 +6,29 @@ from pathlib import Path
 STORE = Path(__file__).resolve().parents[1] / 'data' / 'flow_graphs'
 
 
+def without_spectrum(graph):
+    """Use actual model evaluations for Flow's durable trajectory contract.
+
+    Spectrum 0.2.29 does not supply the complete active-step provenance required
+    by the installed Flow runtime. Do not invent provenance or disable its guard.
+    Global acceleration settings and ordinary generation graphs are untouched.
+    """
+    for key, node in list(graph.items()):
+        if node.get('class_type') != 'SpectrumApplyMiniMaxH3':
+            continue
+        source = node['inputs']['model']
+        for consumer in graph.values():
+            for name, value in consumer.get('inputs', {}).items():
+                if value == [key, 0]:
+                    consumer['inputs'][name] = copy.deepcopy(source)
+        del graph[key]
+    return graph
+
+
 def capture(graph, job):
     if '14' not in graph or '16' not in graph:
         raise ValueError('Flow recording requires a native single-clip sampler')
+    without_spectrum(graph)
     STORE.mkdir(parents=True, exist_ok=True)
     target = STORE / (job['id'] + '.json')
     temporary = target.with_suffix('.tmp')
@@ -31,7 +51,7 @@ def capture(graph, job):
 
 def build(job):
     source = json.loads((STORE / (job['refine_source_id'] + '.json')).read_text(encoding='utf-8'))
-    graph = copy.deepcopy(source)
+    graph = without_spectrum(copy.deepcopy(source))
     # Preserve original low-resolution conditioning for trajectory matching.
     needed = set()
     def visit(key):

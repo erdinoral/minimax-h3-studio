@@ -5459,7 +5459,9 @@ async def _queue_cinema_sheet_job(
         asset_payload["source_ref"] = refs[0]
     asset = cinema.upsert_asset(kind, asset_payload)
     quality_n = normalize_quality(quality or "736")
-    steps_n = steps if steps and steps > 0 else 18
+    # Minimax asset capture uses one predictable draft preset regardless of the
+    # active Director video-step control; only the final still is retained.
+    steps_n = 20
     dur = int(duration) if duration and int(duration) > 0 else 5
     # An asset only needs a representative final still. Four seconds is the
     # shortest native H3 video render supported by the temporal frame grid.

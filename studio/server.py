@@ -1324,6 +1324,7 @@ class GenerateBody(BaseModel):
     post_pass: Optional[str] = None
     fast_preview: bool = False
     sheet_job: bool = False
+    sheet_spectrum_full: bool = False
 
     @field_validator("seed", "steps", mode="before")
     @classmethod
@@ -2936,6 +2937,7 @@ async def generate(body: GenerateBody):
         "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
         "fast_preview": bool(body.fast_preview),
         "sheet_job": bool(getattr(body, "sheet_job", False)),
+        "sheet_spectrum_full": bool(body.sheet_job and body.sheet_spectrum_full),
         **continuum_data,
         "prepare_refine": body.prepare_refine,
         **lora_applied,
@@ -5459,7 +5461,9 @@ async def _queue_cinema_sheet_job(
     quality_n = normalize_quality(quality or "736")
     steps_n = steps if steps and steps > 0 else 18
     dur = int(duration) if duration and int(duration) > 0 else 5
-    dur = max(4, min(dur, 10))
+    # An asset only needs a representative final still. Four seconds is the
+    # shortest native H3 video render supported by the temporal frame grid.
+    dur = 4
     gen_kwargs: dict[str, Any] = {
         "prompt": prompt,
         "duration": dur,
@@ -5472,6 +5476,7 @@ async def _queue_cinema_sheet_job(
         "lane": "director",
         "prompt_rewriter_enabled": False,
         "sheet_job": True,
+        "sheet_spectrum_full": True,
     }
     still = still_catalog_spec()
     if character_lora:

@@ -42,6 +42,29 @@ class OptionalExtrasTests(unittest.TestCase):
         before = copy.deepcopy(graph)
         self.assertEqual(h3_enhancements.patch_graph(graph, {}), before)
 
+    def test_minimax_asset_sheet_forces_full_spectrum_per_job(self):
+        graph = {
+            'unet': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'minimax_h3_test.safetensors'}},
+            'guider': {'class_type': 'BasicGuider', 'inputs': {'model': ['unet', 0]}},
+            'scheduler': {'class_type': 'BasicScheduler', 'inputs': {'model': ['unet', 0]}},
+        }
+        h3_enhancements.patch_graph(graph, {'sheet_job': True, 'sheet_spectrum_full': True})
+        spectrum = next(node for node in graph.values() if node['class_type'] == 'SpectrumApplyMiniMaxH3')
+        self.assertIs(spectrum['inputs']['enabled'], True)
+        self.assertEqual(spectrum['inputs']['blend_weight'], 1.0)
+
+    def test_minimax_asset_override_updates_existing_spectrum_without_adding_another(self):
+        graph = {
+            'unet': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'minimax_h3_test.safetensors'}},
+            'spectrum': {'class_type': 'SpectrumApplyMiniMaxH3', 'inputs': {'model': ['unet', 0], 'enabled': True, 'blend_weight': 0.75}},
+            'guider': {'class_type': 'BasicGuider', 'inputs': {'model': ['spectrum', 0]}},
+            'scheduler': {'class_type': 'BasicScheduler', 'inputs': {'model': ['spectrum', 0]}},
+        }
+        h3_enhancements.patch_graph(graph, {'sheet_job': True, 'sheet_spectrum_full': True})
+        spectrum_nodes = [node for node in graph.values() if node['class_type'] == 'SpectrumApplyMiniMaxH3']
+        self.assertEqual(len(spectrum_nodes), 1)
+        self.assertEqual(spectrum_nodes[0]['inputs']['blend_weight'], 1.0)
+
     def test_decoder_is_recorded_separately_from_encoder(self):
         with patch.object(h3_models, 'load', return_value={'video_decoder': 'lightvae.safetensors'}):
             for mode in ('fl2va', 'ref2va'):

@@ -40,6 +40,16 @@ def preset(names, steps, sampler, scheduler, graph):
 
 
 def patch_graph(graph, job):
+    if job.get('sheet_spectrum_full'):
+        spectrum = next((node for node in graph.values()
+                         if node.get('class_type') == 'SpectrumApplyMiniMaxH3'), None)
+        if spectrum is not None:
+            spectrum['inputs']['enabled'] = True
+            spectrum['inputs']['blend_weight'] = 1.0
+        else:
+            # Import locally to keep the graph builder independent at module load.
+            from .comfy import apply_spectrum
+            apply_spectrum(graph, blend_weight=1.0)
     # Keep keyframe/reference encoding on the original VAE. Only replace the
     # final video decoder; never touch AudioVAE or the draft-only tiny decoder.
     decoder = (job.get('h3_models') or {}).get('video_decoder')

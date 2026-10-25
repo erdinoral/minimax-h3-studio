@@ -17,6 +17,10 @@ SINGULARITY = {
     "slots": ["unet", "unet_ref2va"],
 }
 ALIASES = [SINGULARITY["file"], "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors"]
+SINGULARITY_V2_FILE = "minimaxH3Singularity_v2Int8.safetensors"
+SINGULARITY_V2_BYTES = 34004507622
+SINGULARITY_V2_SHA256 = "db3ec568863db6f5ec1840210d41653afef73d4df7b0cb489c52ad458b6f8a7f"
+ALIASES.append(SINGULARITY_V2_FILE)
 HYBRID_FILE = "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"
 HYBRID_BYTES = 20970379632
 
@@ -51,7 +55,12 @@ def folder():
     return MODELS_ROOT / "diffusion_models"
 
 def installed():
-    return next((MODELS_ROOT/sub/name for sub in ("diffusion_models", "unet") for name in ALIASES
+    newer = next((MODELS_ROOT/sub/SINGULARITY_V2_FILE for sub in ("diffusion_models", "unet")
+        if (MODELS_ROOT/sub/SINGULARITY_V2_FILE).is_file()
+        and (MODELS_ROOT/sub/SINGULARITY_V2_FILE).stat().st_size == SINGULARITY_V2_BYTES), None)
+    if newer:
+        return newer
+    return next((MODELS_ROOT/sub/name for sub in ("diffusion_models", "unet") for name in ALIASES[:-1]
         if (MODELS_ROOT/sub/name).is_file() and (MODELS_ROOT/sub/name).stat().st_size == SINGULARITY["bytes"]), None)
 
 def engine_status():
@@ -82,6 +91,13 @@ def select_engine(engine):
 
 def catalog():
     path = installed()
+    if path and path.name == SINGULARITY_V2_FILE:
+        # A manually installed V2 is distinct from the downloadable V1.3.
+        # Do not advertise the old download URL/hash for the new checkpoint.
+        return [{**SINGULARITY, "label": "Singularity v2 · INT8", "file": path.name,
+            "bytes": SINGULARITY_V2_BYTES, "sha256": SINGULARITY_V2_SHA256, "url": None,
+            "ready": True, "installed_file": path.name, "downloaded": SINGULARITY_V2_BYTES,
+            "progress": 100, "busy": False, "phase": "ready", "error": None}]
     partial = folder()/(SINGULARITY["file"] + ".part")
     downloaded = SINGULARITY["bytes"] if path else partial.stat().st_size if partial.is_file() else 0
     return [{**SINGULARITY, "ready": bool(path), "installed_file": path.name if path else None,

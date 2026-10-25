@@ -94,6 +94,30 @@
     "trigger_position": "start"
   },
   {
+    "id": "h3-anti-burn",
+    "label": "Anti-Burn (long-video continuity)",
+    "file": "h3_antiburn_universal_v1.safetensors",
+    "aliases": [],
+    "category": "other",
+    "graphs": [
+      "fl2va",
+      "ref2va"
+    ],
+    "strength": 0.5,
+    "trigger": "",
+    "url": "https://huggingface.co/Imagineer13/H3-Anti-Burn-LoRA/resolve/main/h3_antiburn_universal_v1.safetensors",
+    "sha256": "8f76dc3c63afa8c556c620b4b7f2ffeeb666f0aa9382a9ce3a07fd6120d0f154",
+    "expected_bytes": 310168728,
+    "source": "https://huggingface.co/Imagineer13/H3-Anti-Burn-LoRA",
+    "preset": false,
+    "steps": null,
+    "sampler": null,
+    "scheduler": null,
+    "hint": "Once installed, Studio adds it at 0.5 to native latent Continue sections only (never to a first clip) so faces do not burn over long chains. Delete it to turn this off.",
+    "size_hint": "295.8 MB",
+    "auto_continuation_strength": 0.5
+  },
+  {
     "id": "face-swap",
     "label": "FaceSwap REF2VA",
     "file": "SS_FaceSwap_MiniMax_H3_REF2VA.safetensors",
@@ -231,5 +255,37 @@
       "video",
       "image"
     ]
+  },
+  {
+    "id": "cinematic-official-v1",
+    "label": "Cinematic Official v1.0",
+    "file": "mmh3_cinematic_v1_official.safetensors",
+    "category": "style",
+    "graphs": [
+      "fl2va",
+      "ref2va"
+    ],
+    "strength": 0.7,
+    "trigger": "",
+    "hint": "Official v1.0: standard 0.7; high motion 0.5. No DY trigger.",
+    "size_hint": "296 MB",
+    "preset": false,
+    "sha256": "6f90eb51502e6eaad0e86c608c752fa8b379af559d24fe6acecc40e0f542f146"
+  },
+  {
+    "id": "male-pov",
+    "label": "Male POV (first-person)",
+    "file": "mmh3_mpov.safetensors",
+    "category": "motion",
+    "graphs": [
+      "fl2va",
+      "ref2va"
+    ],
+    "strength": 0.7,
+    "trigger": "mpov, first-person perspective pov video",
+    "hint": "First-person camera. Use high angle, eye level or low angle; specify visible hands or legs.",
+    "size_hint": "125 MB",
+    "preset": false,
+    "sha256": "5d5011942015fa45533b262dbde638895ca722d3d34d1efe9e4665a25d768e28"
   }
 ]

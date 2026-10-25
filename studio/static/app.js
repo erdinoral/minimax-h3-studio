@@ -91,6 +91,26 @@
     llamacppModels: [],
   };
 
+  let h3AccelerationSaveQueue = Promise.resolve();
+  let h3AccelerationLatestSave = Promise.resolve();
+  let pendingSpeedSpectrumApply = Promise.resolve(true);
+
+  function saveH3AccelerationSettings(changes) {
+    const request = h3AccelerationSaveQueue.then(async () => {
+      const response = await fetch("/api/h3-acceleration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(changes),
+      });
+      const result = await response.json();
+      if (!response.ok) throw Error(errDetail(result));
+      return result;
+    });
+    h3AccelerationLatestSave = request;
+    h3AccelerationSaveQueue = request.then(() => undefined, () => undefined);
+    return request;
+  }
+
   const CHROME_FIT_KEY = "h3-chrome-fit";
   function chromeFitEnabled() {
     try {
@@ -2026,6 +2046,7 @@
     try {
       const ok = await regenerateCinemaAsset(kind, id, button, {
         ref_images: [ref.name], ref_image: ref.name,
+        sheet_method: "look_sheets", production_method: "sheet",
       });
       if (ok && state.cinemaLookRefs[key] === ref) delete state.cinemaLookRefs[key];
     } finally {
@@ -2752,9 +2773,14 @@
     const total = active ? active * Number(ensureCinema().duration || 5) : 0;
     const body =
       n > 0
-        ? shots
-            .map((s, i) => cinemaShotHtml(s, globalIndexStart + i, i))
-            .join("")
+        ? (cinemaStudioMode() === 'seamless' && globalThis.H3DirectorChains?.sequenceGroups
+            ? globalThis.H3DirectorChains.sequenceGroups(shots).map((group, chainIndex) =>
+                '<section class="director-sequence"><h3>' + htmlEsc('Continuum ' + (chainIndex + 1)) +
+                '</h3><p class="muted">' + htmlEsc(uiLang() === 'en' ? 'New video → ordered continuation sections' : 'Yeni video → sırayla işlenen devam bölümleri') + '</p>' +
+                group.shots.map((s, i) => cinemaShotHtml(s, globalIndexStart + shots.indexOf(s), shots.indexOf(s)) +
+                  '<details class="director-section-prompt"><summary>' + htmlEsc((uiLang() === 'en' ? 'Section prompt ' : 'Bölüm promptu ') + (i + 1)) + '</summary><textarea data-director-prompt="' + htmlEsc(s.id) + '" aria-label="Continuum prompt">' + htmlEsc(s.text || '') + '</textarea></details>').join('') +
+                '<button type="button" class="btn-secondary" data-add-continuum-section="' + htmlEsc(group.shots[group.shots.length - 1].id) + '">' + htmlEsc(uiLang() === 'en' ? '+ Continuation section' : '+ Devam bölümü') + '</button></section>').join('')
+            : shots.map((s, i) => cinemaShotHtml(s, globalIndexStart + i, i)).join(''))
         : '<p class="muted cinema-chapter-empty">' + htmlEsc(tt("cinema.chapterEmpty")) + "</p>";
     const tools =
       '<div class="cinema-chapter-tools">' +
@@ -2794,6 +2820,29 @@
   }
 
   let cinemaSceneEditId = null;
+  $('cinema-shots')?.addEventListener('change', (event) => {
+    const field = event.target.closest('[data-director-prompt]');
+    if (!field) return;
+    const shot = cinemaShotById(field.dataset.directorPrompt);
+    if (!shot) return;
+    shot.text = field.value.trim();
+    delete shot.structured;
+    cinemaForceLocalShots = true;
+    void saveCinema(true);
+  });
+  $('cinema-shots')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-add-continuum-section]');
+    if (!button) return;
+    const c = ensureCinema();
+    const index = c.shots.findIndex(s => s.id === button.dataset.addContinuumSection);
+    if (index < 0) return;
+    const shot = {id: cinemaId(), text: '', mode: 'continue', enabled: true, chapter: cinemaChapterOf(c.shots[index])};
+    c.shots.splice(index + 1, 0, shot);
+    cinemaForceLocalShots = true;
+    renderCinemaShots();
+    void saveCinema(true);
+    openCinemaSceneModal(shot.id, 'continue');
+  });
   let cinemaSceneEditMode = "t2v";
   let cinemaSceneEditChapter = null;
 
@@ -5653,6 +5702,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     return String(a.id || "").localeCompare(String(b.id || ""));
   }
 
+  function queueOrderCmp(a, b) {
+    if (a.status !== b.status) return a.status === "running" ? -1 : 1;
+    const pa = Number(a.queue_position);
+    const pb = Number(b.queue_position);
+    if (Number.isFinite(pa) && Number.isFinite(pb) && pa !== pb) return pa - pb;
+    return productionOrderCmp(a, b);
+  }
+
   function showPlayerVideo(url, jobId, prompt, downloadName) {
     const player = $("player");
     const stage = document.querySelector(".player-stage");
@@ -8116,7 +8173,112 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
+  (() => {
+    const ul = $("job-list");
+    if (!ul) return;
+    const FLIP_MS = 200;
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    let dragEl = null;
+    let startNext = null;
+    let startOrder = "";
+    let dropped = false;
+    const draggables = () => [...ul.querySelectorAll("li.job-draggable")];
+    const orderKey = () => draggables().map((li) => li.dataset.jobId).join(",");
+    const renumber = () => {
+      let n = 0;
+      ul.querySelectorAll("li .job-sira").forEach((el) => { el.textContent = `#${++n}`; });
+    };
+    // FLIP: measure, mutate the DOM, then slide every row from its old spot to the new one.
+    const flip = (mutate) => {
+      if (reduceMotion?.matches) { mutate(); renumber(); return; }
+      const rows = [...ul.children];
+      const first = new Map(rows.map((li) => [li, li.getBoundingClientRect().top]));
+      mutate();
+      renumber();
+      for (const li of rows) {
+        li.style.transition = "none";
+        li.style.transform = "";
+      }
+      for (const li of rows) {
+        const dy = first.get(li) - li.getBoundingClientRect().top;
+        if (!dy) continue;
+        li.style.transform = `translateY(${dy}px)`;
+        li._flipUntil = performance.now() + FLIP_MS;
+      }
+      void ul.offsetHeight;
+      for (const li of rows) {
+        if (!li.style.transform) { li.style.transition = ""; continue; }
+        li.style.transition = `transform ${FLIP_MS}ms cubic-bezier(.2,.8,.2,1)`;
+        li.style.transform = "";
+      }
+    };
+    ul.addEventListener("dragstart", (e) => {
+      const li = e.target.closest?.("li.job-draggable");
+      if (!li) return;
+      dragEl = li;
+      startNext = li.nextSibling;
+      startOrder = orderKey();
+      dropped = false;
+      state.queueDragging = true;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", li.dataset.jobId);
+      requestAnimationFrame(() => li.classList.add("job-dragging"));
+    });
+    ul.addEventListener("dragover", (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      const li = e.target.closest?.("li.job-draggable");
+      // A row that is still sliding sits under the cursor mid-way; reacting to it would bounce.
+      if (!li || li === dragEl || (li._flipUntil || 0) > performance.now()) return;
+      const dragBeforeTarget = dragEl.compareDocumentPosition(li) & Node.DOCUMENT_POSITION_FOLLOWING;
+      flip(() => ul.insertBefore(dragEl, dragBeforeTarget ? li.nextSibling : li));
+    });
+    ul.addEventListener("drop", async (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      dropped = true;
+      const moving = dragEl.dataset.jobId;
+      const rows = draggables();
+      const i = rows.indexOf(dragEl);
+      const next = rows[i + 1];
+      const prev = rows[i - 1];
+      if (orderKey() === startOrder || (!next && !prev)) {
+        state.queueDragging = false;
+        return;
+      }
+      state.queueJustMoved = moving;
+      try {
+        const r = await fetch(`/api/jobs/${encodeURIComponent(moving)}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(next
+            ? { target_id: next.dataset.jobId, place: "before" }
+            : { target_id: prev.dataset.jobId, place: "after" }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(errDetail(data));
+        tToast("toast.queueMoved");
+      } catch (err) {
+        state.queueJustMoved = null;
+        toast(String(err.message || err));
+      } finally {
+        state.queueDragging = false;
+        await refreshJobs();
+      }
+    });
+    ul.addEventListener("dragend", () => {
+      const li = dragEl;
+      dragEl = null;
+      if (!li) return;
+      li.classList.remove("job-dragging");
+      if (dropped) return;
+      if (orderKey() !== startOrder) flip(() => ul.insertBefore(li, startNext));
+      state.queueDragging = false;
+    });
+  })();
+
   function renderJobs() {
+    if (state.queueDragging) return;
     const ul = $("job-list");
     ul.innerHTML = "";
     // Active = eski üretim sırası (FIFO). Finished = yeniler üstte (40 cap).
@@ -8138,7 +8300,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
     const active = laneJobs
       .filter((j) => j.status === "running" || j.status === "queued")
-      .sort(productionOrderCmp);
+      .sort(queueOrderCmp);
     const finished = laneJobs
       .filter((j) => j.status !== "running" && j.status !== "queued")
       .sort(byFinishedThenRecent)
@@ -8183,6 +8345,22 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         badge.className = 'director-chain-badge';
         badge.textContent = j.director_parent_id ? '↳ Continuum' : tt('mode.t2v');
         left.prepend(badge);
+      }
+      if (j.status === "queued" && state.prodLane === "scene") {
+        li.draggable = true;
+        li.dataset.jobId = j.id;
+        li.classList.add("job-draggable");
+        if (state.queueJustMoved === j.id) {
+          state.queueJustMoved = null;
+          li.classList.add("job-settle");
+          li.addEventListener("animationend", () => li.classList.remove("job-settle"), { once: true });
+        }
+        const grip = document.createElement("span");
+        grip.className = "job-drag-handle";
+        grip.textContent = "⋮⋮";
+        grip.title = tt("queue.dragTitle");
+        grip.setAttribute("aria-hidden", "true");
+        left.prepend(grip);
       }
       if (j.mode === "qwen_sheet" && j.status === "running") {
         const track = document.createElement("div");
@@ -9024,16 +9202,28 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     return true;
   }
 
+  function noteGenerate(msg) {
+    toast(msg);
+    const hint = $("gen-hint");
+    if (hint && msg) hint.textContent = msg;
+  }
+
   async function submitGenerate() {
-    const prompt = window.getContinuumMainPrompt?.() ?? $("prompt").value.trim();
+    const typed = $("prompt")?.value.trim() || "";
+    const sectionPrompt = String(window.getContinuumMainPrompt?.() || "").trim();
+    const prompt = sectionPrompt || typed;
     if (!prompt) {
-      tToast("toast.writePrompt");
+      noteGenerate(tf("toast.writePrompt"));
       return false;
     }
-    const mode = state.produceMode;
+    let mode = state.produceMode;
+    if ((mode === "cinema" || mode === "storyboard") && state.studioWorkspace !== "director") {
+      mode = "t2v";
+      state.produceMode = "t2v";
+    }
     if (mode === "cinema" || mode === "storyboard") {
       openCinemaStudio();
-      tToast("toast.cinemaQueueFromStudio");
+      noteGenerate(tf("toast.cinemaQueueFromStudio"));
       return false;
     }
     const isContinue = mode === "continue";
@@ -9047,35 +9237,40 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const pick = $("continue-source")?.value || "";
       if (pick) await setContinueMode(pick, { silent: true });
       if (!state.continueFrom) {
-        tToast("toast.continueNoSource");
+        noteGenerate(tf("toast.continueNoSource"));
         fillContinueSource();
         return false;
       }
     }
     if (isRef && !state.refImages.length && !sceneAssetReferences?.payload().asset_bindings?.length && !window.hasPreparedSceneAudioReference?.()) {
-      tToast("toast.refNeedImage");
+      noteGenerate(tf("toast.refNeedImage"));
       return false;
     }
     if (isFace && !state.faceImages.length && !sceneAssetReferences?.payload().asset_bindings?.length) {
-      tToast("toast.faceNeedPortrait");
+      noteGenerate(tf("toast.faceNeedPortrait"));
       return false;
     }
     if (isV2v && !state.v2vVideos.length) {
-      tToast("toast.v2vNeedMedia");
+      noteGenerate(tf("toast.v2vNeedMedia"));
       return false;
     }
     if (motionChain && state.duration !== 5) {
-      tToast("toast.motionChainFiveSec");
+      noteGenerate(tf("toast.motionChainFiveSec"));
       return false;
     }
     if (isI2v && !state.firstFrameName) {
-      toast(tt("scene.firstFrame"));
+      noteGenerate(tt("scene.firstFrame"));
       return false;
     }
 
     const btn = $("btn-generate");
     if (btn) btn.disabled = true;
     try {
+      const speedSettingsApplied = await pendingSpeedSpectrumApply;
+      if (!speedSettingsApplied) throw Error(window.h3Lang?.() === "en"
+        ? "Spectrum settings could not be saved; retry before generating."
+        : "Spectrum ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
+      await h3AccelerationLatestSave;
       const faceLockOn = !!$("face-lock-chain")?.checked && state.faceImages.length > 0;
       const body = {
         prompt: withStyleLock(prompt),
@@ -9162,12 +9357,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             : data.prompt_rewritten
               ? tt("toast.newVideoQueuedRewrite")
               : tt("toast.newVideoQueued");
-      toast(queuedLabel);
+      noteGenerate(queuedLabel);
       setDirectorOpen(false);
       await refreshJobs();
       return true;
     } catch (e) {
-      toast(String(e.message || e));
+      noteGenerate(String(e.message || e));
       return false;
     } finally {
       if (btn) btn.disabled = false;
@@ -9185,7 +9380,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       setQuality("480");
       const steps = $("steps");
       if (steps) steps.value = "12";
-      applyCinemaSpeed("draft");
+      pendingSpeedSpectrumApply = fetch("/api/h3-acceleration")
+        .then(async response => {
+          const current = await response.json();
+          if (!response.ok) throw Error(errDetail(current));
+          if (!current.spectrum_enabled) await saveH3AccelerationSettings({spectrum_enabled:true});
+          return true;
+        })
+        .catch(error => { toast(String(error.message || error)); return false; });
       return;
     }
     if (kind === "quality") {
@@ -9370,15 +9572,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           document.querySelectorAll('[data-lora-weight]').forEach(input => {
             if (input.dataset.loraWeight === box.dataset.loraWeight) input.value = value;
           });
+          if (state.cinemaLoaded) void saveCinema(true);
           return;
         }
         if (box.matches('input[type="checkbox"]') && box.checked && checks.querySelectorAll('input:checked').length > 5) {
           box.checked = false;
         }
         syncLoraChecks();
+        if (state.cinemaLoaded) void saveCinema(true);
       };
-      syncLoraChecks();
     });
+    // Rendering a picker must not clear the film selection through the other,
+    // still-empty picker. Synchronize once after both lists exist.
+    syncLoraSelection(previousIds);
     keepLoraApplied();
     updateLoraHint();
     fillLoraShop();
@@ -9544,9 +9750,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const save = async changes => {
         panel.querySelectorAll("button, input").forEach(control => control.disabled = true);
         try {
-          const r = await fetch("/api/h3-acceleration", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(changes)});
-          const result = await r.json();
-          if (!r.ok) throw Error(errDetail(result));
+          const result = await saveH3AccelerationSettings(changes);
           current = result;
         } catch (error) { toast(error.message); }
         finally { paint(); }
@@ -9807,6 +10011,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       c.lora_selection = selectedLoraIds("cinema-lora-select");
       c.lora_weights = collectLoraPayload().lora_strengths || {};
       await saveCinema(false);
+      $("cinema-lora-panel")?.close();
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -9890,6 +10095,32 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("steps")?.addEventListener("input", () => updateLoraHint());
   $("sampler")?.addEventListener("change", () => updateLoraHint());
+
+  // AkiFactory koprusu uretim baslarken /api/production'i okur; secimler sunucuya da yazilsin.
+  // saveProduction() kullanilmaz: o, ekrani yeniden doldurup continueFrom'u sifirlar.
+  let productionSettingsTimer = null;
+  function autosaveProductionSettings() {
+    clearTimeout(productionSettingsTimer);
+    productionSettingsTimer = setTimeout(() => {
+      const snap = collectProductionState();
+      snap.saved_at = Date.now() / 1000;
+      persistProductionLocal(snap);
+      fetch("/api/production", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(snap),
+      }).catch(() => {});
+    }, 800);
+  }
+  document.addEventListener("click", (e) => {
+    if (e.target.closest?.("#dur-chips, #dur-chips-cont, #quality-chips, #quality-chips-cont, #aspect-chips")) {
+      autosaveProductionSettings();
+    }
+  });
+  ["steps", "seed", "sampler", "scheduler", "lora-select"].forEach((id) => {
+    $(id)?.addEventListener("change", autosaveProductionSettings);
+  });
+
   $("cinema-seamless")?.addEventListener("change", () => {
     const el = $("cinema-seamless");
     if (el) el.dataset.userSet = "1";
@@ -10375,7 +10606,21 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("cinema-lora-toggle")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    toggleResDrop("cinema-lora-drop", "cinema-lora-toggle");
+    const modal = $("cinema-lora-panel");
+    if (!modal) return;
+    document.body.appendChild(modal);
+    modal.showModal();
+    $("cinema-lora-toggle")?.setAttribute("aria-expanded", "true");
+  });
+  $("cinema-lora-close")?.addEventListener("click", () => $("cinema-lora-panel")?.close());
+  $("cinema-lora-panel")?.addEventListener("close", () => {
+    $("cinema-lora-toggle")?.setAttribute("aria-expanded", "false");
+    $("cinema-lora-toggle")?.focus();
+  });
+  $("cinema-lora-panel")?.addEventListener("click", (e) => {
+    if (e.target !== e.currentTarget) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.currentTarget.close();
   });
   $("cinema-quality-chips")?.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-quality]");
@@ -11176,6 +11421,100 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       toast(String(e.message || e));
     }
   });
+
+  async function queueSaveRequest(url, init) {
+    const r = await fetch(url, init);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(errDetail(data));
+    return data;
+  }
+
+  function renderQueueSaves() {
+    const box = $("queue-saves");
+    const ul = $("queue-save-list");
+    if (!box || !ul) return;
+    const saves = state.queueSaves || [];
+    box.classList.toggle("hidden", !saves.length);
+    $("queue-saves-title").textContent = tf("queue.savesTitle", { n: saves.length });
+    ul.innerHTML = "";
+    for (const s of saves) {
+      const li = document.createElement("li");
+      const left = document.createElement("div");
+      const when = s.created_at ? new Date(s.created_at * 1000).toLocaleString(uiLang() === "en" ? "en-GB" : "tr-TR",
+        { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+      left.innerHTML = `<strong>${htmlEsc(s.name || "")}</strong> · ${tf("queue.saveCount", { n: s.count })}${when ? ` · ${when}` : ""}`;
+      const right = document.createElement("div");
+      right.className = "job-actions";
+      const load = document.createElement("button");
+      load.className = "btn-secondary job-action-main";
+      load.textContent = tt("queue.load");
+      load.title = tt("queue.loadTitle");
+      load.onclick = async () => {
+        load.disabled = true;
+        try {
+          const data = await queueSaveRequest(`/api/queue/saves/${encodeURIComponent(s.id)}/load`, { method: "POST" });
+          tToast("toast.queueLoaded", { name: data.name || s.name, n: data.count });
+          await Promise.all([refreshJobs(), refreshQueueSaves()]);
+        } catch (e) {
+          toast(String(e.message || e));
+          load.disabled = false;
+        }
+      };
+      const del = document.createElement("button");
+      del.className = "btn-ghost job-action-delete";
+      del.textContent = tt("queue.deleteSave");
+      del.onclick = async () => {
+        if (!tConfirm("confirm.queueSaveDelete", { name: s.name, n: s.count })) return;
+        try {
+          await queueSaveRequest(`/api/queue/saves/${encodeURIComponent(s.id)}`, { method: "DELETE" });
+          tToast("toast.queueSaveDeleted");
+          await refreshQueueSaves();
+        } catch (e) {
+          toast(String(e.message || e));
+        }
+      };
+      right.append(load, del);
+      li.append(left, right);
+      ul.appendChild(li);
+    }
+  }
+
+  async function refreshQueueSaves() {
+    try {
+      state.queueSaves = (await queueSaveRequest("/api/queue/saves")).saves || [];
+    } catch (e) {
+      console.warn("queue saves", e);
+      return;
+    }
+    renderQueueSaves();
+  }
+
+  $("btn-queue-save")?.addEventListener("click", async (e) => {
+    const lane = state.prodLane === "director" ? "director" : "scene";
+    const active = state.jobs.filter((j) => jobLane(j) === lane && (j.status === "queued" || j.status === "running"));
+    if (!active.length) return tToast("queue.saveNothing");
+    const when = new Date().toLocaleString(uiLang() === "en" ? "en-GB" : "tr-TR",
+      { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const warn = active.some((j) => j.status === "running") ? `${tt("queue.saveRunningWarn")}\n\n` : "";
+    const name = window.prompt(`${warn}${tt("queue.saveName")}`, `${tt("queue.save")} ${when}`);
+    if (name === null) return;
+    const button = e.currentTarget;
+    button.disabled = true;
+    try {
+      const data = await queueSaveRequest("/api/queue/saves", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, lane }),
+      });
+      tToast("toast.queueSaved", { name: data.name, n: data.count });
+      await Promise.all([refreshJobs(), refreshQueueSaves()]);
+    } catch (err) {
+      toast(String(err.message || err));
+    } finally {
+      button.disabled = false;
+    }
+  });
+  void refreshQueueSaves();
 
   async function deleteJob(jobId) {
     try {
@@ -12019,6 +12358,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     fillLoraShop();
     updateLoraHint();
     renderJobs();
+    renderQueueSaves();
     renderQueue();
     if (state.directorBrief?.shots?.length) {
       renderDirectorShotPanel(state.directorBrief, { open: !!$("director-shot-panel")?.open });

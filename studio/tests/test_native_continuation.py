@@ -72,6 +72,7 @@ class NativeContinuation(unittest.TestCase):
             path = native_continuation.state_path(folder, SOURCE)
             path.parent.mkdir(parents=True); path.touch()
             self.assertTrue(native_continuation.prepare(job, parent, folder))
+            self.assertEqual(job['continuation_context_frames'], 39)
             job['width'] = 1312
             with self.assertRaises(ValueError): native_continuation.prepare(job, parent, folder)
             job['width'] = 864
@@ -79,3 +80,34 @@ class NativeContinuation(unittest.TestCase):
             with self.assertRaises(ValueError): native_continuation.prepare(job, parent, folder)
             self.assertFalse(native_continuation.prepare(self.job(), {'id': 'legacy'}, folder))
         with self.assertRaises(ValueError): native_continuation.state_path('.', '../escape')
+
+    def test_asset_ownership_is_annotated_for_each_active_reference_order(self):
+        job = self.job()
+        job.update(ref_images=['spider.png', 'wolverine.png'],
+                   reference_manifest=[
+                       {'file': 'spider.png', 'asset': {'id': 's', 'name': 'Spider-Man', 'kind': 'character', 'notes': 'Red and gold suit.'}},
+                       {'file': 'wolverine.png', 'asset': {'id': 'w', 'name': 'Wolverine', 'kind': 'character', 'notes': 'Yellow and blue suit.'}}],
+                   continuum_ref_assignments={'spider.png': [1], 'wolverine.png': [1, 2]})
+        with patch('lib.comfy.apply_spectrum', side_effect=lambda g, **kw: g):
+            graph = native_continuation.build(job)
+        first = graph['n0_104']['inputs']['prompt']
+        second = graph['n1_104']['inputs']['prompt']
+        self.assertIn('<Picture 1> is Spider-Man', first)
+        self.assertIn('<Picture 2> is Wolverine', first)
+        self.assertIn('Red and gold suit.', first)
+        self.assertIn('<Picture 1> is Wolverine', second)
+        self.assertNotIn('Spider-Man', second)
+        self.assertNotIn('<Picture 2>', second)
+
+    def test_continuation_uses_resolved_lora_weights_including_zero(self):
+        job = self.job()
+        job.update(lora_name='raw.safetensors', lora_strength=0.6,
+                   lora_strengths={'raw.safetensors': 0.6},
+                   effective_lora_name='approved.safetensors',
+                   effective_lora_strength={'approved.safetensors': 0.0})
+        with patch('lib.native_continuation.build_t2v_prompt', wraps=build_t2v_prompt) as builder, \
+             patch('lib.comfy.apply_spectrum', side_effect=lambda g, **kw: g):
+            native_continuation.build(job)
+        for call in builder.call_args_list:
+            self.assertEqual(call.kwargs['lora_name'], 'approved.safetensors')
+            self.assertEqual(call.kwargs['lora_strength'], {'approved.safetensors': 0.0})

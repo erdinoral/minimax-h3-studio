@@ -1,6 +1,17 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {orderJobs, sceneParents} = require('../static/director-chains.js');
+const {sequenceGroups} = require('../static/director-chains.js');
+test('each New owns only its ordered continuation prompt sections', () => {
+  const shots = [
+    {id:'a', mode:'t2v', text:'A'}, {id:'b', mode:'continue', text:'B'},
+    {id:'c', mode:'continue', text:'C'}, {id:'d', mode:'t2v', text:'D'},
+    {id:'e', mode:'continue', text:'E'}
+  ];
+  assert.deepEqual(sequenceGroups(shots).map(g => [g.root, g.shots.map(s => s.text)]),
+    [['a',['A','B','C']], ['d',['D','E']]]);
+  assert.equal(sequenceGroups([{id:'orphan',mode:'continue'}])[0].root, null);
+});
 
 test('active child keeps its finished root above it and siblings in story order', () => {
   const root = {id:'root', film_id:'film'};

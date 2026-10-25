@@ -32,7 +32,7 @@ module.exports = {
         },
         path: "app",
         message: [
-          "python ../comfy_boot.py --listen 127.0.0.1 --disable-auto-launch"
+          "python ../comfy_boot.py --listen 127.0.0.1 --disable-auto-launch --disable-pinned-memory"
         ],
         on: [{
           // Loosened: just look for any http://host:port anywhere in the line,

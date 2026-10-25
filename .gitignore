@@ -31,3 +31,5 @@ venv
 /download/app/
 
 /studio/static/benchmarks/
+/backups/
+/output-*.log

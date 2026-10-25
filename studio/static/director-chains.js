@@ -40,7 +40,18 @@
     }
     return parents;
   }
-  const api = {orderJobs, sceneParents};
+  function sequenceGroups(shots) {
+    const groups = [];
+    for (const shot of shots) {
+      const previous = groups[groups.length - 1];
+      if (!previous || shot.mode !== 'continue' ||
+          (shot.chapter || 'Bölüm 1') !== (previous.shots[0].chapter || 'Bölüm 1')) {
+        groups.push({root: shot.mode === 'continue' ? null : shot.id, shots: [shot]});
+      } else previous.shots.push(shot);
+    }
+    return groups;
+  }
+  const api = {orderJobs, sceneParents, sequenceGroups};
   if (typeof module !== 'undefined') module.exports = api;
   root.H3DirectorChains = api;
 })(globalThis);

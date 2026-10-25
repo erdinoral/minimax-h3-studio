@@ -22,6 +22,8 @@ test('selecting a reference only uploads and previews it; explicit generation qu
   await context.produceCinemaLookSheet('character','ada',null);
   assert.equal(queued.length,1);
   assert.equal(queued[0][3].ref_image,'source.png');
+  assert.equal(queued[0][3].sheet_method,'look_sheets');
+  assert.equal(queued[0][3].production_method,'sheet');
   resolveGeneration(true); await first;
   assert.equal(context.state.cinemaLookRefs['film:character:ada'],undefined);
 });

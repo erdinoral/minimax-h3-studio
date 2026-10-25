@@ -424,6 +424,22 @@ def _has_audio_stream(path: Path) -> bool:
     return bool((r.stdout or "").strip())
 
 
+SEAM_DECLICK_SEC = 0.015
+
+
+def _seam_declick_args(src: Path) -> list[str]:
+    """Hard cuts between generated clips click when the waveform jumps; 15 ms fades
+    at both ends remove it without audibly touching speech."""
+    try:
+        dur = probe_duration_sec(src)
+    except Exception:
+        return []
+    if dur <= SEAM_DECLICK_SEC * 4:
+        return []
+    d = SEAM_DECLICK_SEC
+    return ["-af", f"afade=t=in:st=0:d={d},afade=t=out:st={dur - d:.3f}:d={d}"]
+
+
 def _normalize_clip_keep_audio(src: Path, dest: Path) -> None:
     """H264 + stereo AAC so concat/amix stay compatible. Silent clips get room tone."""
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -433,6 +449,7 @@ def _normalize_clip_keep_audio(src: Path, dest: Path) -> None:
             "-y",
             "-i",
             str(src),
+            *_seam_declick_args(src),
             "-c:v",
             "libx264",
             "-pix_fmt",

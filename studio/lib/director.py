@@ -1771,7 +1771,7 @@ def build_rich_h3_prompt(
         )
     )
 
-    if link == "continue" or index > 0:
+    if link == "continue" or (index > 0 and not shot.get("reanchor")):
         paras = [
             "Continue directly from the previous shot.",
             f"{same_lock.capitalize()}.",
@@ -1864,6 +1864,8 @@ def _clean_shot(
         shot["_placeholder"] = True
     if s.get("_thin_template"):
         shot["_thin_template"] = True
+    if s.get("reanchor"):
+        shot["reanchor"] = True
     if brief is not None:
         silent = _is_silent_brief(brief)
         # Preserve strong LLM SCENE bodies — do not rebuild into filler templates
@@ -1915,9 +1917,12 @@ def force_continue_chain(
     standalone/new shot, is a hard cut: the scene may change, and it does not
     inherit the previous clip's last frame.
     """
+    max_run = int((brief or {}).get("max_continue_run") or 0)
     out: list[dict[str, Any]] = []
     previous_section = ""
     section_number = 0
+    run = 0
+    section_root = ""
     for i, raw in enumerate(shots):
         shot = dict(raw)
         requested = str(shot.get("linkToPrev") or "").strip().lower()
@@ -1930,13 +1935,34 @@ def force_continue_chain(
                 section = f"scene-{section_number}"
         same_scene = bool(i and section == previous_section)
         shot["sectionId"] = section
-        if same_scene and requested == "continue":
+        if same_scene and requested == "continue" and not (max_run and run >= max_run):
             shot["linkToPrev"] = "continue"
+            run += 1
         else:
+            if same_scene and requested == "continue":
+                shot["reanchor"] = True
+                shot["h3Prompt"] = reanchor_prompt(str(shot.get("h3Prompt") or ""), section_root)
             shot["linkToPrev"] = "standalone"
+            run = 0
+            section_root = str(shot.get("h3Prompt") or "")
         out.append(shot)
         previous_section = section
     return out
+
+
+_CONTINUE_OPENER = re.compile(r"^\s*Continue directly from the previous shot\.?\s*", re.I)
+
+
+def reanchor_prompt(prompt: str, section_root: str) -> str:
+    """Long Continue runs drift; cut to a fresh angle of the same moment so the new
+    clip is rebuilt from the cast references instead of an inherited frame."""
+    body = _CONTINUE_OPENER.sub("", prompt).strip()
+    setting = _CONTINUE_OPENER.sub("", section_root).strip().split("\n\n")[0][:500].strip()
+    head = ("Same scene, same moment, new camera angle (re-establishing cut). "
+            "Same characters, identical faces, hair and clothing; same location and lighting.")
+    if setting:
+        head += "\nScene setting: " + setting
+    return head + "\n\n" + body
 
 
 def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:

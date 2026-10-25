@@ -38,6 +38,19 @@ class OptionalModels(unittest.IsolatedAsyncioTestCase):
         with patch.dict(models.SINGULARITY,{"bytes":3}):
             (models.folder()/(models.SINGULARITY["file"]+".part")).write_bytes(b"abc")
             self.assertFalse(models.catalog()[0]["ready"])
+
+    def test_v2_is_preferred_and_uses_its_own_metadata(self):
+        with patch.dict(models.SINGULARITY, {"bytes": 3}), patch.object(models, "SINGULARITY_V2_BYTES", 4):
+            (models.folder()/models.ALIASES[0]).write_bytes(b"old")
+            newer = models.folder()/models.SINGULARITY_V2_FILE
+            newer.write_bytes(b"new2")
+            self.assertEqual(models.installed(), newer)
+            item = models.catalog()[0]
+            self.assertEqual(item['bytes'], 4)
+            self.assertIn('v2', item['label'])
+            self.assertIsNone(item['url'])
+            newer.unlink()
+            self.assertEqual(models.installed().name, models.ALIASES[0])
     def test_hash_mismatch_is_rejected(self):
         path=models.folder()/"test.part"
         path.write_bytes(b"abc")

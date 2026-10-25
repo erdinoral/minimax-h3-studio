@@ -3,6 +3,7 @@ import copy
 import re
 from pathlib import Path
 from .comfy import build_t2v_prompt, build_ref2va_prompt
+from . import asset_references
 
 REQUIRED_NODES = ('H3StudioSaveContinuationTail', 'H3StudioLoadContinuationTail',
                   'H3StudioNativeJoin', 'H3StudioNativeFinish', 'H3StudioSaveContinuationResult',
@@ -45,7 +46,7 @@ def prepare(job, parent, comfy_root):
     if (job.get('h3_models') or {}).get('audio_vae') != (parent.get('h3_models') or {}).get('audio_vae'):
         raise ValueError('Native continuation must keep its parent audio VAE')
     job.update(continuation_source_key=key, first_frame_name=None,
-               continuity_method='native_latent_tail', continuation_context_frames=22)
+               continuity_method='native_latent_tail', continuation_context_frames=39)
     return True
 
 
@@ -59,7 +60,7 @@ def build(job):
     clips = None
     refs = job.get('ref_images') or []
     assignments = job.get('continuum_ref_assignments')
-    context = int(job.get('continuation_context_frames') or 22)
+    context = int(job.get('continuation_context_frames') or 39)
     for index, text in enumerate(prompts):
         active = [name for name in refs if not assignments or index + 1 in assignments.get(name, [])]
         def reference(match):
@@ -68,11 +69,19 @@ def build(job):
                 raise ValueError('Continuation prompt refers to an unassigned reference')
             return '<Picture ' + str(active.index(refs[number - 1]) + 1) + '>'
         text = re.sub(r'@R(\d+)\b', reference, text)
+        if job.get('reference_manifest'):
+            # Picture numbers follow this section's active image order, not
+            # the full film catalogue or the preceding clip's references.
+            by_file = {row['file']: row for row in job['reference_manifest']}
+            rows = [by_file.get(name, {'file': name}) for name in active]
+            text = asset_references.prompt(text, rows)
         kwargs = dict(text=text, width=job['width'], height=job['height'], length=124,
                       seed=int(job['seed']) + index, steps=job['steps'],
                       sampler=job.get('sampler') or 'res_multistep', scheduler=job.get('scheduler') or 'simple',
                       models=job['h3_models'], silent_audio=False, sage_attention='disabled',
-                      lora_name=job.get('lora_name'), lora_strength=job.get('lora_strength') or 0.75)
+                      lora_name=job.get('effective_lora_name', job.get('lora_name')),
+                      lora_strength=job.get('effective_lora_strength',
+                          job.get('lora_strengths') or job.get('lora_strength', 0.75)))
         local = (build_ref2va_prompt(**kwargs, ref_image_names=active)
                  if active else build_t2v_prompt(**kwargs))
         local.pop('91', None); local.pop('92', None)

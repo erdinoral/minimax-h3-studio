@@ -692,6 +692,48 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
     return src, graph
 
 
+_SPEAKER_TAG_RE = re.compile(r"\((S\d)\)")
+
+
+def _scene_audio_reference_lead(text: str) -> str:
+    """H3 binds a reference voice to a speaker tag; without a tag keep the generic lead."""
+    tag = _SPEAKER_TAG_RE.search(text or "")
+    if not tag:
+        return "<Audio 1> is the reference for the requested voice, delivery and sound. "
+    s = tag.group(1)
+    return (f"<Audio 1> is the voice-timbre reference for the speaker ({s}). "
+            f"({s}) keeps the same timbre, pitch, accent and delivery as <Audio 1>, "
+            f"but speaks only the dialogue written in this prompt, never the words heard in <Audio 1>. ")
+
+
+def _with_auto_continuation_loras(
+    job: dict, name: Optional[str], strength: float | dict[str, float]
+) -> tuple[Optional[str], float | dict[str, float]]:
+    """Add installed continuity LoRAs (Anti-Burn) to native latent Continue sections only.
+
+    Anti-Burn was trained and measured on masked latent-context continuations; a first
+    clip has nothing to burn from, so New clips and last-frame continues are left alone.
+    """
+    job.pop("auto_continuation_loras", None)
+    if not job.get("continuation_source_key"):
+        return name, strength
+    names = [n for n in (name or "").split("|") if n]
+    weights = dict(strength) if isinstance(strength, dict) else {n: float(strength) for n in names}
+    added = []
+    for spec in public_list():
+        auto = spec.get("auto_continuation_strength")
+        file = spec.get("file") or ""
+        if not auto or not file or not spec.get("ready") or file in names or len(names) >= 5:
+            continue
+        names.append(file)
+        weights[file] = float(auto)
+        added.append(file)
+    if not added:
+        return name, strength
+    job["auto_continuation_loras"] = added
+    return "|".join(names), weights
+
+
 def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]:
     name = (job.get("lora_name") or "").strip()
     if not name:
@@ -1405,6 +1447,8 @@ class BatchBody(BaseModel):
     lane: Optional[str] = None
     prompt_rewriter_enabled: bool = False
     post_pass: Optional[str] = None
+    # Continue shots resume from the parent's saved latent AV tail instead of its last frame.
+    native_continue: bool = False
 
 
 class CinemaProduceBody(BaseModel):
@@ -2401,9 +2445,12 @@ async def pause_queue(body: QueuePauseBody):
 @app.get("/api/jobs")
 async def list_jobs():
     _ensure_queue_loop()
+    queue_position = {j["id"]: n for n, j in enumerate(x for x in _jobs if x.get("status") == "queued")}
     jobs = []
     for j in reversed(_jobs[-200:]):
         row = dict(j)
+        if row.get("id") in queue_position:
+            row["queue_position"] = queue_position[row["id"]]
         if row.get("status") == "done" and not row.get("download_name"):
             row["download_name"] = video_download_name(row, item_id=str(row.get("id") or ""))
         jobs.append(row)
@@ -2482,6 +2529,40 @@ async def job_diagnostics(job_id: str):
     safe_id = re.sub(r'[^a-zA-Z0-9_-]', '_', job_id)[:80]
     return Response(json.dumps(report, ensure_ascii=False, indent=2), media_type='application/json',
                     headers={'Content-Disposition':f'attachment; filename="h3-studio-{safe_id}-diagnostics.json"'})
+
+
+class QueueMoveBody(BaseModel):
+    target_id: str
+    place: str = "before"
+
+
+@app.post("/api/jobs/{job_id}/move")
+async def move_queued_job(job_id: str, body: QueueMoveBody):
+    """Move one queued job before/after another queued job; the running job keeps its slot."""
+    if body.place not in ("before", "after"):
+        raise HTTPException(400, "place must be before or after")
+    async with _lock:
+        queued = [j for j in _jobs if j.get("status") == "queued"]
+        job = next((j for j in queued if j["id"] == job_id), None)
+        target = next((j for j in queued if j["id"] == body.target_id), None)
+        if not job or not target:
+            raise HTTPException(409, "Yalnızca sıradaki işler taşınabilir")
+        if job is target:
+            return {"ok": True}
+        order = [j for j in queued if j is not job]
+        order.insert(order.index(target) + (body.place == "after"), job)
+        # The queue head waits for its parent, so a continuation placed before
+        # its queued parent would stall the whole queue.
+        position = {j["id"]: n for n, j in enumerate(order)}
+        for j in order:
+            parent_id = j.get("continue_from")
+            if parent_id in position and position[parent_id] > position[j["id"]]:
+                raise HTTPException(409, "Devam klibi, bağlı olduğu klibin önüne taşınamaz")
+        slots = iter(order)
+        _jobs[:] = [next(slots) if j.get("status") == "queued" else j for j in _jobs]
+        _save_jobs()
+    slog.info_job(job, "queue moved", target=body.target_id[:8], place=body.place)
+    return {"ok": True}
 
 
 @app.post("/api/jobs/{job_id}/cancel")
@@ -3003,6 +3084,30 @@ async def motion_transfer_chain(body: MotionTransferChainBody):
     return {**created[0], "jobs": created, "count": len(created), "chain_id": chain_id}
 
 
+def _make_native_continue(job: dict, duration: int) -> None:
+    """Turn a last-frame Continue into a one-section Continuum job (same shape as
+    Director chains). At run time it resumes from the parent's latent tail when one
+    was saved, otherwise Continuum's own last-frame handoff is used."""
+    section_refs = list(job.get("ref_images") or [])
+    try:
+        refs, _ = continuum.reference_plan([{"ref_images": section_refs}])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    text = continuum.align_reference_labels(job["prompt"], section_refs, refs) if refs else job["prompt"]
+    job.update(
+        mode="continuum", prompt=text, script=text, ref_images=refs,
+        ref_image_size=None, ref_role=None,
+        continuum_run="studio_" + uuid.uuid4().hex, continuum_prompts=[text],
+        continuum_chunk_seconds=duration, continuum_ref_assignments=None,
+        continuum_reference_size="Match Output",
+        h3_models=h3_models.resolve("ref2va" if refs else "fl2va"),
+        continuity_method="last_frame_handoff", native_context_chunks=1,
+        planned_duration=duration, chain_normalize=True,
+    )
+    if not refs:
+        job.pop("reference_manifest", None)
+
+
 @app.post("/api/batch")
 async def batch(body: BatchBody):
     if body.duration not in ALLOWED_DURATIONS:
@@ -3100,6 +3205,10 @@ async def batch(body: BatchBody):
         lib, body.ref_images or [],
         continuation=bool(frame_names[i]) or (shot_modes[i] in ("continue", "devam", "i2v", "last_frame") if i < len(shot_modes) else bool(i or tip)),
         film_id=body.asset_film_id) for i, text in enumerate(prompts)]
+    native_chain = False
+    if getattr(body, "native_continue", False) and 4 <= body.duration <= 15:
+        caps = await workflow_capabilities()
+        native_chain = bool(caps.get("native_tail_ready") and caps.get("continuum_ready"))
     async with _lock:
         for i, text in enumerate(prompts):
             seed = body.seed if body.seed >= 0 else (int(time.time() * 1000) + i) % (2**53)
@@ -3224,6 +3333,11 @@ async def batch(body: BatchBody):
                 job["batch_id"] = body.cinema_batch
             if body.score_id:
                 job["score_id"] = body.score_id
+            if native_chain and cont_from and mode in ("continue", "face_continue"):
+                _make_native_continue(job, body.duration)
+                source = next((j for j in created if j["id"] == cont_from), None)
+                if source and source.get("mode") != "continuum":
+                    source["save_continuation_tail"] = True
             created.append(job)
             if chain_next or use_per_shot:
                 parent = job["id"]
@@ -3454,6 +3568,128 @@ async def interrupt(cancel_queued: bool = False):
                 cancelled.append(j["id"])
         _save_jobs()
     return {"ok": True, "cancelled": cancelled, "cancel_queued": cancel_queued}
+
+
+QUEUE_SAVES = DATA / "queue_saves"
+_QUEUE_SAVE_DROP_KEYS = (
+    "prompt_id", "local_path", "last_frame_path", "started_at", "done_at",
+    "effective_lora_name", "effective_lora_strength", "effective_spectrum",
+    "render_pause_requested", "render_paused", "render_control_token", "render_control_ready",
+    "comfy_step", "comfy_step_max", "progress_source", "_ws_progress_at",
+    "cancel_requested_at", "cancel_source", "recovered_from_status", "_reattach", "queue_position",
+)
+_QUEUE_SAVE_LINK_KEYS = ("continue_from", "director_root_id", "director_parent_id")
+
+
+def _queue_save_entry(job: dict) -> dict:
+    entry = {k: v for k, v in job.items() if k not in _QUEUE_SAVE_DROP_KEYS}
+    entry.update(status="queued", progress=0, progress_label=None, output=None, error=None)
+    if entry.get("continue_from") and not entry.get("continuum_resume"):
+        entry["first_frame_name"] = None
+    return entry
+
+
+def _queue_save_path(save_id: str) -> Path:
+    if not re.fullmatch(r"[a-f0-9]{12}", save_id or ""):
+        raise HTTPException(404, "kayıt yok")
+    return QUEUE_SAVES / f"{save_id}.json"
+
+
+class QueueSaveBody(BaseModel):
+    name: str = ""
+    lane: Optional[str] = None
+
+
+@app.get("/api/queue/saves")
+async def list_queue_saves():
+    saves = []
+    for path in QUEUE_SAVES.glob("*.json") if QUEUE_SAVES.exists() else []:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as e:
+            slog.warn("queue save unreadable", path=path.name, err=e)
+            continue
+        saves.append({"id": data.get("id"), "name": data.get("name"),
+                      "created_at": data.get("created_at"), "count": len(data.get("jobs") or [])})
+    saves.sort(key=lambda s: float(s.get("created_at") or 0), reverse=True)
+    return {"saves": saves}
+
+
+@app.post("/api/queue/saves")
+async def save_queue(body: QueueSaveBody):
+    """Move the queue into a named save; the running clip is stopped and saved to render from scratch."""
+    lane = (body.lane or "").strip().lower()
+    if lane and lane not in ("scene", "director"):
+        raise HTTPException(400, "lane: scene | director")
+    async with _lock:
+        picked = [j for j in _jobs if j.get("status") in ("running", "queued")
+                  and (not lane or _job_lane(j) == lane)]
+        if not picked:
+            raise HTTPException(400, "Kaydedilecek iş yok")
+        running = [j for j in picked if j.get("status") == "running"]
+        if running:
+            try:
+                await comfy.interrupt()
+            except Exception as e:
+                raise HTTPException(500, str(e))
+            # A clip that finished during the interrupt is done; saving it would render it twice.
+            running = [j for j in running if j.get("status") == "running"]
+            for j in running:
+                _mark_user_cancelled(j, "queue_save")
+        queued = [j for j in picked if j.get("status") == "queued"]
+        save_id = uuid.uuid4().hex[:12]
+        name = body.name.strip()[:80] or time.strftime("Kuyruk %d.%m %H:%M")
+        payload = {"id": save_id, "name": name, "created_at": time.time(),
+                   "jobs": [_queue_save_entry(j) for j in running + queued]}
+        QUEUE_SAVES.mkdir(parents=True, exist_ok=True)
+        tmp = QUEUE_SAVES / f"{save_id}.tmp"
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(QUEUE_SAVES / f"{save_id}.json")
+        queued_ids = {j["id"] for j in queued}
+        _jobs[:] = [j for j in _jobs if j["id"] not in queued_ids]
+        _save_jobs()
+    slog.info("queue saved", save=save_id, count=len(payload["jobs"]), stopped=len(running))
+    return {"id": save_id, "name": name, "count": len(payload["jobs"]), "stopped": len(running)}
+
+
+@app.post("/api/queue/saves/{save_id}/load")
+async def load_queue_save(save_id: str):
+    """Append a saved queue behind the current one, in its saved order, then drop the save."""
+    path = _queue_save_path(save_id)
+    if not path.exists():
+        raise HTTPException(404, "kayıt yok")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    entries = [e for e in data.get("jobs") or [] if isinstance(e, dict)]
+    if not entries:
+        raise HTTPException(400, "Kayıt boş")
+    async with _lock:
+        new_ids = {e["id"]: str(uuid.uuid4()) for e in entries if e.get("id")}
+        now = time.time()
+        restored = []
+        for n, entry in enumerate(entries):
+            job = dict(entry)
+            job["id"] = new_ids.get(entry.get("id")) or str(uuid.uuid4())
+            for key in _QUEUE_SAVE_LINK_KEYS:
+                if job.get(key) in new_ids:
+                    job[key] = new_ids[job[key]]
+            job.update(status="queued", progress=0, progress_label="kayıttan sırada",
+                       created_at=now + n / 1000, restored_from_save=save_id)
+            restored.append(job)
+        _jobs.extend(restored)
+        _save_jobs()
+        path.unlink(missing_ok=True)
+    slog.info("queue save loaded", save=save_id, count=len(restored))
+    await _free_llm_for_production()
+    return {"ok": True, "count": len(restored), "name": data.get("name")}
+
+
+@app.delete("/api/queue/saves/{save_id}")
+async def delete_queue_save(save_id: str):
+    path = _queue_save_path(save_id)
+    if not path.exists():
+        raise HTTPException(404, "kayıt yok")
+    path.unlink()
+    return {"ok": True, "id": save_id}
 
 
 @app.get("/api/clips/{job_id}/video")
@@ -8378,6 +8614,9 @@ async def director_commit(body: DirectorCommitBody):
         link = True
     # Propagate choice into brief so director.* helpers respect it (new: brief["force_continue"])
     brief["force_continue"] = bool(link)
+    # Cinema New shots are rebuilt from cast cards, so a cut re-anchors identity.
+    # Scene New shots carry no cast references; there a cut would lose it instead.
+    brief["max_continue_run"] = 3 if sess.get("cinema_studio") else 0
     if body.purpose:
         brief["purpose"] = body.purpose
         sess["purpose"] = body.purpose
@@ -8491,6 +8730,7 @@ async def director_commit(body: DirectorCommitBody):
                 sage_attention=_sage_mode(body),
                 lane=commit_lane,
                 post_pass=_normalize_post_pass(body.post_pass),
+                native_continue=True,
             )
             queued = await batch(bb)
 
@@ -9078,7 +9318,7 @@ async def _run_job(job: dict):
         ]
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
-        lora_name, lora_strength = _lora_for_graph(job)
+        lora_name, lora_strength = _with_auto_continuation_loras(job, *_lora_for_graph(job))
         job["effective_lora_name"] = lora_name or ""
         job["effective_lora_strength"] = lora_strength
         models = job.get("h3_models") or h3_models.resolve(h3_models.graph_for_mode(mode))
@@ -9111,7 +9351,7 @@ async def _run_job(job: dict):
                                            new_scene=not first) if rows else prompt_text
             if first:
                 text = enhance_ref_prompt(text, n_images=len(refs), role="asset_continue")
-            text = "<Audio 1> is the reference for the requested voice, delivery and sound. " + text
+            text = _scene_audio_reference_lead(text) + text
             prompt = build_ref2va_prompt(
                 text=text, ref_image_names=refs, ref_video_names=ref_videos,
                 ref_audio_names=[audio_name], width=w, height=h, length=length,

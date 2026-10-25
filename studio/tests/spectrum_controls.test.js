@@ -20,6 +20,9 @@ async function setup() {
     },
   };
   vm.createContext(context);
+  const saveStart = source.indexOf('  let h3AccelerationSaveQueue = Promise.resolve();');
+  const saveEnd = source.indexOf('  const CHROME_FIT_KEY', saveStart);
+  vm.runInContext(source.slice(saveStart, saveEnd), context);
   const start = source.indexOf('  async function renderH3Acceleration(host) {');
   const end = source.indexOf('  let optionalModelTimer;', start);
   vm.runInContext(source.slice(start, end), context);

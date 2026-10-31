@@ -1,7 +1,15 @@
 {
   "_instructions": {
-    "DELETE_BEFORE_RETURN": "Read _user.scenes and _user.about. Build ONE continuing film. takes.length = _user.scenes. Each take has EXACTLY 8 filled English author fields. Studio will compose official H3 three-block prompts — you only fill author fields. Copy about into logline (English). Invent title. Then DELETE _instructions and _user. Return ONLY valid JSON.",
-    "SIL_SONRA_DON": "Insan sadece _user.scenes ve _user.about doldurdu. Sen gerisini yaz. N sahneli = N take, her take TAM 8 shot, tek film DEVAM. Alanlari INGILIZCE ve DETAYLI yaz (resmi H3 3 blok Studio birlestirir). Sonra _instructions ve _user sil. Sadece JSON don.",
+    "DELETE_BEFORE_RETURN": "Read input_sources first: the brief may be in _user or in the chat message. Build ONE continuing film. takes.length = scene count. Each take has EXACTLY 8 filled English author fields. Set mode on every section per shot_structure (camera change = t2v, same shot rolling on = continue). Studio will compose official H3 three-block prompts; you only fill author fields. Write logline in English. Invent title if none is given. Check final_checklist, then DELETE _instructions and _user. Return ONLY valid JSON.",
+    "SIL_SONRA_DON": "Konu ve senaryo _user icinde veya sohbet mesajinda olabilir; ikisini de oku, senaryo verildiyse ona sadik kal. N sahneli = N take, her take TAM 8 shot, tek film DEVAM. Her section'a mode yaz: kamera acisi degisiyorsa t2v (kesme), ayni plan suruyorsa continue. Mekan degisince yeni take + yeni chapter. Alanlari INGILIZCE ve DETAYLI yaz, diyalog istenen dilde. Sonra _instructions ve _user sil. Sadece JSON don.",
+    "input_sources": {
+      "where_the_brief_comes_from": "The human gives the brief either in _user (scenes, about) or in the chat message that came with this file, often in Turkish. Use both. If they differ, the chat message wins.",
+      "scenario_given": "If the human describes a scenario or specific events, follow those events in that order and keep their names, places and lines. Only invent what they left open. Do not replace their plot with a different one.",
+      "topic_only": "If the human gives only a topic, invent the whole story from it.",
+      "scene_count": "Use the scene count the human gives (chat or _user.scenes). If the scenario does not fit, keep the count and compress or expand the events.",
+      "dialogue_language": "Dialogue stays in the language the human writes or asks for; set dialogue_lang to its code (tr, en, ...). Every other field is English.",
+      "no_questions": "Do not ask questions back. Deliver the finished JSON in one answer."
+    },
     "language": {
       "required": "English",
       "why": "MiniMax H3 video prompts must be English. Turkish/other languages in visual fields hurt quality.",
@@ -9,11 +17,11 @@
         "setup.look, camera, palette, lighting, era, style",
         "characters[].notes, voice, trigger (names may stay as proper nouns)",
         "locations[].notes",
-        "takes[].title (optional scene name), takes[].sections: title, location, character, action, camera, visual_style, audio, music, important, logline"
+        "takes[].title (optional scene name), takes[].sections: title, location, character, action, camera, opening_frame, ending_frame, visual_style, audio, music, important, logline"
       ],
       "dialogue_exception": "dialogue may stay in the spoken story language (set dialogue_lang: tr|en|ar|…). Everything else = English."
     },
-    "what_this_is": "Text-only Kesintisiz package for MiniMax H3 Studio. Human writes scene count + topic only. You write the film. Each take = one seamless Multishot clip of 8 beats (8x5s = 40s). Story continues take-to-take. Studio composes official H3: integrated_multimodal_description / overall_soundscape / non_diegetic_music. No images, portraits, or URLs.",
+    "what_this_is": "Text-only Continuum package for MiniMax H3 Studio. Human writes scene count + topic only. You write the film. Each take = 8 sections (8x5s = 40s) in one location, built from cuts (t2v) and unbroken pieces (continue) per shot_structure; each unbroken piece renders as a Continuum chain that carries motion and references. Story continues take-to-take. Studio composes official H3: integrated_multimodal_description / overall_soundscape / non_diegetic_music. No images, portraits, or URLs.",
     "defaults": {
       "duration_seconds_per_beat": 5,
       "sections_per_take": 8,
@@ -28,32 +36,36 @@
     "studio_mode": {
       "required": "seamless",
       "schema": "h3-cinema-seamless/v1",
-      "do_not_use": "h3-cinema/v1 is the 12×5s Film / face-lock package. This file is the long uninterrupted take."
+      "do_not_use": "h3-cinema/v1 is the 12×5s Character / location (face-lock) package. This file is the Continuum package for long uninterrupted takes."
     },
     "how_pipeline_works": [
-      "1) Read _user.scenes and _user.about only. Invent the rest. Visual fields ENGLISH.",
-      "2) Write takes.length = scenes, each with EXACTLY 8 detailed author-field sections. One continuing film.",
+      "1) Read input_sources: brief from _user and/or the chat message. Invent only what is missing. Visual fields ENGLISH.",
+      "2) Write takes.length = scenes, each with EXACTLY 8 detailed sections. Follow shot_structure for mode on every section. One continuing film.",
       "3) User imports. Studio opens Kesintisiz and composes the official 3-block H3 prompt per beat. Nothing generates yet.",
-      "4) User clicks Uret. Each take = one H3MultishotSampler job. Then concat.",
+      "4) User clicks Uret. Each t2v section starts a fresh shot with face lock; the continue sections after it render as one Continuum chain until the next t2v or chapter change. Then concat.",
       "5) No portraits, stills, urls, base64. No integrated_multimodal_description key in the JSON."
     ],
     "field_guide": {
+      "mode": "t2v | continue on EVERY section. t2v = cut to a new camera setup; continue = the same shot rolls on. See shot_structure.",
       "title": "Short English beat title.",
-      "location": "Place name matching locations[].name. Same place for all 8 beats of a take unless the camera walks there in-shot.",
-      "character": "Who is on screen — exact characters[].name (comma-separate if multiple).",
-      "action": "ENGLISH. THIS beat only. 2-5 present-tense visible sentences: body, hands, eyes, props, weather, light. Continue the previous beat. First beat of a later take continues the STORY. Not a theme. Not one verb.",
+      "location": "Place name matching locations[].name. A take stays in one location; a new location starts a new take and chapter with a t2v section.",
+      "character": "Who is on screen — exact characters[].name, plus visible creatures[].name / vehicles[].name (comma-separate, at most 8 names).",
+      "action": "ENGLISH. THIS section only. 2-5 present-tense visible sentences: body, hands, eyes, props, weather, light. On continue, pick up exactly where the previous section ended and do not re-describe the place or the character.",
       "dialogue": "Spoken lines THIS beat only. Empty if silent. May stay in the story language; set dialogue_lang. Studio wraps as says: <d>[Lang] ...</d>.",
       "dialogue_lang": "auto | tr | en | ar | …",
-      "camera": "ENGLISH. Shot size + height + move for a take (slow push-in, follow, shoulder). Vary angle across the 8 beats. Not the same line copied 8 times.",
+      "camera": "ENGLISH. On t2v: shot size + height + lens feel + move. On continue: how the SAME shot keeps moving; no new angle. Angles vary only across t2v cuts.",
       "visual_style": "Usually empty (inherit setup) or Live-action, cinematic.",
       "audio": "ENGLISH. Diegetic only: room tone, Foley, weather, breath. This becomes overall_soundscape. No BGM.",
       "music": "N/A unless the user asked for score. This becomes non_diegetic_music.",
-      "important": "Must-lock continuity (wardrobe, prop in hand). Short."
+      "important": "Must-lock continuity (wardrobe, prop in hand). Short.",
+      "opening_frame": "Visible composition at the start. On continue it equals the previous ending_frame.",
+      "ending_frame": "Visible composition at the end; the next continue section starts from it."
     },
     "cast_guide": {
       "characters": "Invent unique names from about. notes = ENGLISH appearance, age, wardrobe (identity lock). voice optional English. trigger = same as name. lora_id empty. No images.",
       "locations": "name + ENGLISH architecture, time of day, weather. Text only.",
-      "creatures": "Usually empty. If needed: name + ENGLISH anatomy. No images."
+      "creatures": "Usually empty. If needed: name + ENGLISH anatomy. No images.",
+      "vehicles": "Usually empty. If needed: name + ENGLISH shape, size, materials. Name them in section character. No images."
     },
     "setup_guide": {
       "look_camera_palette_lighting_era": "Global film bible IN ENGLISH; use auto if unsure. Same look for the whole film. Location/time may change at a take boundary, not mid-take.",
@@ -61,7 +73,7 @@
       "style": "realistic | cinematic | …"
     },
     "rules": [
-      "Human input is ONLY _user.scenes + _user.about. Do not ask the human more questions.",
+      "The brief comes from _user and/or the chat message (see input_sources). Do not ask the human more questions.",
       "Write ALL visual fields in English. Dialogue may stay in the spoken language.",
       "Keep schema h3-cinema-seamless/v1, studio_mode seamless, seamless true, duration 5 unless asked.",
       "takes.length = _user.scenes. Each take EXACTLY 8 filled sections. ONE continuing film.",
@@ -74,14 +86,15 @@
     "take_guide": {
       "scene_count": "takes.length MUST equal _user.scenes. Clone the last take{} if the file has fewer placeholders.",
       "shots_per_scene": "EXACTLY 8 filled sections per take. action not empty.",
-      "one_continuing_film": "ONE story from about. Take 2 continues Take 1. Not separate shorts.",
-      "inside_a_take": "Seamless: same location, wardrobe, time of day for all 8 beats.",
+      "one_continuing_film": "ONE story from the brief. Take 2 continues Take 1. Not separate shorts.",
+      "inside_a_take": "Same location, wardrobe and time of day. Mix cuts and continuous pieces per shot_structure: a take is usually 2-4 unbroken pieces, each a t2v followed by 1-3 continue sections.",
       "between_takes": "Hard cut OK. New location/time OK at the boundary. Plot and names continue.",
+      "chapters": "Set takes[].chapter (e.g. Part 1 - Bedroom). Every section of that take joins the chapter; a chain never crosses a chapter boundary. New location = new take + new chapter.",
       "titles": "takes[].title = Sahne 1, Sahne 2, ... in order."
     },
     "human_writes_only": {
       "scenes": "Integer. 5 = 5 takes. Each take = EXACTLY 8 sections. 5 sahneli = 5 take x 8 shot.",
-      "about": "One paragraph: what the film is about (genre, place, who, conflict). Turkish OK here; YOU translate the film into English fields. Dialogue may stay in the story language."
+      "about": "Topic or full scenario, in _user.about or in the chat message. Turkish OK; YOU write the visual fields in English. Dialogue stays in the story language."
     },
     "h3_prompt_format": {
       "do_not_write_the_three_blocks": "Studio composes the official H3 prompt from author fields. Do NOT output integrated_multimodal_description / overall_soundscape / non_diegetic_music yourself. Do NOT paste those keys into action.",
@@ -91,11 +104,52 @@
         "non_diegetic_music: {music}"
       ],
       "quality": "Author fields must be DETAILED so the composed prompt is rich. Short generic beats (he walks, she looks) are rejected. Each action = 2-5 present-tense visible sentences for THIS beat only: body, hands, eyes, weather, props, light. Camera = size + lens feel + move + height (not just close-up). audio = diegetic room/Foley only. music = N/A unless the user asked for score."
-    }
+    },
+    "shot_structure": {
+      "principle": "mode t2v = a CUT: a new camera setup (new angle or framing, new location, or a time jump). mode continue = the SAME shot still rolling: the camera may keep moving (push-in, follow, orbit, crane) but never jumps to a new framing or angle.",
+      "rhythm": "Build the film from short unbroken pieces: one t2v section followed by 1-3 continue sections (10-20 s without a cut), then cut with the next t2v. Camera variety comes from the cuts, never from continue sections. A single t2v section without continues is fine for a quick insert.",
+      "location_change": "A new location or time jump is ALWAYS t2v and starts a new chapter.",
+      "continue_rules": [
+        "opening_frame = the previous section's ending_frame (same framing, same positions).",
+        "camera describes how the SAME shot keeps going (e.g. 'the slow push-in continues over his shoulder until the monitor fills the frame'); no new shot size, angle or lens.",
+        "action covers only the next seconds; do not re-describe the location, the wardrobe or who the character is.",
+        "location stays the same as the previous section."
+      ],
+      "one_shot_per_section": "Each section is ONE shot. Never write 'cut to', 'cut-in', 'montage', 'multi-angle' or 'then a close-up of ...' inside a section; make it a new t2v section instead. One section (5 s) holds one or two visible actions.",
+      "mode_required": "Write mode (t2v or continue) on EVERY section; Studio does not guess it.",
+      "example": [
+        {
+          "mode": "t2v",
+          "camera": "Wide shot from behind his left shoulder, slow push-in toward the monitor.",
+          "ending_frame": "Over-the-shoulder medium shot, monitor glowing ahead of him."
+        },
+        {
+          "mode": "continue",
+          "camera": "The push-in continues over his shoulder until his hands and the boss health bar fill the frame.",
+          "opening_frame": "Over-the-shoulder medium shot, monitor glowing ahead of him."
+        },
+        {
+          "mode": "t2v",
+          "camera": "Cut to a side medium shot at desk height, static, as the screen freezes.",
+          "ending_frame": "Side medium shot, his hands lifted off the keyboard."
+        }
+      ]
+    },
+    "final_checklist": [
+      "Every section has mode t2v or continue. A camera angle change, new location or time jump is t2v.",
+      "Every continue section: same location as the previous section, opening_frame equals the previous ending_frame, camera describes the same shot still moving, action does not re-describe the place or character.",
+      "No section contains 'cut to', 'cut-in', 'montage' or several shots.",
+      "Every section has opening_frame and ending_frame filled.",
+      "takes.length equals the scene count, each take has exactly 8 sections, one location per take, and takes[].chapter is set.",
+      "character and location use exact card names, spelled the same everywhere.",
+      "The story follows the human's scenario and scene count.",
+      "All visual fields are English; dialogue_lang matches the dialogue.",
+      "_instructions and _user are deleted; the answer is only valid JSON."
+    ]
   },
   "_user": {
-    "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
-    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, look, cast notes, locations, and every beat from that. Do not ask questions. Do not leave empty action/camera/audio.",
+    "READ_ME_HUMAN": "Fill scenes + about here, or just write the scene count, topic and scenario in your chat message. Then send this WHOLE file to an AI.",
+    "READ_ME_AI": "The brief is in _user and/or the chat message (see _instructions.input_sources). Follow the human's scenario; invent only what is missing. Follow shot_structure exactly. Do not ask questions. Do not leave action/camera/audio/opening_frame/ending_frame empty.",
     "scenes": 5,
     "about": ""
   },
@@ -140,6 +194,7 @@
       "title": "Sahne 1",
       "sections": [
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -150,9 +205,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -163,9 +221,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -176,9 +237,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -189,9 +253,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -202,9 +269,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -215,9 +285,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -228,9 +301,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -241,14 +317,18 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         }
-      ]
+      ],
+      "chapter": "Part 1"
     },
     {
       "title": "Sahne 2",
       "sections": [
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -259,9 +339,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -272,9 +355,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -285,9 +371,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -298,9 +387,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -311,9 +403,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -324,9 +419,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -337,9 +435,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -350,14 +451,18 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         }
-      ]
+      ],
+      "chapter": "Part 2"
     },
     {
       "title": "Sahne 3",
       "sections": [
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -368,9 +473,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -381,9 +489,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -394,9 +505,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -407,9 +521,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -420,9 +537,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -433,9 +553,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "continue",
           "title": "",
           "location": "",
           "character": "",
@@ -446,9 +569,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         },
         {
+          "mode": "t2v",
           "title": "",
           "location": "",
           "character": "",
@@ -459,9 +585,12 @@
           "visual_style": "",
           "audio": "",
           "music": "N/A",
-          "important": ""
+          "important": "",
+          "opening_frame": "",
+          "ending_frame": ""
         }
-      ]
+      ],
+      "chapter": "Part 3"
     }
   ]
 }

@@ -94,6 +94,58 @@
   let h3AccelerationSaveQueue = Promise.resolve();
   let h3AccelerationLatestSave = Promise.resolve();
   let pendingSpeedSpectrumApply = Promise.resolve(true);
+  let pendingDraftLoraApply = Promise.resolve(true);
+  let draftLoraRequest = 0;
+  // FL2VA pick; Ref2VA shots swap to lightx2v-ref2v-4step on the server.
+  const DRAFT_LORA_ID = "lightx2v-fl2v-4step-v12";
+  const DRAFT_LORA_FILE = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors";
+  const OLD_DRAFT_LORA_IDS = ["erosmax-beta1-fl2v-4step"];
+
+  function prepareDraftLora(kind) {
+    const request = ++draftLoraRequest;
+    if (kind !== "draft") {
+      pendingDraftLoraApply = Promise.resolve(true);
+      // A speed adapter belongs to its preset, not the next quality profile.
+      syncLoraSelection(selectedLoraIds().filter(id => id !== DRAFT_LORA_ID &&
+        !OLD_DRAFT_LORA_IDS.includes(id) &&
+        state.loraCatalog.find(row => row.id === id)?.file !== DRAFT_LORA_FILE), false);
+      return;
+    }
+    for (const id of ["steps", "cinema-steps"]) if ($(id)) $(id).value = "4";
+    ensureCinema().steps = 4;
+    pendingDraftLoraApply = (async () => {
+      if (!state.loraCatalog.length) await loadLoras();
+      const spec = state.loraCatalog.find(item => item.id === DRAFT_LORA_ID || item.file === DRAFT_LORA_FILE);
+      if (!spec) throw Error("Taslak LoRA bulunamadı. Studio'yu güncelleyip yeniden deneyin.");
+      const ready = await downloadCatalogLora(spec, false);
+      if (request !== draftLoraRequest) return true;
+      if (!ready?.ready) throw Error("Taslak LoRA indirilemedi.");
+      const ids = selectedLoraIds().filter(id => {
+        const item = state.loraCatalog.find(row => row.id === id);
+        return item && item.file !== DRAFT_LORA_FILE && !item.preset && item.category !== "speed";
+      });
+      // Keep character/style adapters; replace other acceleration adapters.
+      if (ids.length >= 5) throw Error("Taslak LoRA için bir LoRA seçim yerini boşaltın.");
+      syncLoraSelection([...ids, ready.id], false);
+      for (const key of ["sampler", "scheduler"]) {
+        const select = $(key);
+        const value = ready[key] || (key === "sampler" ? "er_sde" : "simple");
+        if (select) {
+          if (![...select.options].some(opt => opt.value === value)) {
+            const option = document.createElement("option");
+            option.value = value; option.textContent = value; select.appendChild(option);
+          }
+          select.value = value;
+        }
+      }
+      if (state.cinemaLoaded) await saveCinema(true);
+      return true;
+    })().catch(error => { toast(String(error.message || error)); return false; });
+  }
+
+  async function waitForDraftLora() {
+    if (!await pendingDraftLoraApply) throw Error("Taslak LoRA hazır değil; Taslak seçimini tekrar deneyin.");
+  }
 
   function saveH3AccelerationSettings(changes) {
     const request = h3AccelerationSaveQueue.then(async () => {
@@ -2269,6 +2321,89 @@
     ) || null;
   }
 
+  function cinemaFrameJob(shotId) {
+    return (state.jobs || [])
+      .filter((j) => j.mode === "qwen_frame" && j.frame_shot_id === shotId)
+      .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0))[0] || null;
+  }
+
+  function cinemaShotFrameHtml(shot) {
+    const job = cinemaFrameJob(shot.id);
+    const approved = String(shot.first_frame_name || "");
+    const busy = job && (job.status === "queued" || job.status === "running");
+    const candidate = job && job.status === "done" && job.frame_name ? String(job.frame_name) : "";
+    const shown = approved || candidate;
+    const isApproved = !!approved && (!candidate || candidate === approved);
+    const img = shown
+      ? '<img class="cinema-shot-frame-img" alt="" loading="lazy" src="/api/refs/' + encodeURIComponent(shown) + '">'
+      : "";
+    const status = busy
+      ? tf("cinema.frameBusy", { n: String(job.progress || 0) })
+      : isApproved
+        ? tt("cinema.frameApproved")
+        : candidate
+          ? tt("cinema.frameReady")
+          : job && job.status === "error"
+            ? tt("cinema.frameError")
+            : "";
+    const btns =
+      '<button type="button" class="btn-secondary cinema-shot-frame"' + (busy ? " disabled" : "") + ">" +
+      htmlEsc(tt(shown ? "cinema.frameRedo" : "cinema.frameMake")) + "</button>" +
+      (candidate && candidate !== approved
+        ? '<button type="button" class="cta cinema-shot-frame-approve" data-frame="' + htmlEsc(candidate) + '">' +
+          htmlEsc(tt("cinema.frameApprove")) + "</button>"
+        : "") +
+      (approved
+        ? '<button type="button" class="btn-ghost cinema-shot-frame-clear">' + htmlEsc(tt("cinema.frameClear")) + "</button>"
+        : "");
+    return (
+      '<div class="cinema-shot-frame-row' + (isApproved ? " is-approved" : "") + '">' +
+      img +
+      '<div class="cinema-shot-frame-side">' +
+      (status ? '<small class="cinema-shot-frame-status">' + htmlEsc(status) + "</small>" : "") +
+      '<div class="cinema-shot-frame-btns">' + btns + "</div></div></div>"
+    );
+  }
+
+  async function makeCinemaShotFrame(shotId, btn) {
+    const shot = cinemaShotById(shotId);
+    if (!shot || !String(shot.text || "").trim()) {
+      toast(tt("cinema.needShotText"));
+      return;
+    }
+    if (btn) btn.disabled = true;
+    try {
+      await saveCinema(true);
+      const r = await fetch("/api/cinema/shot-frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shot_id: shot.id,
+          text: shot.text,
+          structured: shot.structured || null,
+          title: cinemaShotStructured(shot).title || "",
+          aspect: state.aspect || "16:9",
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      toast(tt("cinema.frameQueued"));
+      await refreshJobs();
+    } catch (err) {
+      toast(String(err.message || err));
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function setCinemaShotFrame(shotId, name) {
+    const shot = cinemaShotById(shotId);
+    if (!shot) return;
+    shot.first_frame_name = name || "";
+    cinemaForceLocalShots = true;
+    renderCinemaShots();
+    void saveCinema(true);
+  }
+
   function cinemaTypingIn(id) {
     const el = document.activeElement;
     const host = $(id);
@@ -2540,9 +2675,17 @@
     return film;
   }
 
+  const CINEMA_DIALOGUE_LANG_CODES = {
+    tr: "Turkish", en: "English", ar: "Arabic", ru: "Russian", ja: "Japanese",
+    zh: "Chinese", ko: "Korean", de: "German", fr: "French", es: "Spanish",
+    it: "Italian", pt: "Portuguese", nl: "Dutch", pl: "Polish", hi: "Hindi",
+  };
+
   function cinemaDialogueLangLabel(structured) {
     const explicit = String(structured.dialogue_lang || "").trim();
-    if (explicit && explicit.toLowerCase() !== "auto") return explicit;
+    if (explicit && explicit.toLowerCase() !== "auto") {
+      return CINEMA_DIALOGUE_LANG_CODES[explicit.toLowerCase()] || explicit;
+    }
     const dialogue = structured.dialogue || "";
     if (/[\u0600-\u06FF]/.test(dialogue)) return "Arabic";
     if (/[\u0400-\u04FF]/.test(dialogue)) return "Russian";
@@ -2752,6 +2895,9 @@
       '<button type="button" class="btn-secondary cinema-shot-edit">' +
       tt("cinema.sectionEdit") +
       "</button></div>" +
+      (mode === "t2v" && cinemaStudioMode() !== "seamless" && String(shot.text || "").trim()
+        ? cinemaShotFrameHtml(shot)
+        : "") +
       (calls.length
         ? '<div class="cinema-shot-binds">' +
           calls.map((n) => '<span class="cinema-bind">' + htmlEsc(n) + "</span>").join("") +
@@ -3540,7 +3686,7 @@
     const c = ensureCinema();
     if (kind === "draft") {
       c.quality = "480";
-      c.steps = 10;
+      c.steps = 4;
       c.duration = Number($("cinema-duration")?.value) || c.duration || 5;
     } else {
       c.quality = "736";
@@ -3548,6 +3694,7 @@
     }
     if ($("steps")) $("steps").value = String(c.steps);
     setQuality(c.quality);
+    prepareDraftLora(kind);
     renderCinemaKnobs();
     void saveCinema(true);
     toast(kind === "draft" ? tt("cinema.draftToast") : tt("cinema.finalToast"));
@@ -4871,6 +5018,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (btn) btn.disabled = true;
     state.filmPlanBusy = true;
     try {
+      await waitForDraftLora();
       await saveCinema(true);
       const cine = ensureCinema();
       const shots = (cine.shots || []).filter(
@@ -4982,12 +5130,73 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
+  async function confirmCinemaLint(shots, duration) {
+    let data;
+    try {
+      const r = await fetch("/api/cinema/lint", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shots, duration }),
+      });
+      if (!r.ok) return true;
+      data = await r.json();
+    } catch {
+      return true;
+    }
+    const issues = (data.issues || []).filter((i) => i.level !== "info");
+    if (!issues.length) return true;
+    const lines = issues.slice(0, 12).map((i) => {
+      const params = {};
+      Object.keys(i.params || {}).forEach((k) => {
+        params[k] = i.params[k] == null ? "" : String(i.params[k]);
+      });
+      const mark = i.level === "error" ? "✖" : "⚠";
+      return `${mark} ${tf("lint.scene", { n: i.index })}: ${tf("lint." + i.code, params)}`;
+    });
+    if (issues.length > 12) lines.push(tf("lint.more", { n: issues.length - 12 }));
+    return tConfirm("lint.confirm", {
+      e: (data.counts && data.counts.error) || 0,
+      w: (data.counts && data.counts.warn) || 0,
+      list: lines.join("\n"),
+    });
+  }
+
+  function polishNote(report) {
+    if (!report || (!report.audio_leveled && !report.color_matched)) return "";
+    return tf("cinema.polishNote", {
+      a: report.audio_leveled || 0,
+      c: report.color_matched || 0,
+    });
+  }
+
+  async function redoFailedCinemaShots() {
+    const btn = $("btn-cinema-redo-failed");
+    if (btn) btn.disabled = true;
+    try {
+      const r = await fetch("/api/cinema/redo-failed", { method: "POST" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      let msg = data.count
+        ? tf("cinema.redoFailedOk", { n: data.count })
+        : tt("cinema.redoFailedNone");
+      if ((data.skipped || []).length) msg += tf("cinema.redoFailedSkipped", { n: data.skipped.length });
+      if (data.never_made) msg += tf("cinema.redoFailedNever", { n: data.never_made });
+      toast(msg);
+      if (data.count) await refreshJobs();
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function produceCinema(opts) {
     opts = opts && typeof opts === "object" ? opts : {};
     const btn = $("btn-cinema-produce");
     if (btn) btn.disabled = true;
     if (ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
     try {
+      await waitForDraftLora();
       const c = ensureCinema();
       flushCinemaFields();
       const draft = $("cinema-shot-draft");
@@ -5050,6 +5259,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         }
         /* Continuum groups up to 16 sections per take. */
       }
+      const lintDuration = Number($("cinema-duration")?.value) || c.duration || 5;
+      if (!(await confirmCinemaLint(shots, lintDuration))) return;
       const audio = cinemaAudio();
       const filmMode = audio.mode !== "silent";
       const purpose =
@@ -5227,6 +5438,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (button) button.disabled = true;
     if (ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
     try {
+      await waitForDraftLora();
       flushCinemaFields();
       await saveCinema(true);
       const cine = ensureCinema();
@@ -5330,7 +5542,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (!r.ok) throw new Error(errDetail(data));
       if (data.batch_id) audio.last_batch = data.batch_id;
       renderCinemaAudio();
-      tToast("toast.filmClipsReady", { n: String(data.clips || 0) });
+      toast(tf("toast.filmClipsReady", { n: String(data.clips || 0) }) + polishNote(data.polish));
       if (data.final_url) window.open(data.final_url, "_blank");
     } catch (e) {
       toast(String(e.message || e));
@@ -5494,6 +5706,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         .sort((a, b) => (Number(a.batch_index) || 0) - (Number(b.batch_index) || 0));
       if (batchClips.length >= 2) {
         state.mergePickIds = batchClips.map((j) => j.id);
+        toast(tf("merge.preselected", { n: String(batchClips.length) }));
       }
     }
     setDirectorLlmOpen(false);
@@ -5539,7 +5752,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         }
       }
       exitGalleryMergeMode();
-      toast(tf("cinema.concatOk", { n: data.clips || ids.length }));
+      toast(tf("cinema.concatOk", { n: data.clips || ids.length }) + polishNote(data.polish));
       if (data.final_url) window.open(data.final_url, "_blank");
       await renderGallery();
     } catch (e) {
@@ -8362,7 +8575,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         grip.setAttribute("aria-hidden", "true");
         left.prepend(grip);
       }
-      if (j.mode === "qwen_sheet" && j.status === "running") {
+      if ((j.mode === "qwen_sheet" || j.mode === "qwen_frame") && j.status === "running") {
         const track = document.createElement("div");
         track.className = "job-inline-progress";
         track.setAttribute("role", "progressbar");
@@ -8408,7 +8621,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         right.appendChild(cp);
       }
       if (j.status === "done") {
-        if (j.mode !== "qwen_sheet") {
+        if (j.mode !== "qwen_sheet" && j.mode !== "qwen_frame") {
           const b = document.createElement("button");
           b.textContent = tt("job.play");
           b.className = "btn-secondary job-action-main";
@@ -8999,6 +9212,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await fetch("/api/jobs").then((r) => r.json());
       const prevStatus = state.jobStatusSnapshot || {};
       state.jobs = data.jobs || [];
+      const produceError = data.pending_produce_error;
+      if (produceError && produceError.id !== state.pendingProduceErrorSeen
+          && Date.now() / 1000 - Number(produceError.at || 0) < 1800) {
+        state.pendingProduceErrorSeen = produceError.id;
+        toast(tf("cinema.pendingProduceFailed", { err: errDetail({ detail: produceError.detail }) }));
+      }
       state.queuePaused=!!data.queue_paused;
       const pauseButton=$('btn-queue-pause');
       if(pauseButton?.dataset){pauseButton.dataset.i18n=state.queuePaused?'queue.resume':'queue.pauseAfter';pauseButton.textContent=tt(pauseButton.dataset.i18n);}
@@ -9267,6 +9486,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (btn) btn.disabled = true;
     try {
       const speedSettingsApplied = await pendingSpeedSpectrumApply;
+      await waitForDraftLora();
       if (!speedSettingsApplied) throw Error(window.h3Lang?.() === "en"
         ? "Spectrum settings could not be saved; retry before generating."
         : "Spectrum ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
@@ -9370,6 +9590,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function applySpeedProfile(kind) {
+    prepareDraftLora(kind);
     document.querySelectorAll("#speed-chips [data-speed]").forEach(button => {
       const selected = button.dataset.speed === kind;
       button.classList.toggle("on", selected);
@@ -9379,7 +9600,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       setDuration(5);
       setQuality("480");
       const steps = $("steps");
-      if (steps) steps.value = "12";
+      if (steps) steps.value = "4";
       pendingSpeedSpectrumApply = fetch("/api/h3-acceleration")
         .then(async response => {
           const current = await response.json();
@@ -9445,7 +9666,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     return [...($(selectId)?.selectedOptions || [])].map((opt) => opt.value).filter(Boolean).slice(0, 5);
   }
 
-  function syncLoraSelection(ids) {
+  function syncLoraSelection(ids, applyPreset = true) {
     const selected = new Set(ids.filter(Boolean).slice(0, 5));
     ["lora-select", "cinema-lora-select"].forEach((id) => {
       [...($(id)?.options || [])].forEach((opt) => { opt.selected = selected.has(opt.value); });
@@ -9457,9 +9678,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       });
     });
     const presets = [...selected].map(id => (state.loraCatalog || []).find(item => item.id === id)).filter(item => item?.preset && item.file);
-    if (presets.length === 1) {
+    if (applyPreset && presets.length === 1) {
       const recipe = presets[0];
-      if (recipe.steps) {
+      if (recipe.steps && !recipe.preserve_manual_steps) {
         if ($("steps")) $("steps").value = String(recipe.steps);
         if ($("cinema-steps")) $("cinema-steps").value = String(recipe.steps);
         ensureCinema().steps = recipe.steps;
@@ -9512,9 +9733,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   function fillLoraSelect() {
     const sel = $("lora-select");
     if (!sel) return;
-    const prev = state.loraApplied && state.loraId ? state.loraId : sel.value || state.loraId || "";
-    const previousIds = state.cinemaLoaded && Array.isArray(state.cinema?.lora_selection) ? state.cinema.lora_selection : selectedLoraIds();
     const catalog = videoLoraCatalog();
+    // Preserve selections when a formerly local file gains a catalog/download ID.
+    const canonicalId = id => id?.startsWith("file:")
+      ? catalog.find(spec => spec.file === id.slice(5))?.id || id : id;
+    const prev = canonicalId(state.loraApplied && state.loraId ? state.loraId : sel.value || state.loraId || "");
+    const previousIds = (state.cinemaLoaded && Array.isArray(state.cinema?.lora_selection) ? state.cinema.lora_selection : selectedLoraIds()).map(canonicalId);
     sel.innerHTML = "";
     if (!catalog.length) {
       const opt = document.createElement("option");
@@ -9745,7 +9969,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const paint = () => {
         const weight = Number(current.spectrum_blend_weight ?? 0.5);
         const presets = current.spectrum_presets || [{id:"light",blend_weight:0.25},{id:"balanced",blend_weight:0.5},{id:"strong",blend_weight:0.75}];
-        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend><div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><p class="muted">${en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0."}</p><p class="muted">${en ? "Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir."}</p>`;
+        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend><div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><p class="muted">${en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0."}</p><p class="muted">${en ? "Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir."}</p><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sol-Attn<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Sol-Attn sparse attention" : "Sol-Attn seyrek dikkat"}" id="h3-sparse-enabled" data-acceleration="sparse" ${current.sparse_enabled ? "checked" : ""}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "ComfyUI core block sparse attention (tau 1.3, from 20%). Faster on long clips; applies to new jobs." : "ComfyUI'ın yerleşik seyrek dikkat hızlandırması (tau 1.3, %20'den sonra). Uzun kliplerde hızlandırır; yeni işlerde geçerli."}</p>`;
       };
       const save = async changes => {
         panel.querySelectorAll("button, input").forEach(control => control.disabled = true);
@@ -9766,7 +9990,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       };
       panel.onchange = async event => {
         const target = event.target;
-        if (target.matches("[data-acceleration]")) return save({spectrum_enabled:target.checked});
+        if (target.matches("[data-acceleration]")) return save({[`${target.dataset.acceleration}_enabled`]:target.checked});
         if (!target.matches("[data-spectrum-range], [data-spectrum-weight]")) return;
         const value = Number(target.value);
         if (!target.value.trim() || !target.validity.valid || !Number.isFinite(value) || value < 0 || value > 1) {
@@ -9910,7 +10134,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
-  async function downloadCatalogLora(spec) {
+  async function downloadCatalogLora(spec, selectAfterDownload = true) {
     if (!spec?.id || !spec.file) return spec;
     if (spec.ready) return spec;
     if (!spec.downloadable) {
@@ -9939,8 +10163,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (now?.ready) {
         state.loraCatalog = st.loras || state.loraCatalog;
         fillLoraSelect();
-        if ($("lora-select")) $("lora-select").value = spec.id;
-        if ($("cinema-lora-select")) $("cinema-lora-select").value = spec.id;
+        if (selectAfterDownload && $("lora-select")) $("lora-select").value = spec.id;
+        if (selectAfterDownload && $("cinema-lora-select")) $("cinema-lora-select").value = spec.id;
         return now;
       }
       fillLoraShop();
@@ -10575,6 +10799,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   $("btn-cinema-add-cont")?.addEventListener("click", () => addEmptyCinemaScene("continue"));
   $("btn-cinema-save")?.addEventListener("click", () => void saveCinema(false));
   $("btn-cinema-produce")?.addEventListener("click", () => void produceCinema({ all: true }));
+  $("btn-cinema-redo-failed")?.addEventListener("click", () => void redoFailedCinemaShots());
   $("cinema-duration")?.addEventListener("change", () => {
     ensureCinema().duration = Number($("cinema-duration").value) || 5;
     void saveCinema(true);
@@ -11056,6 +11281,33 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       e.stopPropagation();
       const chapter = chapterDel.closest(".cinema-chapter")?.dataset.chapter;
       if (chapter) deleteCinemaChapter(chapter);
+      return;
+    }
+    const frameBtn = e.target.closest(".cinema-shot-frame");
+    if (frameBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = frameBtn.closest(".cinema-shot")?.dataset.id;
+      if (id) void makeCinemaShotFrame(id, frameBtn);
+      return;
+    }
+    const frameApprove = e.target.closest(".cinema-shot-frame-approve");
+    if (frameApprove) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = frameApprove.closest(".cinema-shot")?.dataset.id;
+      if (id) {
+        setCinemaShotFrame(id, frameApprove.dataset.frame || "");
+        toast(tt("cinema.frameApprovedToast"));
+      }
+      return;
+    }
+    const frameClear = e.target.closest(".cinema-shot-frame-clear");
+    if (frameClear) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = frameClear.closest(".cinema-shot")?.dataset.id;
+      if (id) setCinemaShotFrame(id, "");
       return;
     }
     const produce = e.target.closest(".cinema-shot-produce");

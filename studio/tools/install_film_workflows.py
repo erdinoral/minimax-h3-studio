@@ -19,7 +19,7 @@ REPLACEMENTS={
 }
 
 WORKFLOW_PACKS = (
-    ('ComfyUI-H3-Continuum', 'https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum.git', 'e9b1294ccd08dfce972cd8e5a11703b3f616ee54'),
+    ('ComfyUI-H3-Continuum', 'https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum.git', '308653cff108061a94381cef446fef985384b214'),
     ('MiniMax-H3-Flow-Aligned-Regenerate', 'https://github.com/xmarre/MiniMax-H3-Flow-Aligned-Regenerate.git', '2bc8247810f99ccf5f580bfab985b7defe26a620'),
     ('Comfyui_Minimax_h3_latent_Upscaler-Plus', 'https://github.com/xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus.git', '1ddcc33e9b674aaabbccc3808fe36e1a47bdd36d'),
 )

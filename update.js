@@ -59,6 +59,34 @@ module.exports = {
     {
       method: "shell.run",
       params: {
+        path: "app/custom_nodes/ComfyUI-Minimax-H3-Reference-Library",
+        message: "git pull",
+      },
+      when: "{{exists('app/custom_nodes/ComfyUI-Minimax-H3-Reference-Library')}}"
+    },
+    {
+      method: "shell.run",
+      params: {
+        venv: "env",
+        path: "app",
+        message: "uv pip install -r custom_nodes/ComfyUI-Minimax-H3-Reference-Library/requirements.txt"
+      },
+      when: "{{exists('app/custom_nodes/ComfyUI-Minimax-H3-Reference-Library/requirements.txt')}}"
+    },
+    {
+      method: "shell.run",
+      params: {
+        path: "app/custom_nodes",
+        message: [
+          "git -C ComfyUI-H3-Continuum fetch --tags",
+          "git -C ComfyUI-H3-Continuum checkout --detach 308653cff108061a94381cef446fef985384b214"
+        ]
+      },
+      when: "{{exists('app/custom_nodes/ComfyUI-H3-Continuum')}}"
+    },
+    {
+      method: "shell.run",
+      params: {
         venv: "env",
         path: "app",
         message: [

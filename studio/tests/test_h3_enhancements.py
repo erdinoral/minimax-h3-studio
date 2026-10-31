@@ -11,6 +11,16 @@ from lib.comfy import build_ref2va_prompt, build_t2v_prompt, add_h3_first_frame_
 
 
 class Enhancements(unittest.TestCase):
+    def test_erosmax_catalog_download_and_manual_steps(self):
+        spec = loras.find_spec(lora_id='erosmax-beta1-fl2v-4step')
+        self.assertIn('v1.0_768p_10ErosMax_beta1', spec['file'])
+        self.assertEqual(spec['expected_bytes'], 1956194370)
+        self.assertEqual(len(spec['sha256']), 64)
+        self.assertTrue(spec['url'].startswith('https://huggingface.co/t8star/'))
+        self.assertEqual(enhancements.preset(spec['file'], 4, 'euler', 'normal', 'fl2va'), (4, 'er_sde', 'simple'))
+        self.assertEqual(enhancements.preset(spec['file'], 8, 'euler', 'normal', 'fl2va'), (8, 'er_sde', 'simple'))
+        self.assertEqual(enhancements.preset(spec['file'], 20, 'euler', 'normal', 'ref2va'), (20, 'euler', 'normal'))
+
     def test_hyperflow_installer_digest_compatibility_and_idempotence(self):
         installer = Path(__file__).resolve().parents[1] / 'tools' / 'install_film_workflows.py'
         tree = ast.parse(installer.read_text(encoding='utf-8'))

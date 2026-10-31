@@ -13,6 +13,17 @@ SIZES = {"16:9": (1664, 928), "9:16": (928, 1664), "1:1": (1328, 1328),
          "4:3": (1472, 1104), "3:4": (1104, 1472)}
 
 
+def closest_aspect(aspect: str) -> str:
+    if aspect in SIZES:
+        return aspect
+    try:
+        a, b = (float(x) for x in str(aspect).split(":", 1))
+        ratio = a / b
+    except (ValueError, ZeroDivisionError):
+        return "16:9"
+    return min(SIZES, key=lambda k: abs(SIZES[k][0] / SIZES[k][1] - ratio))
+
+
 def missing_models(comfy_root: Path, *, edit=False, available_models=()) -> list[str]:
     models = {**MODELS, **({"diffusion_models": EDIT_MODEL} if edit else {})}
     return [f"{folder}/{name}" for folder, name in models.items()
@@ -53,6 +64,27 @@ def build_reference_views(*, kind, notes, style_line, source_image, steps, seed,
         graph[prefix + "_decode"] = {"class_type": "VAEDecode", "inputs": {"samples": [prefix + "_sample", 0], "vae": ["21", 0]}}
         graph[f"70_{index}"] = {"class_type": "SaveImage", "inputs": {
             "images": [prefix + "_decode", 0], "filename_prefix": f"H3_Studio_Qwen_Edit/{view.replace(' ', '_')}"}}
+    return graph
+
+
+def build_storyboard_frame(*, prompt: str, negative: str, ref_images: list[str], aspect: str,
+                           steps: int, seed: int) -> dict:
+    """One film frame. With refs, Qwen Edit sees them as Picture 1..3; without, plain text-to-image."""
+    refs = [r for r in ref_images if r][:3]
+    aspect = closest_aspect(aspect)
+    graph = build_graph(prompt=prompt, negative=negative, aspect=aspect, steps=steps, seed=seed,
+                        prefix="H3_Studio_Frame")
+    if not refs:
+        return graph
+    graph["10"]["inputs"]["unet_name"] = EDIT_MODEL
+    images = {}
+    for index, name in enumerate(refs, start=1):
+        graph[f"25_{index}"] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        images[f"image{index}"] = [f"25_{index}", 0]
+    graph["30"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
+        "clip": ["20", 0], "prompt": prompt, "vae": ["21", 0], **images}}
+    graph["31"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
+        "clip": ["20", 0], "prompt": negative, "vae": ["21", 0]}}
     return graph
 
 

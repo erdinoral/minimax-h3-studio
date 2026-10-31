@@ -8,7 +8,7 @@ Director can process each chapter as one ordered Continuum sequence. Each scene 
 
 ### Director: New Video and Continuum children
 
-Director JSON keeps `mode: "t2v"` as a normal standalone main clip. Consecutive `mode: "continue"` scenes become Continuum children beneath that clip in the production list; each scene retains its ordered prompt. With the Studio native-tail bridge installed, New clips save a bounded AV latent tail and continuations carry 22 frames of motion/audio context, including between memory-bounded child groups. Older clips without this state retain the explicitly reported last-frame handoff. Another New Video creates another main clip. Scene cards show the same parent/child arrangement. Existing jobs are preserved; changing scene modes affects future production only. See [native continuation details and limits](studio/docs/NATIVE_CONTINUATION.md).
+Director JSON keeps `mode: "t2v"` as a normal standalone main clip. Consecutive `mode: "continue"` scenes become Continuum children beneath that clip in the production list; each scene retains its ordered prompt. With the Studio native-tail bridge installed, New clips save a bounded AV latent tail and continuations carry 22 frames of motion/audio context, including between memory-bounded child groups. Older clips without this state retain the explicitly reported last-frame handoff. Every continuation section also receives its scene's character/asset references with the same "Picture N is <asset>" ownership lines as the New clip, so two actors do not swap looks mid-chain. Another New Video creates another main clip. Scene cards show the same parent/child arrangement. Existing jobs are preserved; changing scene modes affects future production only. See [native continuation details and limits](studio/docs/NATIVE_CONTINUATION.md).
 
 ## 9.3.1 — Director continuity and production reliability
 
@@ -267,7 +267,9 @@ In Scene settings, **Fast draft preview (TAE)** is an opt-in for testing composi
 
 **Cinema:** **Kesintisiz zincir** (on when the pack is present). Shot texts are joined with `---` and render as one clip per **take** (max 8 shots, e.g. 8×5s = 40s). In JSON, `takes[]` is the scene list of **one continuing film**: “5 sahneli” = 5 takes × 8 shots (Sahne 1…5), then concat. A flat `sections[]` list still auto-chunks every 8. Pack limit is 8 shots **per take**, not per film. Uncheck it to use the older per-shot Continue chain (last-frame I2V, up to 80 shots).
 
-**Kesintisiz JSON** (`h3-cinema-seamless/v1`): Direktör → **JSON → Kesintisiz örnek**. You fill only `_user.scenes` + `_user.about`, send the file to an AI. It writes detailed author fields; Studio composes the official H3 three-block prompt (`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`). Delete `_instructions` + `_user`, import, then **Üret**. One Multishot job **per take**. Do not add portraits. The older **Film örneği** (`h3-cinema/v1`) is the face-lock package (same `_user` brief).
+**Continuum JSON** (`h3-cinema-seamless/v1`): Direktör → **JSON → Continuum örneği**. You fill only `_user.scenes` + `_user.about`, send the file to an AI. It writes detailed author fields; Studio composes the official H3 three-block prompt (`integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`). Delete `_instructions` + `_user`, import, then **Üret**. Each take renders as one Continuum chain (Multishot is the fallback). Do not add portraits. **Karakter / mekan örneği** (`h3-cinema/v1`) is the face-lock package for the Character / location mode (same `_user` brief).
+
+Both packages accept an optional `chapter` on each section (or on a `takes[]` block). Continue chains never cross a chapter boundary, so chapters survive import and export. Sections also accept `duration` (4–15 s); exported sections keep `chapter`, `take_index` and `take_title`.
 
 ```text
 GET  /api/cinema/json-template              # 12×5s Film (h3-cinema/v1)
@@ -393,6 +395,9 @@ GET  /api/cinema/film-plan
 POST /api/cinema/film-plan/concat
 POST /api/cinema/mux       # concat clips, keep dialogue, mix one score
 POST /api/clips/concat
+                          # concat/mux: level_audio (-16 LUFS per clip), color_match (per scene) — both default true
+POST /api/cinema/lint      # { shots?, duration? } pre-production prompt check, queues nothing
+POST /api/cinema/redo-failed  # re-queue the active film's failed / cancelled shots
 GET  /api/cinema/final/{batch_id}
 POST /api/director/chat            # plan_mode: true → shot tahtasını görür, patch ile düzenler
 POST /api/director/plan            # { session_id, shots, apply_cinema } Plan kaydet / stüdyoya aktar
@@ -468,6 +473,39 @@ mux = requests.post(f"{base}/api/cinema/mux", json={"score_id": music_id}).json(
 print(mux["final_url"])
 ```
 
+#### Üretim öncesi kontrol · hatalıları yeniden üret · birleştirme cilası / Pre-production check · redo failed · concat polish
+
+- **Tümünü üret** önce `/api/cinema/lint` çağırır. Hata veya uyarı varsa listeyi gösterip onay ister: kapanmamış `<d>`, `<d>` içindeki karakter adı (H3 adı da okur), film dilinden farklı diyalog etiketi, klip süresine sığmayan diyalog, sessiz filmde diyalog, ilk sahnede Devam modu, çok kısa prompt, metinde adı geçtiği halde sahnenin asset seçiminde olmayan karakter (`cast_unbound` — referans ve oyuncu kilidi almaz). Görseli olmayan karakterler yalnızca bilgi olarak döner. / **Produce all** runs `/api/cinema/lint` first and asks for confirmation on errors or warnings.
+- **Hatalıları yeniden üret**, aktif filmin hata veren veya iptal edilen shot'larını aynı ayarlarla kuyruğa geri alır. Bitmiş ya da kuyrukta olan shot'lara dokunmaz. / **Redo failed shots** re-queues the active film's failed or cancelled shots and leaves finished or queued ones alone.
+- Birleştirme (`/api/clips/concat`, `/api/cinema/concat`, `/api/cinema/mux`) her klibin sesini -16 LUFS'a çeker. Oda sesi gibi sessiz klipler olduğu gibi kalır, tepe sinyali -1 dBTP'yi aşmaz. Aynı sahnedeki kliplerin parlaklık ve renk tonu sahnenin ilk klibine yaklaştırılır, büyük sıçramalar sahne geçişi sayılır. Kapatmak için `level_audio: false` / `color_match: false`. Yanıttaki `polish` alanı uygulanan kazancı ve ofsetleri gösterir. / Concat levels each clip to -16 LUFS and matches color within a scene; turn off with `level_audio: false` / `color_match: false`. The `polish` field reports what was applied.
+
+```javascript
+const lint = await fetch("/api/cinema/lint", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then((r) => r.json());
+console.log(lint.counts, lint.issues); // [{ level, code, index, shot_id, params }]
+const redo = await fetch("/api/cinema/redo-failed", { method: "POST" }).then((r) => r.json());
+console.log(redo.count, redo.never_made);
+const joined = await fetch("/api/clips/concat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ job_ids: ["JOB1", "JOB2"], color_match: false }),
+}).then((r) => r.json());
+console.log(joined.polish); // { audio_gain_db, color_offsets, audio_leveled, color_matched }
+```
+
+```python
+import requests
+base = "http://127.0.0.1:8787"
+print(requests.post(f"{base}/api/cinema/lint", json={"duration": 5}).json()["issues"])
+print(requests.post(f"{base}/api/cinema/redo-failed").json())
+print(requests.post(f"{base}/api/clips/concat", json={"job_ids": ["JOB1", "JOB2"], "level_audio": True}).json()["polish"])
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8787/api/cinema/lint -H "Content-Type: application/json" -d '{}'
+curl -s -X POST http://127.0.0.1:8787/api/cinema/redo-failed
+curl -s -X POST http://127.0.0.1:8787/api/cinema/concat -H "Content-Type: application/json" -d '{"batch_id":"BATCH","color_match":false}'
+```
+
 ### Resolution — you are not capped at 768p
 
 The nodes take explicit `width` / `height` inputs (default **1344×768**, max `MAX_RESOLUTION` = 16384), so you can generate natively at 1920×1088 or higher. 768 is the *default* short edge and the resolution H3 was primarily trained at — not a ceiling.
@@ -482,7 +520,14 @@ Cost scales steeply with pixel count. Community figures on a 32 GB RTX 5090 at 1
 | 10 s, with sage-attention | ~23 min |
 | 10 s, 20 steps, without | ~58 min |
 
-So 1080p is very much usable — it just costs time, and quality is reportedly better than 768p. Practical levers (besides LoRA): **shorter clips**, **480p/720p**, **15 steps**, **silent decode** on music videos. Studio has **Taslak** (5s · 480p · 12) and **Hızlı** (5s · 720p · 15). Studio graphs do **not** patch Sage Attention.
+So 1080p is very much usable — it just costs time, and quality is reportedly better than 768p. Practical levers (besides LoRA): **shorter clips**, **480p/720p**, **15 steps**, **silent decode** on music videos. Studio has **Taslak / Draft** (5s · 480p · 4 steps) and **Orta / Medium** (5s · 736p · 15 steps). Draft selects the speed adapter per graph:
+
+| Graph | Modes | Draft adapter |
+|---|---|---|
+| FL2VA | New video without references, first frame, first–last frame, last-frame Continue, Continuum without references | LightX2V FL2V v1.2 (4 steps, `er_sde`) |
+| Ref2VA | Face lock / references, V2V, audio continue, Director scenes with asset cards, Continuum with references | LightX2V Ref2V (4 steps, `er_sde`) |
+
+Draft downloads the missing FL2VA adapter (LightX2V Ref2V must already be downloaded for Ref2VA shots), preserves character/style adapters, and waits for the download before submitting. The current engine and Spectrum blend remain selected, and subsequent manual step changes are respected. Studio graphs do **not** patch Sage Attention.
 
 See **SageAttention 3** below if you want those kernels in Comfy itself; H3 Studio no longer uses them.
 

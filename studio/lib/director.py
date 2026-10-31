@@ -345,6 +345,34 @@ CAMERA_VARIETY: tuple[str, ...] = (
     "extreme close-up on eyes or hands, 85mm shallow depth of field",
 )
 
+CONTINUE_CAMERA = "the previous camera move keeps going in the same shot, no new angle"
+
+SHOT_STRUCTURE_GUIDE = (
+    "SHOT STRUCTURE (cuts vs continuous pieces):\n"
+    "- link=cut: a new camera setup (new angle or framing, new location, or a time jump). It renders as a fresh video.\n"
+    "- link=continue: the SAME shot still rolling from the previous clip's last moment. The camera may keep moving "
+    "(push-in, follow, orbit, crane) but never jumps to a new framing or angle.\n"
+    "- Build the film from short unbroken pieces: one cut followed by 1-3 continue rows (10-20 s without a cut), "
+    "then the next cut. Camera variety comes from cuts, never from continue rows.\n"
+    "- A new location or time jump is always a cut with a new sectionId.\n"
+    "- A continue row keeps the sectionId and location, starts on the previous row's endFrame, and its camera "
+    "describes how the same move keeps going.\n"
+    "- Each row is ONE shot: never 'cut to', 'cut-in', 'montage' or several angles inside one clip; "
+    "make it a new cut row instead.\n"
+)
+
+
+def outline_link(row: Any) -> str:
+    """Outline row cut/continue plan: "continue", "cut", or "" when unspecified."""
+    if not isinstance(row, dict):
+        return ""
+    raw = str(row.get("link") or row.get("linkToPrev") or row.get("mode") or "").strip().lower()
+    if raw in ("continue", "devam", "i2v", "last_frame"):
+        return "continue"
+    if raw in ("cut", "standalone", "new", "t2v", "kesme"):
+        return "cut"
+    return ""
+
 _ORDINAL_SHOT = {
     "birinci": 1,
     "ikinci": 2,
@@ -396,6 +424,71 @@ def _strip_user_prefix(text: str) -> str:
     t = re.sub(r"^\[proje:[^\]]+\]\s*", "", t, flags=re.I)
     t = re.sub(r"^\[sinema stüdyosu\]\s*", "", t, flags=re.I)
     return t.strip()
+
+
+_SINGLE_FORMAT = re.compile(
+    r"(?<!\w)(?:tekli|tek\s+(?:bir\s+)?(?:shot|şot|plan|klip|video|prompt|promt|sahne)|"
+    r"single(?:[\s-]*shot)?|one[\s-]*shot|bir\s+shot)(?!\w)|^\s*tek\s*[.!]?\s*$",
+    re.I,
+)
+_LONG_FORMAT = re.compile(
+    r"^\s*uzun(?:\s+olsun)?\s*[.!]?\s*$|(?<!\w)(?:uzun\s+(?:bir\s+)?(?:sahne|film|video|sekans|klip)|"
+    r"long\s+(?:scene|video|film|sequence)|çoklu|çok\s+shot\w*|multi[\s-]*shot)(?!\w)",
+    re.I,
+)
+
+
+def scene_format_from_text(text: Any, *, clip_sec: int = 5) -> str:
+    """User's long-scene vs single-shot choice: "single", "long", or ""."""
+    t = _strip_user_prefix(str(text or ""))
+    if not t:
+        return ""
+    if _SINGLE_FORMAT.search(t):
+        return "single"
+    if _LONG_FORMAT.search(t):
+        return "long"
+    _total, need = infer_duration_and_shots(t, clip_sec=clip_sec)
+    if need:
+        return "single" if need == 1 else "long"
+    return ""
+
+
+def scene_format_question(lang: Any = None) -> str:
+    if normalize_ui_lang(lang) == "en":
+        return (
+            "Before I write anything: is this a **long scene** or a **single shot**?\n\n"
+            "- **Long scene**: several shots in the Director, built from cuts and continuous pieces. "
+            "Tell me the total duration too.\n"
+            "- **Single shot**: I write one video prompt and that's it."
+        )
+    return (
+        "Yazmaya başlamadan önce: **uzun bir sahne** mi düşünüyorsun, yoksa **tek shot** mı?\n\n"
+        "- **Uzun sahne**: Director'da kesme ve kesintisiz parçalardan oluşan birkaç shot. "
+        "Toplam süreyi de söyle.\n"
+        "- **Tek shot**: tek bir video promptu yazarım, o kadar."
+    )
+
+
+def scene_format_addendum(fmt: str) -> str:
+    if fmt == "single":
+        return (
+            "\n\n## SCENE FORMAT: SINGLE SHOT (chosen by the user)\n"
+            "Write exactly one video: expectedShotCount 1, totalDurationSec = clipDurationSec. "
+            "Return a 1-row shotOutline plus one full h3Prompt shot with ready: true. "
+            "No multi-shot outline and no cut/continue chain.\n"
+        )
+    if fmt == "long":
+        return (
+            "\n\n## SCENE FORMAT: LONG SCENE (chosen by the user)\n"
+            "Use the Director structure: FAZ A outline where every row has link (cut|continue), sectionId and endFrame, "
+            "following the cut/continue rules. Ask for the total duration if it is still unknown.\n"
+        )
+    return (
+        "\n\n## SCENE FORMAT NOT CHOSEN YET (highest priority)\n"
+        "Before any outline or JSON, ask the user in the UI language whether they want a long scene "
+        "(several shots in the Director, built from cuts and continuous pieces) or a single shot (one video prompt). "
+        "Do not output JSON this turn.\n"
+    )
 
 
 def extract_director_directives(messages: list[Any]) -> dict[str, Any]:
@@ -518,6 +611,8 @@ def camera_for_outline_index(
     if per.get(index + 1):
         return str(per[index + 1]).strip()
     row_cam = str((row or {}).get("camera") or "").strip()
+    if index and outline_link(row) == "continue":
+        return row_cam if row_cam and not _is_generic_camera(row_cam) else CONTINUE_CAMERA
     if row_cam and not _is_generic_camera(row_cam):
         return row_cam
     if d.get("globalCamera"):
@@ -557,7 +652,8 @@ def diversify_outline_cameras(
     cams = [str(r.get("camera") or "").strip() for r in outline]
     if len(outline) > 1 and all(_is_generic_camera(c) for c in cams):
         return [
-            {**row, "camera": CAMERA_VARIETY[i % len(CAMERA_VARIETY)]}
+            {**row, "camera": CONTINUE_CAMERA if i and outline_link(row) == "continue"
+             else CAMERA_VARIETY[i % len(CAMERA_VARIETY)]}
             for i, row in enumerate(outline)
         ]
     if d.get("varyAngles") and len(outline) > 1:
@@ -566,6 +662,10 @@ def diversify_outline_cameras(
         for i, row in enumerate(outline):
             r = dict(row)
             cam = camera_for_outline_index(i, directives=d, row=r)
+            if i and outline_link(r) == "continue":
+                r["camera"] = cam
+                out.append(r)
+                continue
             if cam.lower() in seen:
                 cam = CAMERA_VARIETY[i % len(CAMERA_VARIETY)]
             seen.add(cam.lower())
@@ -631,6 +731,7 @@ def sync_shot_outline_from_shots(brief: dict[str, Any]) -> dict[str, Any]:
             body = str(s.get("h3Prompt") or "").strip()
             if body and not row.get("beat"):
                 row["beat"] = body[:160]
+            _copy_outline_plan(s, row)
         row["index"] = i + 1
         merged.append(row)
     if need:
@@ -2109,7 +2210,8 @@ def opening_message(lang: Any = None) -> str:
             "Look: realistic, anime, disney, game, 3D CGI, comic, illustration, oil paint, clay, found footage.\n"
             "Give duration + story + character/location; say when the idea is locked.\n"
             "The **Plan** tab lets you read and edit every shot.\n\n"
-            "What are we making? Look and total duration in seconds?"
+            "What are we making? A **long scene** (several shots with cuts and continuous pieces) "
+            "or a **single shot** (one video prompt)?"
         )
     return (
         "Merhaba — ben **H3 Yönetmen**. Chip’ten proje seç.\n\n"
@@ -2121,7 +2223,8 @@ def opening_message(lang: Any = None) -> str:
         "Tarz: gerçekçi, anime, disney, oyun, 3D CGI, çizgi roman, illüstrasyon, yağlı boya, kil, found footage.\n"
         "Süre + hikâye + karakter/lokasyon ver; “tamam / N shot / fikrimiz bu” de.\n"
         "**Plan** sekmesinde tüm shot metinlerini görüp düzenleyebilirsin.\n\n"
-        "Şimdi: ne üretiyoruz? Tarz ve toplam süre kaç sn?"
+        "Şimdi: ne üretiyoruz? **Uzun bir sahne** mi (kesme ve kesintisiz parçalardan birkaç shot), "
+        "yoksa **tek shot** mı (tek video promptu)?"
     )
 
 
@@ -2245,6 +2348,18 @@ def format_project_bible(brief: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _copy_outline_plan(src: dict[str, Any], item: dict[str, Any]) -> None:
+    link = outline_link(src)
+    if link:
+        item["link"] = link
+    section = str(src.get("sectionId") or src.get("section_id") or "").strip()
+    if section:
+        item["sectionId"] = section
+    end_frame = str(src.get("endFrame") or src.get("ending_frame") or "").strip()
+    if end_frame:
+        item["endFrame"] = end_frame
+
+
 def normalize_shot_outline(
     brief: dict[str, Any],
     *,
@@ -2261,18 +2376,18 @@ def normalize_shot_outline(
             if not isinstance(row, dict):
                 continue
             idx = int(row.get("index") or (i + 1))
-            out.append(
-                {
-                    "index": idx,
-                    "title": str(row.get("title") or f"Shot {idx}").strip(),
-                    "beat": str(
-                        row.get("beat") or row.get("action") or row.get("title") or ""
-                    ).strip(),
-                    "camera": str(
-                        row.get("camera") or DEFAULT_CAMERA
-                    ).strip(),
-                }
-            )
+            item = {
+                "index": idx,
+                "title": str(row.get("title") or f"Shot {idx}").strip(),
+                "beat": str(
+                    row.get("beat") or row.get("action") or row.get("title") or ""
+                ).strip(),
+                "camera": str(
+                    row.get("camera") or DEFAULT_CAMERA
+                ).strip(),
+            }
+            _copy_outline_plan(row, item)
+            out.append(item)
     elif shots:
         for i, s in enumerate(shots):
             if not isinstance(s, dict):
@@ -2282,14 +2397,14 @@ def normalize_shot_outline(
             # Skip empty placeholders — they are not a real outline
             if not action and len(prompt) < 80:
                 continue
-            out.append(
-                {
-                    "index": i + 1,
-                    "title": str(s.get("title") or action or f"Shot {i + 1}")[:80],
-                    "beat": action or (prompt[:160] if prompt else ""),
-                    "camera": str(s.get("camera") or DEFAULT_CAMERA).strip(),
-                }
-            )
+            item = {
+                "index": i + 1,
+                "title": str(s.get("title") or action or f"Shot {i + 1}")[:80],
+                "beat": action or (prompt[:160] if prompt else ""),
+                "camera": str(s.get("camera") or DEFAULT_CAMERA).strip(),
+            }
+            _copy_outline_plan(s, item)
+            out.append(item)
     if pad and need and len(out) < need:
         while len(out) < need:
             i = len(out) + 1
@@ -2308,6 +2423,8 @@ def normalize_shot_outline(
         out = out[:need]
     for i, row in enumerate(out):
         row["index"] = i + 1
+    if out and out[0].get("link") == "continue":
+        out[0]["link"] = "cut"
     return out
 
 
@@ -2440,8 +2557,9 @@ def outline_generation_user_prompt(brief: dict[str, Any]) -> str:
         f"{directives}"
         f"{scene_bit}"
         f"{role_bit}"
-        "Each outline row MUST have a **distinct** `camera` field (height, lens, movement). "
-        "Never copy the same camera line for every shot unless the user explicitly locked one angle.\n"
+        f"{SHOT_STRUCTURE_GUIDE}"
+        "Every row MUST have `link` (cut|continue), `sectionId` and `endFrame` (visible composition at the end). Row 1 is a cut. "
+        "Cut rows get a distinct `camera` (height, lens, movement); continue rows describe how the previous move keeps going.\n"
         "If USER CAMERA NOTES exist above, they override everything — bake them into each row's `camera`.\n"
         "Return ONLY JSON:\n"
         "{\n"
@@ -2453,7 +2571,8 @@ def outline_generation_user_prompt(brief: dict[str, Any]) -> str:
         '    "characters": [...],\n'
         '    "locations": [...],\n'
         '    "shotOutline": [\n'
-        '      {"index": 1, "title": "...", "beat": "...", "camera": "..."},\n'
+        '      {"index": 1, "title": "...", "beat": "...", "camera": "...", "link": "cut", "sectionId": "scene-1", "endFrame": "..."},\n'
+        '      {"index": 2, "title": "...", "beat": "...", "camera": "the push-in continues ...", "link": "continue", "sectionId": "scene-1", "endFrame": "..."},\n'
         f"      ... exactly {need} items\n"
         "    ],\n"
         '    "shots": []\n'
@@ -2474,7 +2593,8 @@ def single_shot_user_prompt(
 ) -> str:
     """FAZ B — write exactly one GOLD STANDARD h3Prompt."""
     dur = int(brief.get("clipDurationSec") or 5)
-    link = "standalone"
+    planned = outline_link(outline_row) if index else "cut"
+    link = "continue" if planned == "continue" else "standalone"
     title = (outline_row or {}).get("title") or f"Shot {index + 1}"
     beat = (outline_row or {}).get("beat") or title
     camera = camera_for_outline_index(index, directives=brief.get("directorDirectives"), row=outline_row)
@@ -2506,10 +2626,31 @@ def single_shot_user_prompt(
             "Assign sectionId such as scene-1. Keep the same sectionId and use linkToPrev=continue only when this shot starts at the exact final moment of the previous clip. A recurring character in a new location/action starts a new sectionId with linkToPrev=standalone.\n"
         )
     prev_snip = ""
+    prev_section = ""
     if prev_shot and isinstance(prev_shot, dict):
         prev_body = (prev_shot.get("h3Prompt") or "")[:900]
         prev_section = str(prev_shot.get("sectionId") or "scene-1")
         prev_snip = f"PREVIOUS SHOT (sectionId={prev_section}):\n{prev_body}\n"
+    row_section = str((outline_row or {}).get("sectionId") or "").strip()
+    end_frame = str((outline_row or {}).get("endFrame") or "").strip()
+    plan_rule = ""
+    if planned == "continue":
+        section = row_section or prev_section or "scene-1"
+        plan_rule = (
+            f"PLAN: this shot CONTINUES the previous shot (linkToPrev=continue, sectionId={section}). "
+            "Same camera setup, same location: the camera only keeps moving as described; no new angle, "
+            "no re-introduction of the place or wardrobe beyond the 'Same ...' line. "
+            "Begin exactly where the previous shot ended.\n"
+        )
+    elif planned == "cut" and index:
+        plan_rule = (
+            f"PLAN: this shot is a CUT (linkToPrev=standalone"
+            + (f", sectionId={row_section}" if row_section else "")
+            + "). New camera setup; do not start with 'Continue directly from the previous shot.'\n"
+        )
+    if end_frame:
+        plan_rule += f"End the shot on this composition: {end_frame}\n"
+    plan_rule += "One shot only: no cuts, cut-ins or montage inside this clip.\n"
     return (
         f"FAZ B — write ONLY shot {index + 1} of {need} "
         f"({dur} seconds, suggested linkToPrev={link}).\n"
@@ -2521,6 +2662,7 @@ def single_shot_user_prompt(
         f"OUTLINE for this shot: title={title!r} beat={beat!r} camera={camera!r}\n"
         f"MANDATORY: `camera` field AND a full paragraph starting with 'The camera:' MUST match {camera!r} exactly. "
         "User camera notes override outline defaults.\n"
+        f"{plan_rule}"
         f"{prev_snip}"
         "Return ONLY JSON: "
         '{"shot":{'

@@ -20,7 +20,8 @@ from lib.comfy import build_t2v_prompt
 class AccelerationSettingsTests(unittest.TestCase):
     def test_legacy_file_keeps_the_existing_default(self):
         self.assertEqual(h3_acceleration.clean_settings({'spectrum_enabled': True}),
-                         dict(spectrum_enabled=True, spectrum_preset='balanced', spectrum_blend_weight=0.5))
+                         dict(spectrum_enabled=True, spectrum_preset='balanced', spectrum_blend_weight=0.5,
+                              sparse_enabled=False))
 
     def test_presets_manual_values_and_toggle_preserve_each_other(self):
         settings = h3_acceleration.update_settings({}, {'spectrum_enabled': True, 'spectrum_preset': 'strong'})

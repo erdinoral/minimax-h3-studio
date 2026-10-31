@@ -76,7 +76,8 @@ test('Produce all queues both chapters; chapter production queues only its chapt
     },
     tt: String, tf: String, toast: x => errors.push(x),
     setProdLane: noop, refreshJobs: async () => {},
-    stopImageStudioQueuePoll: noop,
+    stopImageStudioQueuePoll: noop, waitForDraftLora: async () => {},
+    confirmCinemaLint: async () => true,
   };
   vm.createContext(context);
   const start = source.indexOf('  async function produceCinema(opts)');

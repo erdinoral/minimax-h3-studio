@@ -116,6 +116,17 @@ class DirectorMultiLoraTests(unittest.TestCase):
             self.select("turbo.safetensors")
         self.assertEqual(caught.exception.detail["code"], "lora.noCompatibleSelection")
 
+    def test_draft_turbo_uses_fl2v_and_swaps_to_ref2v_on_asset_shots(self):
+        ref2v = loras.find_spec(lora_id="lightx2v-ref2v-4step")["file"]
+        for draft_id in ("lightx2v-fl2v-4step-v12", "erosmax-beta1-fl2v-4step"):
+            draft = loras.find_spec(lora_id=draft_id)
+            body = SimpleNamespace(lora_name=draft["file"], lora_id="", lora_strength=None, lora_strengths={})
+            with patch.object(server, "spec_ready", return_value=True):
+                face, face_graph = server._lora_src_for_shot(body, {"hits": []}, "face")
+                new, new_graph = server._lora_src_for_shot(body, {"hits": []}, "t2v")
+            self.assertEqual((face_graph, face.lora_name), ("ref2va", ref2v))
+            self.assertEqual((new_graph, new.lora_name), ("fl2va", draft["file"]))
+
 
 if __name__ == "__main__":
     unittest.main()

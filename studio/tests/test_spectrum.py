@@ -64,6 +64,17 @@ class SpectrumTests(unittest.TestCase):
         node = next(n for n in graph.values() if n['class_type'] == 'SpectrumApplyMiniMaxH3')
         self.assertEqual(node['inputs']['model'], ['lora_stack_3', 0])
 
+    def test_sparse_attention_runs_before_spectrum(self):
+        with patch.object(Path, 'read_text', return_value='{"spectrum_enabled": true, "sparse_enabled": true}'):
+            graph = build_t2v_prompt(text='test')
+        sparse_key, sparse = next((k, n) for k, n in graph.items() if n['class_type'] == 'BlockSparseAttention')
+        spectrum_key, spectrum = next((k, n) for k, n in graph.items() if n['class_type'] == 'SpectrumApplyMiniMaxH3')
+        self.assertEqual(sparse['inputs']['selection'], 'sol-attn')
+        self.assertEqual(spectrum['inputs']['model'], [sparse_key, 0])
+        for node in graph.values():
+            if node['class_type'] in ('BasicGuider', 'BasicScheduler'):
+                self.assertEqual(node['inputs']['model'], [spectrum_key, 0])
+
     def test_other_models_and_incomplete_graphs_are_unchanged(self):
         for graph in ({}, {'6': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'wan.safetensors'}}},
                       {'6': {'class_type': 'UNETLoader', 'inputs': {'unet_name': 'minimax_h3.safetensors'}}}):

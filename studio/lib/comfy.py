@@ -557,10 +557,7 @@ def build_t2v_prompt(
         g["104"]["inputs"]["last_frame"] = ["201", 0]
     if fast_preview_tae:
         # Draft-only: bypass the expensive full video VAE. Never used for finals.
-        g["10"] = {
-            "class_type": "H3TAEDecode",
-            "inputs": {"samples": ["14", 0], "tae_name": fast_preview_tae},
-        }
+        _add_tae_decode(g, fast_preview_tae)
     return apply_image_post(
         apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),
         post_pass=post_pass,
@@ -576,6 +573,15 @@ def detect_multishot_pack(comfy_root: Optional[Path] = None) -> bool:
     """True when jlucasmcrell's Seamless Chain pack is on disk (Comfy must restart to load it)."""
     root = Path(comfy_root) if comfy_root else Path(__file__).resolve().parents[2] / "app"
     return (root / "custom_nodes" / MULTISHOT_PACK / "__init__.py").is_file()
+
+
+def _add_tae_decode(g: dict[str, Any], tae_name: str) -> None:
+    """H3TAEDecode needs the plain video latent; the H3 sampler emits a joint AV NestedTensor."""
+    g["10s"] = {"class_type": "LTXVSeparateAVLatent", "inputs": {"av_latent": ["14", 0]}}
+    g["10"] = {
+        "class_type": "H3TAEDecode",
+        "inputs": {"samples": ["10s", 0], "tae_name": tae_name},
+    }
 
 
 def detect_h3_tae(comfy_root: Optional[Path] = None) -> Optional[str]:
@@ -884,10 +890,7 @@ def build_ref2va_prompt(
             },
         }
     if fast_preview_tae:
-        g["10"] = {
-            "class_type": "H3TAEDecode",
-            "inputs": {"samples": ["14", 0], "tae_name": fast_preview_tae},
-        }
+        _add_tae_decode(g, fast_preview_tae)
     return apply_image_post(
         apply_sage_attention(apply_lora(g, lora_name, lora_strength), sage_attention),
         post_pass=post_pass,
@@ -1061,13 +1064,15 @@ def apply_sage_attention(
     *,
     comfy_root: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Sage remains disabled; independently apply opt-in Spectrum acceleration."""
+    """Sage remains disabled; independently apply opt-in Sol sparse attention, then Spectrum."""
     settings = h3_acceleration.load_settings()
+    if settings["sparse_enabled"]:
+        g = apply_sparse_attention(g)
     return apply_spectrum(g, blend_weight=settings["spectrum_blend_weight"]) if settings["spectrum_enabled"] else g
 
 
-def apply_spectrum(g: dict[str, Any], *, blend_weight: float = 0.5) -> dict[str, Any]:
-    """Add the reviewed Spectrum defaults after LoRAs, only to native H3 graphs."""
+def _insert_h3_model_patch(g: dict[str, Any], class_type: str, inputs: dict[str, Any]) -> dict[str, Any]:
+    """Insert a model patch before the sampler, only in native H3 graphs."""
     loaders = [n for n in g.values() if n.get("class_type") == "UNETLoader"]
     def is_h3_loader(node):
         filename = str(node.get("inputs", {}).get("unet_name", "")).replace("\\", "/").rsplit("/", 1)[-1]
@@ -1083,14 +1088,26 @@ def apply_spectrum(g: dict[str, Any], *, blend_weight: float = 0.5) -> dict[str,
     for n in g.values():
         if n.get("class_type") in ("BasicGuider", "BasicScheduler") and n.get("inputs", {}).get("model") == source:
             n["inputs"]["model"] = [node_id, 0]
-    g[node_id] = {
-        "class_type": "SpectrumApplyMiniMaxH3",
-        "inputs": {
-            "model": source, "enabled": True, "blend_weight": blend_weight,
-            "degree": 1, "ridge_lambda": 0.1, "window_size": 2.0,
-            "flex_window": 0.75, "warmup_steps": 1, "tail_actual_steps": 1,
-            "max_history": 8, "debug": False, "history_storage": "system_ram",
-            "audio_blend_weight": 0.0, "offline_smoothing_replay": True,
-        },
-    }
+    g[node_id] = {"class_type": class_type, "inputs": {"model": source, **inputs}}
     return g
+
+
+def apply_sparse_attention(g: dict[str, Any]) -> dict[str, Any]:
+    """ComfyUI core Sol-Attn block sparse attention with its node defaults."""
+    return _insert_h3_model_patch(g, "BlockSparseAttention", {
+        "selection": "sol-attn", "selection.tau": 1.3,
+        "start_percent": 0.2, "end_percent": 1.0, "dense_blocks": "",
+        "min_tokens": 12288, "extra_tokens": 256,
+        "sink_conditioning": "exact_kv_and_rows", "verbose": False,
+    })
+
+
+def apply_spectrum(g: dict[str, Any], *, blend_weight: float = 0.5) -> dict[str, Any]:
+    """Add the reviewed Spectrum defaults after LoRAs, only to native H3 graphs."""
+    return _insert_h3_model_patch(g, "SpectrumApplyMiniMaxH3", {
+        "enabled": True, "blend_weight": blend_weight,
+        "degree": 1, "ridge_lambda": 0.1, "window_size": 2.0,
+        "flex_window": 0.75, "warmup_steps": 1, "tail_actual_steps": 1,
+        "max_history": 8, "debug": False, "history_storage": "system_ram",
+        "audio_blend_weight": 0.0, "offline_smoothing_replay": True,
+    })

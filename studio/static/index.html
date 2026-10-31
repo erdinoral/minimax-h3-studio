@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=queue-save299" />
+  <link rel="stylesheet" href="/static/app.css?v=frame301" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -283,7 +283,7 @@
         <label><span id="ayar-steps-label">Adım</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
         <label id="ayar-speed-label">Hız</label>
         <div class="chips wrap" id="speed-chips" role="group" aria-label="Hız" data-i18n-aria-label="ui.speed-chips.aria-label">
-          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 12 step" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
+          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 4 step · Turbo LoRA" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
           <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step" data-i18n-title="ui.btn-speed-quick.title">Orta</button>
           <button type="button" class="chip" id="btn-speed-quality" data-speed="quality" data-i18n="ayar.qualityPreset" title="1088p · 20 steps">Kalite</button>
         </div>
@@ -733,6 +733,7 @@
           <button type="button" class="btn-ghost" id="btn-cinema-add-t2v" data-i18n="cinema.addT2v">+ Bölüm ekle</button>
           <button type="button" class="btn-ghost" id="btn-cinema-save">Kaydet</button>
           <span id="cinema-save-status" class="muted" role="status" aria-live="polite" data-i18n="cinema.saveHint">Değişiklikler otomatik kaydedilir</span>
+          <button type="button" class="btn-ghost" id="btn-cinema-redo-failed" data-i18n="cinema.redoFailed" data-i18n-title="cinema.redoFailedTitle" title="Bu filmde hata veren veya iptal edilen shot'ları aynı ayarlarla tekrar kuyruğa alır">Hatalıları yeniden üret</button>
           <button type="button" class="cta" id="btn-cinema-produce" data-i18n="cinema.produceAll" disabled>Tümünü üret</button>
         </div>
       </div>
@@ -1024,8 +1025,8 @@
             <textarea id="cinema-json-text" rows="14" spellcheck="false" placeholder='{ "schema": "h3-cinema/v1", "title": "...", "characters": [], "locations": [], "sections": [] }'></textarea>
           </label>
           <div class="row-btns">
-            <button type="button" class="btn-secondary" id="btn-cinema-json-template-seamless">Kesintisiz örnek</button>
-            <button type="button" class="btn-secondary" id="btn-cinema-json-template">Film örneği</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-json-template-seamless">Continuum örneği</button>
+            <button type="button" class="btn-secondary" id="btn-cinema-json-template">Karakter / mekan örneği</button>
             <button type="button" class="btn-secondary" id="btn-cinema-json-cancel">İptal</button>
             <button type="button" class="cta" id="btn-cinema-json-import">İçe aktar</button>
           </div>
@@ -1342,14 +1343,14 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=queue-save299" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=frame301" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
-  <script src="/static/app.js?v=queue-save299" charset="utf-8"></script>
+  <script src="/static/app.js?v=frame301" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>

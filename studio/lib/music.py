@@ -426,30 +426,196 @@ def _has_audio_stream(path: Path) -> bool:
 
 SEAM_DECLICK_SEC = 0.015
 
+# Per-clip dialogue level: every clip lands on the same integrated loudness.
+TARGET_LUFS = -16.0
+MAX_GAIN_DB = 12.0
+# Room tone / silent picture: boosting it only raises hiss.
+SILENT_LUFS = -50.0
+PEAK_CEIL_DBTP = -1.0
 
-def _seam_declick_args(src: Path) -> list[str]:
+# Grade drift between clips of one scene (8-bit YUV levels).
+COLOR_STRENGTH = 0.7
+COLOR_DEADZONE = 1.5
+COLOR_MAX_Y = 14.0
+COLOR_MAX_C = 8.0
+# Larger jumps are treated as an intentional cut to a new scene.
+COLOR_CUT_Y = 30.0
+COLOR_CUT_C = 12.0
+
+
+def _seam_declick_filter(src: Path) -> str:
     """Hard cuts between generated clips click when the waveform jumps; 15 ms fades
     at both ends remove it without audibly touching speech."""
     try:
         dur = probe_duration_sec(src)
     except Exception:
-        return []
+        return ""
     if dur <= SEAM_DECLICK_SEC * 4:
-        return []
+        return ""
     d = SEAM_DECLICK_SEC
-    return ["-af", f"afade=t=in:st=0:d={d},afade=t=out:st={dur - d:.3f}:d={d}"]
+    return f"afade=t=in:st=0:d={d},afade=t=out:st={dur - d:.3f}:d={d}"
 
 
-def _normalize_clip_keep_audio(src: Path, dest: Path) -> None:
+def _measure_loudness(path: Path) -> tuple[Optional[float], Optional[float]]:
+    """Integrated loudness (LUFS) and true peak (dBTP); None when silent/unreadable."""
+    cmd = [
+        _ffmpeg(),
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(path),
+        "-vn",
+        "-af",
+        f"loudnorm=I={TARGET_LUFS}:TP={PEAK_CEIL_DBTP}:LRA=11:print_format=json",
+        "-f",
+        "null",
+        "-",
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    blob = r.stderr or ""
+
+    def _num(key: str) -> Optional[float]:
+        m = re.search(rf'"{key}"\s*:\s*"(-?[\d.]+|-?inf)"', blob)
+        if not m or "inf" in m.group(1):
+            return None
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+
+    return _num("input_i"), _num("input_tp")
+
+
+def clip_gain_db(lufs: Optional[float], peak: Optional[float]) -> float:
+    if lufs is None or lufs < SILENT_LUFS:
+        return 0.0
+    gain = max(-MAX_GAIN_DB, min(MAX_GAIN_DB, TARGET_LUFS - lufs))
+    if peak is not None and gain > 0:
+        gain = min(gain, max(0.0, PEAK_CEIL_DBTP - peak))
+    return round(gain, 2) if abs(gain) >= 0.5 else 0.0
+
+
+def _measure_yuv_mean(path: Path) -> Optional[tuple[float, float, float]]:
+    """Average Y/U/V over ~2 fps of the clip, in 8-bit levels."""
+    cmd = [
+        _ffmpeg(),
+        "-hide_banner",
+        "-nostats",
+        "-i",
+        str(path),
+        "-an",
+        "-vf",
+        "fps=2,format=yuv420p,signalstats,metadata=mode=print",
+        "-f",
+        "null",
+        "-",
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    blob = r.stderr or ""
+    vals: dict[str, list[float]] = {"YAVG": [], "UAVG": [], "VAVG": []}
+    for key, num in re.findall(r"lavfi\.signalstats\.(YAVG|UAVG|VAVG)=(-?[\d.]+)", blob):
+        try:
+            vals[key].append(float(num))
+        except ValueError:
+            pass
+    if not all(vals.values()):
+        return None
+    return tuple(sum(v) / len(v) for v in (vals["YAVG"], vals["UAVG"], vals["VAVG"]))  # type: ignore[return-value]
+
+
+def plan_color_offsets(
+    means: list[Optional[tuple[float, float, float]]],
+) -> list[tuple[float, float, float]]:
+    """Pull each clip toward the first clip of its scene; reset on big jumps."""
+    out: list[tuple[float, float, float]] = []
+    anchor: Optional[tuple[float, float, float]] = None
+    prev: Optional[tuple[float, float, float]] = None
+    for m in means:
+        if m is None:
+            out.append((0.0, 0.0, 0.0))
+            anchor = None
+            prev = None
+            continue
+        cut = prev is None or (
+            abs(m[0] - prev[0]) > COLOR_CUT_Y
+            or abs(m[1] - prev[1]) > COLOR_CUT_C
+            or abs(m[2] - prev[2]) > COLOR_CUT_C
+        )
+        if cut or anchor is None:
+            anchor = m
+            out.append((0.0, 0.0, 0.0))
+            prev = m
+            continue
+        offs = []
+        for k, cap in ((0, COLOR_MAX_Y), (1, COLOR_MAX_C), (2, COLOR_MAX_C)):
+            d = (anchor[k] - m[k]) * COLOR_STRENGTH
+            if abs(d) < COLOR_DEADZONE:
+                d = 0.0
+            offs.append(round(max(-cap, min(cap, d)), 2))
+        out.append((offs[0], offs[1], offs[2]))
+        prev = m
+    return out
+
+
+def _color_offset_filter(off: Optional[tuple[float, float, float]]) -> str:
+    if not off or not any(off):
+        return ""
+    dy, du, dv = off
+    return (
+        "format=yuv420p,"
+        f"lutyuv=y='clip(val+{dy},0,255)':u='clip(val+{du},0,255)':v='clip(val+{dv},0,255)'"
+    )
+
+
+def _prepare_concat_clips(
+    video_paths: list[Path],
+    work: Path,
+    *,
+    level_audio: bool = True,
+    color_match: bool = True,
+    report: Optional[dict[str, Any]] = None,
+) -> list[Path]:
+    gains = [0.0] * len(video_paths)
+    if level_audio:
+        for i, p in enumerate(video_paths):
+            if _has_audio_stream(p):
+                gains[i] = clip_gain_db(*_measure_loudness(p))
+    offsets: list[tuple[float, float, float]] = [(0.0, 0.0, 0.0)] * len(video_paths)
+    if color_match and len(video_paths) > 1:
+        offsets = plan_color_offsets([_measure_yuv_mean(p) for p in video_paths])
+    normalized: list[Path] = []
+    for i, p in enumerate(video_paths):
+        dest = work / f"clip_{i:03d}.mp4"
+        _normalize_clip_keep_audio(p, dest, gain_db=gains[i], yuv_offset=offsets[i])
+        normalized.append(dest)
+    if report is not None:
+        report["audio_gain_db"] = gains
+        report["color_offsets"] = [list(o) for o in offsets]
+        report["audio_leveled"] = sum(1 for g in gains if g)
+        report["color_matched"] = sum(1 for o in offsets if any(o))
+    return normalized
+
+
+def _normalize_clip_keep_audio(
+    src: Path,
+    dest: Path,
+    *,
+    gain_db: float = 0.0,
+    yuv_offset: Optional[tuple[float, float, float]] = None,
+) -> None:
     """H264 + stereo AAC so concat/amix stay compatible. Silent clips get room tone."""
     dest.parent.mkdir(parents=True, exist_ok=True)
+    vf = _color_offset_filter(yuv_offset)
+    vf_args = ["-vf", vf] if vf else []
     if _has_audio_stream(src):
+        af = [x for x in (_seam_declick_filter(src), f"volume={gain_db}dB" if gain_db else "") if x]
         cmd = [
             _ffmpeg(),
             "-y",
             "-i",
             str(src),
-            *_seam_declick_args(src),
+            *vf_args,
+            *(["-af", ",".join(af)] if af else []),
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -476,6 +642,7 @@ def _normalize_clip_keep_audio(src: Path, dest: Path) -> None:
             "lavfi",
             "-i",
             "anullsrc=r=32000:cl=stereo",
+            *vf_args,
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -492,7 +659,14 @@ def _normalize_clip_keep_audio(src: Path, dest: Path) -> None:
         raise RuntimeError(f"klip normalize başarısız: {(r.stderr or '')[-600:]}")
 
 
-def concat_keep_audio(*, video_paths: list[Path], out_path: Path) -> Path:
+def concat_keep_audio(
+    *,
+    video_paths: list[Path],
+    out_path: Path,
+    level_audio: bool = True,
+    color_match: bool = True,
+    report: Optional[dict[str, Any]] = None,
+) -> Path:
     """Join clips in order, keep each clip's dialogue/SFX."""
     if not video_paths:
         raise ValueError("birleştirilecek video yok")
@@ -503,11 +677,9 @@ def concat_keep_audio(*, video_paths: list[Path], out_path: Path) -> Path:
     work = out_path.parent / f"_cinema_cat_{out_path.stem}"
     work.mkdir(parents=True, exist_ok=True)
     try:
-        normalized: list[Path] = []
-        for i, p in enumerate(video_paths):
-            dest = work / f"clip_{i:03d}.mp4"
-            _normalize_clip_keep_audio(p, dest)
-            normalized.append(dest)
+        normalized = _prepare_concat_clips(
+            video_paths, work, level_audio=level_audio, color_match=color_match, report=report
+        )
         list_file = work / "concat.txt"
         lines = []
         for p in normalized:
@@ -541,6 +713,9 @@ def concat_keep_audio_mix_score(
     audio_path: Path,
     out_path: Path,
     score_volume: float = 0.16,
+    level_audio: bool = True,
+    color_match: bool = True,
+    report: Optional[dict[str, Any]] = None,
 ) -> Path:
     """Concat clips keeping dialogue/SFX, then mix one film score underneath."""
     if not video_paths:
@@ -555,11 +730,9 @@ def concat_keep_audio_mix_score(
     work = out_path.parent / f"_cinema_mux_{out_path.stem}"
     work.mkdir(parents=True, exist_ok=True)
     try:
-        normalized: list[Path] = []
-        for i, p in enumerate(video_paths):
-            dest = work / f"clip_{i:03d}.mp4"
-            _normalize_clip_keep_audio(p, dest)
-            normalized.append(dest)
+        normalized = _prepare_concat_clips(
+            video_paths, work, level_audio=level_audio, color_match=color_match, report=report
+        )
 
         list_file = work / "concat.txt"
         lines = []

@@ -12,7 +12,26 @@ from urllib.parse import unquote, urlparse
 STUDIO_ROOT = Path(__file__).resolve().parent.parent
 LORAS_DIR = STUDIO_ROOT.parent / "app" / "models" / "loras"
 
-CATALOG: list[dict[str, Any]] = [{'id': 'lightx2v-hybrid-r48',
+CATALOG: list[dict[str, Any]] = [{
+  'id': 'erosmax-beta1-fl2v-4step',
+  'label': '10Eros Max beta1 Turbo (4 step · 768p)',
+  'file': 'minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors',
+  'steps': 4,
+  'sampler': 'er_sde',
+  'scheduler': 'simple',
+  'strength': 1.0,
+  'graphs': ['fl2va'],
+  'category': 'speed',
+  'hint': '4 steps · 768p source · beta1 compatibility build; other bases experimental',
+  'size_hint': '~1.82 GiB',
+  'expected_bytes': 1956194370,
+  'sha256': 'cba6e93a47da5fa4f70a3921c0fada66317113db864a71d5ff2cc58b112ceaf2',
+  'validated_unet': '10Eros_Max_h3_fl2va_beta1_pruned.safetensors',
+  'validated_unet_sha256': '315541d5dc82da7788091f82f30b67ea230491268fd31e7b148ac474f1d67eab',
+  'url': 'https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8/resolve/fcd42cc417a6490146331e851fa1ef7d62c12b72/minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors?download=true',
+  'preset': True,
+  'preserve_manual_steps': True,
+  'experimental': True}, {'id': 'lightx2v-hybrid-r48',
   'label': 'LightX2V Hybrid r48 (8 step)',
   'file': 'lightx2v_hybrid-4to8step-Turbo_r48.safetensors',
   'steps': 8,

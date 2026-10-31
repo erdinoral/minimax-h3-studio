@@ -42,3 +42,9 @@ class IndependentWeights(unittest.TestCase):
         names, weights=select(dict(mode="t2v",lora_name="ref.safetensors|actor.safetensors",lora_strength=.7,lora_strengths={"ref.safetensors":1.0,"actor.safetensors":0.0}))
         self.assertEqual(names,"actor.safetensors")
         self.assertEqual(weights,{"actor.safetensors":0.0})
+    def test_continuum_with_references_keeps_ref2va_lora(self):
+        lookup=lambda **kw: {"graphs":["ref2va"] if kw["file"]=="ref.safetensors" else ["fl2va"],"strength":0.8}
+        select=function_from("server.py","_lora_for_graph",dict(Optional=Optional,find_spec=lookup,is_still_lora=lambda s:False,slog=SimpleNamespace(info=lambda *a,**k:None)))
+        job=dict(mode="continuum",lora_name="ref.safetensors",lora_strength=.8)
+        self.assertEqual(select(dict(job,ref_images=["actor.png"]))[0],"ref.safetensors")
+        self.assertIsNone(select(job)[0])

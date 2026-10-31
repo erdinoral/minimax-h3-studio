@@ -32,6 +32,7 @@ function setup(initialSettings = {spectrum_enabled: false, spectrum_preset: 'bal
     setDuration: value => { values.duration = value; },
     setQuality: value => { values.quality = value; },
     applyCinemaSpeed: value => { values.cinemaSpeed = value; },
+    prepareDraftLora: value => { values.draftLora = value; },
     document: {querySelectorAll: () => []},
   };
   vm.createContext(context);
@@ -39,6 +40,7 @@ function setup(initialSettings = {spectrum_enabled: false, spectrum_preset: 'bal
   const saveStart = source.indexOf('  let h3AccelerationSaveQueue = Promise.resolve();');
   const saveEnd = source.indexOf('  const CHROME_FIT_KEY', saveStart);
   vm.runInContext(source.slice(saveStart, saveEnd), context);
+  context.prepareDraftLora = value => { values.draftLora = value; };
 
   const speedStart = source.indexOf('  function applySpeedProfile(kind) {');
   const speedEnd = source.indexOf('  $("btn-generate").onclick', speedStart);
@@ -53,7 +55,8 @@ test('Taslak enables the default 50% Spectrum setting without replacing its blen
   assert.equal(applied, true);
   assert.equal(values.duration, 5);
   assert.equal(values.quality, '480');
-  assert.equal(values.steps.value, '12');
+  assert.equal(values.steps.value, '4');
+  assert.equal(values.draftLora, 'draft');
   assert.deepEqual(requests, [
     {url: '/api/h3-acceleration', method: 'GET'},
     {
@@ -73,7 +76,7 @@ test('Taslak preserves a manually selected 75% Spectrum value', async () => {
   assert.equal(applied, true);
   assert.equal(values.duration, 5);
   assert.equal(values.quality, '480');
-  assert.equal(values.steps.value, '12');
+  assert.equal(values.steps.value, '4');
   assert.deepEqual(requests, [{url: '/api/h3-acceleration', method: 'GET'}]);
   assert.equal(initial.spectrum_blend_weight, 0.75);
 });

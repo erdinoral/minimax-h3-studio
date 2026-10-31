@@ -1,7 +1,15 @@
 {
   "_instructions": {
-    "DELETE_BEFORE_RETURN": "Read _user.scenes and _user.about. Write that many detailed sections (author fields only). Studio composes official H3 three-block prompts. Copy about into logline (English). Invent title. Then DELETE _instructions and _user. Return ONLY valid JSON.",
-    "SIL_SONRA_DON": "Insan sadece _user.scenes ve _user.about doldurdu. Sen gerisini yaz. N = clip sayisi (varsayilan 12). Alanlar INGILIZCE ve DETAYLI. Resmi H3 3 blok Studio birlestirir. Sonra _instructions ve _user sil.",
+    "DELETE_BEFORE_RETURN": "Read input_sources first: the brief may be in _user or in the chat message. Write that many detailed sections (author fields only). Set mode on every section per shot_structure (camera change = t2v, same shot rolling on = continue). Studio composes official H3 three-block prompts. Write logline in English. Invent title if none is given. Check final_checklist, then DELETE _instructions and _user. Return ONLY valid JSON.",
+    "SIL_SONRA_DON": "Konu ve senaryo _user icinde veya sohbet mesajinda olabilir; ikisini de oku, senaryo verildiyse ona sadik kal. N = clip sayisi (varsayilan 12). Her section'a mode yaz: kamera acisi degisiyorsa t2v (kesme), ayni plan suruyorsa continue. Mekan degisince t2v + yeni chapter. Alanlar INGILIZCE ve DETAYLI, diyalog istenen dilde. Sonra _instructions ve _user sil, sadece JSON don.",
+    "input_sources": {
+      "where_the_brief_comes_from": "The human gives the brief either in _user (scenes, about) or in the chat message that came with this file, often in Turkish. Use both. If they differ, the chat message wins.",
+      "scenario_given": "If the human describes a scenario or specific events, follow those events in that order and keep their names, places and lines. Only invent what they left open. Do not replace their plot with a different one.",
+      "topic_only": "If the human gives only a topic, invent the whole story from it.",
+      "scene_count": "Use the scene count the human gives (chat or _user.scenes). If the scenario does not fit, keep the count and compress or expand the events.",
+      "dialogue_language": "Dialogue stays in the language the human writes or asks for; set dialogue_lang to its code (tr, en, ...). Every other field is English.",
+      "no_questions": "Do not ask questions back. Deliver the finished JSON in one answer."
+    },
     "language": {
       "required": "English",
       "why": "MiniMax H3 still + video prompts must be English. Turkish/other languages in visual fields hurt quality.",
@@ -13,29 +21,32 @@
       ],
       "dialogue_exception": "dialogue may stay in the spoken story language (set dialogue_lang: tr|en|ar|…). Everything else = English."
     },
-    "what_this_is": "Text-only Film / face-lock package for MiniMax H3 Studio. Human writes clip count + topic only. You write the film. Studio later makes stills + per-clip video (t2v / continue). Studio composes official H3: integrated_multimodal_description / overall_soundscape / non_diegetic_music. No images or URLs from you.",
+    "what_this_is": "Text-only Character / location (face-lock) package for MiniMax H3 Studio. Human writes clip count + topic only. You write the film. Studio later makes stills + per-clip video (t2v / continue). Studio composes official H3: integrated_multimodal_description / overall_soundscape / non_diegetic_music. No images or URLs from you.",
     "defaults": {
       "duration_seconds_per_clip": 5,
       "sections_count": "EQUALS _user.scenes (default 12). Add/remove section objects to match.",
       "total_runtime": "12 clips x 5s = 60s (1 minute). Keep exactly 12 sections unless the user asks otherwise. 3 acts = 36 sections (3 x 12).",
+      "per_section_duration": "Optional integer key duration (4-15 seconds) on a section that needs a longer or shorter clip. Omit it to use the Studio duration.",
+      "chapters": "Optional key chapter on every section (e.g. Part 1, Part 2). A continue chain never crosses a chapter boundary, so start each chapter with a t2v section and keep the same chapter name on all its sections.",
       "production_settings": "Style, preset, duration, quality, steps and LoRA are selected in Studio and are never part of this JSON."
     },
     "mode_field": {
-      "t2v": "NEW video — fresh clip (text-to-video / new beat). Use for shot 1 and for hard cuts (new location, time jump, different cast with no overlap).",
-      "continue": "CONTINUE from previous clip last frame (chain). Use when the same beat continues in the same space with overlapping cast.",
+      "t2v": "NEW video — fresh clip (text-to-video / new beat). Use for shot 1 and for every cut: a new camera angle or framing, a new location, a time jump, or a different cast with no overlap.",
+      "continue": "CONTINUE the previous clip seamlessly (Continuum chain: motion tail + the same character/location references). Use when the same beat continues in the same location with overlapping cast. A chain runs from a t2v section through the following continue sections and ends at the next t2v section or chapter change.",
       "aliases_also_ok": [
         "continue",
         "devam",
         "i2v",
         "last_frame"
       ],
-      "default_in_this_template": "section[0]=t2v, sections[1..11]=continue for one continuous minute. Change a later section to t2v for a hard cut."
+      "default_in_this_template": "Placeholder modes follow shot_structure.rhythm (t2v, then 1-3 continue, then a new t2v). Set every section's mode from the shots you write.",
+      "continue_rules": "A continue section stays in the same location as the previous section, and its opening_frame should match the previous ending_frame."
     },
     "how_pipeline_works": [
-      "1) Read _user.scenes and _user.about only. Invent the rest. Visual fields ENGLISH.",
-      "2) Write exactly that many detailed author-field sections. First t2v; later continue unless hard cut.",
+      "1) Read input_sources: brief from _user and/or the chat message. Invent only what is missing. Visual fields ENGLISH.",
+      "2) Write exactly that many detailed author-field sections. Follow shot_structure: every camera change or new location is t2v; the same shot rolling on is continue.",
       "3) User imports. Studio composes the official 3-block H3 prompt per clip. Nothing generates yet.",
-      "4) User clicks Produce: character/location stills, then scene videos.",
+      "4) User clicks Produce: stills for cards without images, then scene videos. Each t2v section starts fresh with face lock; following continue sections render as one Continuum chain until the next t2v section or chapter change.",
       "5) No portraits/urls/base64 from you. No integrated_multimodal_description key in the JSON."
     ],
     "field_guide": {
@@ -45,22 +56,22 @@
       "action": "ENGLISH. THIS 5s clip only. 2-5 present-tense visible sentences: body, hands, eyes, props, weather, light. Not a theme. Not one verb.",
       "dialogue": "Spoken lines in THIS clip only. Empty if silent. May stay in the story language; set dialogue_lang. Do not force a language unless the story needs it.",
       "dialogue_lang": "auto | tr | en | ar | … — language of dialogue; auto keeps text as written.",
-      "camera": "ENGLISH. Shot size + height + move. Vary across clips. Not the same line copied 12 times.",
+      "camera": "ENGLISH. On t2v: shot size + height + lens feel + move. On continue: how the SAME shot keeps moving; no new angle. Angles vary only across t2v cuts.",
       "visual_style": "ENGLISH. Look for THIS clip if it differs from setup; else leave empty to inherit.",
       "audio": "ENGLISH. Diegetic only. Becomes overall_soundscape. No BGM.",
       "music": "N/A unless the user asked for score. Becomes non_diegetic_music.",
       "important": "Must-lock details (costume, prop, continuity). Keep short.",
       "reference_subjects": "Exact subject names and reference roles.",
       "reference_environment": "Exact location name and reference role.",
-      "opening_frame": "Visible composition at the beginning of this clip.",
-      "ending_frame": "Visible composition at the end of this clip.",
+      "opening_frame": "Visible composition at the beginning of this clip. On continue it equals the previous ending_frame.",
+      "ending_frame": "Visible composition at the end of this clip; the next continue section starts from it.",
       "camera_framing": "Shot size.",
       "camera_angle": "Camera height and viewpoint.",
       "camera_movement": "Choose static, push in, pull out, zoom in, zoom out, pan left, pan right, tilt up, tilt down, truck left, truck right, pedestal up, pedestal down, arc or tracking.",
       "camera_amplitude": "small, large, or empty for normal.",
       "camera_speed": "slow, fast, or empty for normal.",
       "camera_target": "Subject toward which the camera moves.",
-      "transition": "hard cut, reverse angle, or continuous.",
+      "transition": "hard cut or reverse angle on t2v; continuous on continue.",
       "beats": "Timed visible beats at 0s, 2s and 4s; consistent with action."
     },
     "strict_section_contract": {
@@ -80,11 +91,13 @@
       "asset_binding": [
         "location MUST be the exact name of one entry in locations[].name whenever a named place is visible. Example: location: Alex's Attic Apartment.",
         "character MUST be the exact name of one or more entries in characters[].name whenever a named person is visible. Multiple people: Alex, Maya.",
+        "Visible creatures and vehicles also go in character with their exact creatures[].name / vehicles[].name. Example: Kael, IRON REQUIEM, THRESHER.",
+        "List at most 8 named assets in one section; each section receives at most 9 reference images in total.",
         "Do not leave location or character blank when a named place/person appears. Empty character is allowed only for a true no-character establishing shot.",
         "Repeat the exact same spelling in every section. Do not use pronouns, roles, shortened names, or descriptions as a substitute for the card name."
       ],
       "canonical_section_example": {
-        "mode": "continue",
+        "mode": "t2v",
         "title": "Alex finds the mirror",
         "location": "Alex's Attic Apartment",
         "character": "Alex",
@@ -92,6 +105,8 @@
         "dialogue": "",
         "dialogue_lang": "auto",
         "camera": "Medium close-up at eye level, slow dolly forward toward Alex and the mirror.",
+        "opening_frame": "Medium shot at eye level: Alex in the attic doorway, the dusty mirror on the right.",
+        "ending_frame": "Medium close-up: Alex's gloved hand raised toward the mirror, his reflection a beat behind.",
         "visual_style": "",
         "audio": "Quiet attic room tone, floorboard creak, a faint glass hum.",
         "music": "N/A",
@@ -108,10 +123,11 @@
     "cast_guide": {
       "characters": "name + ENGLISH notes ONLY (appearance, age, wardrobe — this is the still prompt). Optional English voice tag. trigger = same as name. Leave lora_id empty. Do NOT add image/url fields.",
       "locations": "name + ENGLISH notes (architecture, time of day, weather). Notes become the location still prompt.",
-      "creatures": "name + ENGLISH notes (anatomy, scale, color). Notes become the creature still prompt. No voice/lora."
+      "creatures": "name + ENGLISH notes (anatomy, scale, color). Notes become the creature still prompt. No voice/lora. For giants, state scale against the setting (e.g. skyscrapers reach its hips) and keep small objects out of the foreground of their shots so the giant does not read as a toy.",
+      "vehicles": "name + ENGLISH notes (shape, size, materials, markings). Notes become the vehicle still prompt. Name vehicles in section character like a cast member."
     },
     "rules": [
-      "Human input is ONLY _user.scenes + _user.about. Do not ask more questions.",
+      "The brief comes from _user and/or the chat message (see input_sources). Do not ask more questions.",
       "Write ALL visual fields in English. Dialogue may stay in the spoken language.",
       "Keep schema h3-cinema/v1. sections.length = _user.scenes (default 12).",
       "Fill author fields in DETAIL. Follow strict_section_contract exactly: every relevant section must explicitly bind its character and location. Studio composes the official 3-block H3 prompt; production settings stay in the Studio UI.",
@@ -121,8 +137,8 @@
       "DELETE _instructions and _user before final output."
     ],
     "human_writes_only": {
-      "scenes": "Integer = how many 5s clips. Default 12 (one minute). 5 = 5 clips. First clip t2v, later continue unless a hard cut.",
-      "about": "One paragraph: what the film is about. Turkish OK here; YOU translate the film into English fields. Dialogue may stay in the story language."
+      "scenes": "Integer = how many 5s clips. Default 12 (one minute). Modes follow shot_structure.",
+      "about": "Topic or full scenario, in _user.about or in the chat message. Turkish OK; YOU write the visual fields in English. Dialogue stays in the story language."
     },
     "h3_prompt_format": {
       "do_not_write_the_three_blocks": "Studio composes the official H3 prompt from author fields. Do NOT output integrated_multimodal_description / overall_soundscape / non_diegetic_music yourself. Do NOT paste those keys into action.",
@@ -133,11 +149,52 @@
       ],
       "quality": "Author fields must be DETAILED so the composed prompt is rich. Short generic beats (he walks, she looks) are rejected. Each action = 2-5 present-tense visible sentences for THIS beat only: body, hands, eyes, weather, props, light. Camera = size + lens feel + move + height (not just close-up). audio = diegetic room/Foley only. music = N/A unless the user asked for score."
     },
-    "editor_fields": "Fill the advanced reference, opening/ending frame, camera, transition and beats fields when applicable so the scene editor can display them; do not put them only inside action or camera prose."
+    "editor_fields": "Fill the advanced reference, opening/ending frame, camera, transition and beats fields when applicable so the scene editor can display them; do not put them only inside action or camera prose.",
+    "shot_structure": {
+      "principle": "mode t2v = a CUT: a new camera setup (new angle or framing, new location, or a time jump). mode continue = the SAME shot still rolling: the camera may keep moving (push-in, follow, orbit, crane) but never jumps to a new framing or angle.",
+      "rhythm": "Build the film from short unbroken pieces: one t2v section followed by 1-3 continue sections (10-20 s without a cut), then cut with the next t2v. Camera variety comes from the cuts, never from continue sections. A single t2v section without continues is fine for a quick insert.",
+      "location_change": "A new location or time jump is ALWAYS t2v and starts a new chapter.",
+      "continue_rules": [
+        "opening_frame = the previous section's ending_frame (same framing, same positions).",
+        "camera describes how the SAME shot keeps going (e.g. 'the slow push-in continues over his shoulder until the monitor fills the frame'); no new shot size, angle or lens.",
+        "action covers only the next seconds; do not re-describe the location, the wardrobe or who the character is.",
+        "location stays the same as the previous section."
+      ],
+      "one_shot_per_section": "Each section is ONE shot. Never write 'cut to', 'cut-in', 'montage', 'multi-angle' or 'then a close-up of ...' inside a section; make it a new t2v section instead. One section (5 s) holds one or two visible actions.",
+      "mode_required": "Write mode (t2v or continue) on EVERY section; Studio does not guess it.",
+      "example": [
+        {
+          "mode": "t2v",
+          "camera": "Wide shot from behind his left shoulder, slow push-in toward the monitor.",
+          "ending_frame": "Over-the-shoulder medium shot, monitor glowing ahead of him."
+        },
+        {
+          "mode": "continue",
+          "camera": "The push-in continues over his shoulder until his hands and the boss health bar fill the frame.",
+          "opening_frame": "Over-the-shoulder medium shot, monitor glowing ahead of him."
+        },
+        {
+          "mode": "t2v",
+          "camera": "Cut to a side medium shot at desk height, static, as the screen freezes.",
+          "ending_frame": "Side medium shot, his hands lifted off the keyboard."
+        }
+      ]
+    },
+    "final_checklist": [
+      "Every section has mode t2v or continue. A camera angle change, new location or time jump is t2v.",
+      "Every continue section: same location as the previous section, opening_frame equals the previous ending_frame, camera describes the same shot still moving, action does not re-describe the place or character.",
+      "No section contains 'cut to', 'cut-in', 'montage' or several shots.",
+      "Every section has opening_frame and ending_frame filled.",
+      "sections.length equals the scene count; a new location starts a new chapter with a t2v section.",
+      "character and location use exact card names, spelled the same everywhere.",
+      "The story follows the human's scenario and scene count.",
+      "All visual fields are English; dialogue_lang matches the dialogue.",
+      "_instructions and _user are deleted; the answer is only valid JSON."
+    ]
   },
   "_user": {
-    "READ_ME_HUMAN": "Fill ONLY scenes + about. Then send this WHOLE file to an AI. Do not edit other fields.",
-    "READ_ME_AI": "The human filled only _user.scenes and _user.about. Invent names, cast notes, locations, and every beat from that. Follow _instructions.strict_section_contract exactly. Do not ask questions. Do not leave action/camera/audio blank, and explicitly fill character + location on every relevant section.",
+    "READ_ME_HUMAN": "Fill scenes + about here, or just write the scene count, topic and scenario in your chat message. Then send this WHOLE file to an AI.",
+    "READ_ME_AI": "The brief is in _user and/or the chat message (see _instructions.input_sources). Follow the human's scenario; invent only what is missing. Follow strict_section_contract and shot_structure exactly. Do not ask questions. Do not leave action/camera/audio blank, and explicitly fill character + location on every relevant section.",
     "scenes": 12,
     "about": ""
   },
@@ -248,7 +305,7 @@
       "beats": ""
     },
     {
-      "mode": "continue",
+      "mode": "t2v",
       "title": "",
       "location": "",
       "character": "",
@@ -326,7 +383,7 @@
       "beats": ""
     },
     {
-      "mode": "continue",
+      "mode": "t2v",
       "title": "",
       "location": "",
       "character": "",
@@ -404,7 +461,7 @@
       "beats": ""
     },
     {
-      "mode": "continue",
+      "mode": "t2v",
       "title": "",
       "location": "",
       "character": "",

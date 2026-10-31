@@ -50,13 +50,21 @@ test('invalid manual input is rejected before saving', async () => {
 test('toggle and preset controls send partial updates without resetting manual fields', async () => {
   const s = await setup();
   s.reply({...s.initial, spectrum_enabled:true});
-  await s.panel.onchange({target:{checked:true, matches:selector => selector === '[data-acceleration]'}});
+  await s.panel.onchange({target:{checked:true, dataset:{acceleration:'spectrum'}, matches:selector => selector === '[data-acceleration]'}});
   assert.deepEqual(s.requests[0], {spectrum_enabled:true});
   s.reply({...s.initial, spectrum_enabled:true, spectrum_preset:'strong', spectrum_blend_weight:0.75});
   s.panel.onclick({target:{closest:() => ({disabled:false, dataset:{spectrumPreset:'strong'}})}});
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(s.requests[1], {spectrum_preset:'strong'});
   assert.match(s.panel.innerHTML, /data-spectrum-preset="strong" aria-pressed="true"/);
+});
+
+test('Sol-Attn toggle sends only its own setting', async () => {
+  const s = await setup();
+  s.reply({...s.initial, sparse_enabled:true});
+  await s.panel.onchange({target:{checked:true, dataset:{acceleration:'sparse'}, matches:selector => selector === '[data-acceleration]'}});
+  assert.deepEqual(s.requests[0], {sparse_enabled:true});
+  assert.match(s.panel.innerHTML, /id="h3-sparse-enabled" data-acceleration="sparse" checked/);
 });
 
 test('failed save restores the confirmed selection', async () => {

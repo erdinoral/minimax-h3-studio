@@ -731,11 +731,18 @@ def _clean_structured(raw: Any) -> dict[str, str]:
     return out
 
 
+_DIALOGUE_LANG_CODES = {
+    "tr": "Turkish", "en": "English", "ar": "Arabic", "ru": "Russian", "ja": "Japanese",
+    "zh": "Chinese", "ko": "Korean", "de": "German", "fr": "French", "es": "Spanish",
+    "it": "Italian", "pt": "Portuguese", "nl": "Dutch", "pl": "Polish", "hi": "Hindi",
+}
+
+
 def _dialogue_lang_label(structured: dict[str, str]) -> str:
     """H3 <d>[Language] tag — never invent Arabic; preserve user choice / light auto."""
     explicit = (structured.get("dialogue_lang") or "").strip()
     if explicit and explicit.lower() not in ("auto", ""):
-        return explicit
+        return _DIALOGUE_LANG_CODES.get(explicit.lower(), explicit)
     dialogue = structured.get("dialogue") or ""
     if re.search(r"[\u0600-\u06FF]", dialogue):
         return "Arabic"
@@ -1770,7 +1777,8 @@ def film_audio_preamble(audio: Optional[dict[str, Any]] = None) -> str:
     # Never put a sample <d>…</d> here — H3 speaks tag contents, so a
     # placeholder word like "line" becomes the first audible word in the clip.
     return (
-        f"Only tagged spoken words are audible. Language for those tags is {lang}. "
+        f"Only tagged spoken words are audible. Speak each tag in the language named at its start; "
+        f"tags without a language are in {lang}. "
         "Do not speak instructions, tag names, language names, or placeholders. "
         "The same named person must sound identical in every shot. "
         "No background music and no original score — underscore is mixed later."
@@ -2045,6 +2053,75 @@ def bound_vehicle_stills(text: str, lib: Optional[dict[str, Any]] = None) -> lis
     return files
 
 
+def storyboard_frame_refs(
+    text: str, lib: Optional[dict[str, Any]] = None, limit: int = 3
+) -> list[dict[str, str]]:
+    """One still per named card for a storyboard frame: cast first, then craft, then the set."""
+    order = {"character": 0, "creature": 1, "vehicle": 2, "location": 3}
+    hits = sorted(match_prompt(text, lib), key=lambda h: order.get(str(h.get("kind") or ""), 9))
+    out: list[dict[str, str]] = []
+    for hit in hits:
+        kind = str(hit.get("kind") or "")
+        if kind == "character" and uses_lora(hit):
+            continue
+        files = character_portrait_files(hit) if kind != "location" else [
+            str((im.get("file") if isinstance(im, dict) else im) or "").strip()
+            for im in hit.get("images") or []
+        ]
+        file = next((f for f in files if f), "")
+        if not file:
+            continue
+        out.append({"file": file, "name": str(hit.get("name") or ""), "kind": kind})
+        if len(out) >= limit:
+            break
+    return out
+
+
+_FRAME_STRIP = re.compile(r"<\s*(?:Picture|Video)\s*\d+\s*>|\[\s*Shot\s*\d+\s*\]", re.I)
+
+
+def storyboard_frame_prompt(
+    shot: dict[str, Any], refs: list[dict[str, str]], style_line: str = ""
+) -> str:
+    """Qwen prompt for the opening frame of a shot (no dialogue, no sheet layout)."""
+    st = shot.get("structured") if isinstance(shot.get("structured"), dict) else {}
+    pick = lambda k: _FRAME_STRIP.sub("", str(st.get(k) or "")).strip()
+    moment = pick("opening_frame") or pick("action")
+    if not moment:
+        raw = _FRAME_STRIP.sub("", str(shot.get("text") or ""))
+        moment = " ".join(
+            ln.strip() for ln in raw.splitlines()
+            if ln.strip() and not re.match(r"^\s*(dialogue|audio|music|sound)\s*:", ln, re.I)
+        )[:1200]
+    camera = ", ".join(x for x in (pick("camera_framing"), pick("camera_angle"), pick("camera")) if x)
+    lines = ["Cinematic film still: one single frame from a movie, the opening moment of this shot."]
+    if style_line:
+        lines.append(style_line)
+    for label, value in (("Location", pick("location")), ("Characters", pick("character")),
+                         ("Moment", moment), ("Camera", camera), ("Look", pick("visual_style"))):
+        if value:
+            lines.append(f"{label}: {value}")
+    roles = {
+        "character": "keep the exact face, hair, body and costume of this person",
+        "creature": "keep the exact anatomy, colors and markings of this creature",
+        "vehicle": "keep the exact design, shape and paint of this vehicle",
+        "location": "use this place as the set, same architecture and materials",
+    }
+    for i, ref in enumerate(refs, start=1):
+        lines.append(f"Picture {i} is {ref['name']}: {roles.get(ref['kind'], 'visual reference')}.")
+    lines.append(
+        "Natural film composition with depth, one continuous image. "
+        "No text, no subtitles, no collage, no panels, no split screen, no character sheet layout."
+    )
+    return "\n".join(lines)
+
+
+STORYBOARD_FRAME_NEGATIVE = (
+    "collage, split screen, multiple panels, character sheet, turnaround, multiple views, "
+    "text, subtitles, watermark, logo, frame border, deformed hands, extra limbs, blurry"
+)
+
+
 def characters_missing_stills(lib: Optional[dict[str, Any]] = None) -> list[str]:
     """Character names with no uploaded stills (face lock weaker without them)."""
     lib = lib or load()
@@ -2058,6 +2135,111 @@ def characters_missing_stills(lib: Optional[dict[str, Any]] = None) -> list[str]
         if not character_portrait_files(ch):
             missing.append(name)
     return missing
+
+
+_LINT_D_BLOCK = re.compile(r"<d>(.*?)</d>", re.I | re.S)
+_LINT_LANG_TAG = re.compile(r"^\s*\[([^\]]{1,24})\]\s*")
+_LINT_WORDS_PER_SEC = 2.7
+_LINT_MIN_TEXT = 25
+
+
+def _lint_lang_key(label: str) -> str:
+    return re.sub(r"[^a-z]", "", (label or "").casefold())[:2]
+
+
+def lint_shots(
+    shots: list[dict[str, Any]],
+    lib: Optional[dict[str, Any]] = None,
+    *,
+    duration: float = 5.0,
+) -> dict[str, Any]:
+    """Pre-production prompt check. Issues carry a code + params; the UI words them."""
+    lib = lib or load()
+    audio = _clean_audio(lib.get("audio"))
+    silent = audio.get("mode") == "silent"
+    voice_key = _lint_lang_key(audio.get("voice_lang") or "English")
+    dur = max(1.0, float(duration or 5))
+    word_cap = int(round(dur * _LINT_WORDS_PER_SEC))
+    full_ids = [str(s.get("id") or "") for s in (lib.get("shots") or []) if isinstance(s, dict)]
+    first_text_id = next(
+        (str(s.get("id") or "") for s in (lib.get("shots") or [])
+         if isinstance(s, dict) and str(s.get("text") or "").strip() and s.get("enabled", True)),
+        "",
+    )
+    char_names = [
+        str(c.get("name") or "").strip()
+        for c in (lib.get("characters") or [])
+        if isinstance(c, dict) and str(c.get("name") or "").strip()
+    ]
+    issues: list[dict[str, Any]] = []
+    stills_flagged: set[str] = set()
+
+    def add(level: str, code: str, idx: int, sid: str, **params: Any) -> None:
+        issues.append({"level": level, "code": code, "index": idx, "shot_id": sid, "params": params})
+
+    for pos, shot in enumerate(shots or []):
+        if not isinstance(shot, dict):
+            continue
+        text = str(shot.get("text") or "").strip()
+        sid = str(shot.get("id") or "")
+        idx = (full_ids.index(sid) + 1) if sid and sid in full_ids else pos + 1
+        if not text:
+            add("warn", "empty", idx, sid)
+            continue
+        opens = len(re.findall(r"<d>", text, re.I))
+        closes = len(re.findall(r"</d>", text, re.I))
+        if opens != closes:
+            add("error", "unclosed_d", idx, sid, open=opens, close=closes)
+        blocks = _LINT_D_BLOCK.findall(text)
+        spoken_words = 0
+        structured = shot.get("structured") if isinstance(shot.get("structured"), dict) else {}
+        chosen_lang = str(structured.get("dialogue_lang") or "").strip().lower()
+        lang_chosen = chosen_lang not in ("", "auto")
+        for block in blocks:
+            tag = _LINT_LANG_TAG.match(block)
+            line = block[tag.end():] if tag else block
+            if (tag and not silent and not lang_chosen and voice_key
+                    and _lint_lang_key(tag.group(1)) != voice_key):
+                add("warn", "lang_mismatch", idx, sid, tag=tag.group(1), lang=audio.get("voice_lang"))
+            head = line.lstrip()
+            for name in char_names:
+                first = name.split()[0]
+                if re.match(rf"(?:{re.escape(name)}|{re.escape(first)})\s*(?:\(S\d\))?\s*:", head, re.I):
+                    add("warn", "name_in_dialogue", idx, sid, name=name)
+                    break
+            spoken_words += len(re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)?", line))
+        if blocks and silent:
+            add("warn", "silent_dialogue", idx, sid)
+        if spoken_words > word_cap:
+            add("warn", "dialogue_long", idx, sid, words=spoken_words, max=word_cap, seconds=int(dur))
+        plain = _LINT_D_BLOCK.sub(" ", text)
+        if len(plain.strip()) < _LINT_MIN_TEXT:
+            add("warn", "short_prompt", idx, sid, chars=len(plain.strip()))
+        if str(shot.get("mode") or "") == "continue" and sid and sid == first_text_id:
+            add("warn", "continue_first", idx, sid)
+        bindings = shot.get("bindings")
+        cast_field = {
+            n.strip().casefold()
+            for n in str((shot.get("structured") or {}).get("character") or "").split(",")
+            if n.strip()
+        }
+        for hit in match_prompt(text, lib):
+            if hit.get("kind") != "character":
+                continue
+            name = str(hit.get("name") or "").strip()
+            # An explicit selection drops every unselected actor from refs and the cast lock.
+            if (bindings is not None and name
+                    and hit.get("id") not in {b.get("asset_id") for b in bindings if isinstance(b, dict)}
+                    and name.casefold() not in cast_field):
+                add("warn", "cast_unbound", idx, sid, name=name)
+            if uses_lora(hit):
+                continue
+            if name and name not in stills_flagged and not character_portrait_files(hit):
+                stills_flagged.add(name)
+                add("info", "no_still", idx, sid, name=name)
+
+    counts = {lvl: sum(1 for i in issues if i["level"] == lvl) for lvl in ("error", "warn", "info")}
+    return {"ok": counts["error"] == 0, "issues": issues, "counts": counts, "checked": len(shots or [])}
 
 
 def _clean_film_plan(raw: Any) -> dict[str, Any]:
@@ -2455,7 +2637,11 @@ def extract_take_blocks(payload: Any) -> list[dict[str, Any]] | None:
             title = str(
                 block.get("title") or block.get("name") or block.get("scene") or f"Sahne {i}"
             ).strip() or f"Sahne {i}"
-            blocks.append({"title": title, "sections": secs})
+            blocks.append({
+                "title": title,
+                "sections": secs,
+                "chapter": str(block.get("chapter") or "").strip(),
+            })
         if blocks:
             return blocks
     return None
@@ -2558,6 +2744,8 @@ def _shots_from_take_blocks(
             for item in part:
                 shot = _shot_from_section(item, idx, look_id=look_id)
                 _stamp_take(shot, take_index=take_n, take_title=title, take_id=take_id)
+                if block.get("chapter") and not shot.get("chapter"):
+                    shot["chapter"] = block["chapter"]
                 if shot.get("text") or shot.get("structured"):
                     shots.append(shot)
                     idx += 1
@@ -2757,6 +2945,13 @@ def _section_from_shot(shot: Any) -> dict[str, Any]:
     section_id = str(shot.get("section_id") or shot.get("sectionId") or "").strip()
     if section_id:
         row["id"] = section_id
+    chapter = str(shot.get("chapter") or "").strip()
+    if chapter:
+        row["chapter"] = chapter
+    if shot.get("take_index") not in (None, "", 0):
+        row["take_index"] = shot.get("take_index")
+        if shot.get("take_title"):
+            row["take_title"] = shot.get("take_title")
     duration = shot.get("durationSec") or shot.get("duration")
     if duration not in (None, ""):
         try:
@@ -2889,6 +3084,7 @@ def _append_shots_fill_tail(
         if base:
             ch = str(base[-1].get("chapter") or "").strip()
         ch = ch or "Bölüm 1"
+    first_has_chapter = bool(str(fresh[0].get("chapter") or "").strip())
     for row in fresh:
         if not str(row.get("chapter") or "").strip():
             row["chapter"] = ch
@@ -2898,7 +3094,8 @@ def _append_shots_fill_tail(
         first = fresh[0]
         if keep_id:
             first["id"] = keep_id
-        first["chapter"] = keep_ch
+        if not first_has_chapter:
+            first["chapter"] = keep_ch
         if "enabled" in base[-1]:
             first["enabled"] = base[-1].get("enabled") is not False
         base[-1] = first
@@ -2957,6 +3154,9 @@ def _shot_from_section(item: Any, index: int, look_id: str = "") -> dict[str, An
     for key in ("take_index", "take_title", "take_id"):
         if item.get(key) not in (None, ""):
             payload[key] = item.get(key)
+    chapter = str(item.get("chapter") or "").strip()
+    if chapter:
+        payload["chapter"] = chapter
     return _clean_shot(payload, index, look_id=look_id)
 
 
@@ -3116,6 +3316,7 @@ def import_project_json(
         data["vehicles"] = _merge_named_assets("vehicle", [], vehicles_in)
         if shots:
             data["shots"] = shots
+            data["chapters"] = _clean_chapters([], shots)
             imported_n = len(shots)
         elif sections == [] and (chars_in or locs_in or creatures_in or vehicles_in):
             # Cast-only package — keep existing shots unless empty film

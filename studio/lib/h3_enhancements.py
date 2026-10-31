@@ -36,7 +36,8 @@ def preset(names, steps, sampler, scheduler, graph):
     if not specs:
         return steps, sampler, scheduler
     spec = specs[0]
-    return spec.get('steps') or steps, spec.get('sampler') or sampler, spec.get('scheduler') or scheduler
+    effective_steps = steps if spec.get('preserve_manual_steps') and steps > 0 else spec.get('steps') or steps
+    return effective_steps, spec.get('sampler') or sampler, spec.get('scheduler') or scheduler
 
 
 def patch_graph(graph, job):

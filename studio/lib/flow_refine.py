@@ -44,6 +44,9 @@ def capture(graph, job):
         if node['class_type'] in ('VAEDecode', 'VAEDecodeAudio', 'H3TAEDecode'):
             if node['inputs'].get('samples') == ['14',0]:
                 node['inputs']['samples'] = ['flow_save',0]
+        elif node['class_type'] == 'LTXVSeparateAVLatent':
+            if node['inputs'].get('av_latent') == ['14',0]:
+                node['inputs']['av_latent'] = ['flow_save',0]
     graph['flow_save'] = {'class_type':'H3StudioSaveFlowState', 'inputs':{
         'samples':['14',0], 'trajectory':['flow_handle',0], 'key':job['id']}}
     return graph

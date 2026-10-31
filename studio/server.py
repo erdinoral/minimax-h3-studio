@@ -87,6 +87,10 @@ from lib.director import (
     is_thin_template_prompt,
     merge_session_directives,
     normalize_shot_outline,
+    outline_link,
+    scene_format_addendum,
+    scene_format_from_text,
+    scene_format_question,
     opening_message,
     outline_generation_user_prompt,
     PLAN_MODE_ADDENDUM,
@@ -656,6 +660,7 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
                 continue
         if not _ok(spec) and spec.get("preset"):
             companion = {("lightx2v-fl2v-4step-v12", "ref2va"): "lightx2v-ref2v-4step",
+                         ("erosmax-beta1-fl2v-4step", "ref2va"): "lightx2v-ref2v-4step",
                          ("lightx2v-turbo", "ref2va"): "lightx2v-ref2v-4step",
                          ("lightx2v-fl2v-8step", "ref2va"): "ref2v-turbo-8step",
                          ("lightx2v-ref2v-4step", "fl2va"): "lightx2v-fl2v-4step-v12",
@@ -741,6 +746,8 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]
     mode = (job.get("mode") or "t2v").lower()
     graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue", "audio_continue") else "fl2va"
     if job.get("scene_audio_file") and job.get("scene_audio_mode") == "reference":
+        graph = "ref2va"
+    if mode == "continuum" and job.get("ref_images"):
         graph = "ref2va"
     usable = []
     for item in name.split("|")[:5]:
@@ -1672,6 +1679,12 @@ async def _brief_from_director_text(
         brief_src["silentAudio"] = True
     brief = _apply_session_timing(validate_brief(brief_src), sess)
     brief = merge_session_directives(brief, sess)
+    if sess.get("scene_format") == "single":
+        brief["expectedShotCount"] = 1
+        brief["totalDurationSec"] = int(brief.get("clipDurationSec") or 5)
+        brief["shots"] = (brief.get("shots") or [])[:1]
+        if isinstance(brief.get("shotOutline"), list):
+            brief["shotOutline"] = brief["shotOutline"][:1]
     need = brief.get("expectedShotCount") or 0
     have = len(brief.get("shots") or [])
     outline = normalize_shot_outline(brief)
@@ -1879,6 +1892,14 @@ async def _write_one_shot_from_outline(
             continue
         raw_shot.setdefault("action", outline_row.get("beat") or outline_row.get("title"))
         raw_shot.setdefault("camera", outline_row.get("camera"))
+        planned = outline_link(outline_row)
+        if index and planned:
+            raw_shot["linkToPrev"] = "continue" if planned == "continue" else "standalone"
+            section = str(outline_row.get("sectionId") or "").strip()
+            if not section and planned == "continue" and prev_shot:
+                section = str(prev_shot.get("sectionId") or "").strip()
+            if section:
+                raw_shot["sectionId"] = section
         # Preserve an explicit LLM link. Missing links mean a new, independent shot.
         if index == 0 or not raw_shot.get("linkToPrev"):
             raw_shot["linkToPrev"] = "standalone"
@@ -2175,6 +2196,7 @@ class H3AccelerationBody(BaseModel):
     spectrum_enabled: Optional[bool] = None
     spectrum_preset: Optional[Literal["light", "balanced", "strong", "custom"]] = None
     spectrum_blend_weight: Optional[float] = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    sparse_enabled: Optional[bool] = None
 
 
 @app.get("/api/h3-acceleration")
@@ -2188,17 +2210,23 @@ async def get_h3_acceleration():
 @app.post("/api/h3-acceleration")
 async def set_h3_acceleration(body: H3AccelerationBody):
     path = DATA / "h3_acceleration.json"
-    settings = h3_acceleration.update_settings(h3_acceleration.load_settings(path), body.model_dump(exclude_none=True))
+    changes = body.model_dump(exclude_none=True)
+    settings = h3_acceleration.update_settings(h3_acceleration.load_settings(path), changes)
+    required = []
     if settings["spectrum_enabled"]:
+        required.append(("SpectrumApplyMiniMaxH3", "Spectrum"))
+    if changes.get("sparse_enabled"):
+        required.append(("BlockSparseAttention", "Sol-Attn"))
+    for node, label in required:
         try:
             async with httpx.AsyncClient(timeout=10) as c:
-                r = await c.get(f"{COMFY_URL}/object_info/SpectrumApplyMiniMaxH3")
+                r = await c.get(f"{COMFY_URL}/object_info/{node}")
                 r.raise_for_status()
-                loaded = "SpectrumApplyMiniMaxH3" in r.json()
+                loaded = node in r.json()
         except Exception:
             loaded = False
         if not loaded:
-            raise HTTPException(409, "Spectrum düğümü yüklenmedi; ComfyUI'yi yeniden başlatın.")
+            raise HTTPException(409, f"{label} düğümü yüklenmedi; ComfyUI'yi yeniden başlatın.")
     h3_acceleration.save_settings(settings, path)
     return await get_h3_acceleration()
 
@@ -2455,7 +2483,8 @@ async def list_jobs():
             row["download_name"] = video_download_name(row, item_id=str(row.get("id") or ""))
         jobs.append(row)
     return {"jobs": jobs, "queue_paused": _queue_paused,
-            "queue_pause_capability": "after_current"}
+            "queue_pause_capability": "after_current",
+            "pending_produce_error": _pending_produce_error}
 
 
 @app.get("/api/gallery")
@@ -3383,26 +3412,30 @@ async def retry_job(job_id: str):
                     400,
                     "önce önceki klip done olmalı — önce onu tekrar dene",
                 )
-        job["status"] = "queued"
-        job["progress"] = 0
-        job["progress_label"] = "tekrar sırada"
-        job["error"] = None
-        job["output"] = None
-        job["prompt_id"] = None
-        job["local_path"] = None
-        if job.get('continue_from') and not job.get('continuum_resume'):
-            job["first_frame_name"] = None
-        job.pop("comfy_step", None)
-        job.pop("comfy_step_max", None)
-        job.pop("progress_source", None)
-        job.pop("_ws_progress_at", None)
-        for key in ('cancel_requested_at', 'cancel_source', 'recovered_from_status', '_reattach'):
-            job.pop(key, None)
-        job["retried_at"] = time.time()
-        job["retry_count"] = int(job.get("retry_count") or 0) + 1
+        _reset_job_for_retry(job)
         _save_jobs()
     await _free_llm_for_production()
     return job
+
+
+def _reset_job_for_retry(job: dict) -> None:
+    job["status"] = "queued"
+    job["progress"] = 0
+    job["progress_label"] = "tekrar sırada"
+    job["error"] = None
+    job["output"] = None
+    job["prompt_id"] = None
+    job["local_path"] = None
+    if job.get('continue_from') and not job.get('continuum_resume'):
+        job["first_frame_name"] = None
+    job.pop("comfy_step", None)
+    job.pop("comfy_step_max", None)
+    job.pop("progress_source", None)
+    job.pop("_ws_progress_at", None)
+    for key in ('cancel_requested_at', 'cancel_source', 'recovered_from_status', '_reattach'):
+        job.pop(key, None)
+    job["retried_at"] = time.time()
+    job["retry_count"] = int(job.get("retry_count") or 0) + 1
 
 
 @app.post("/api/jobs/retry-errors")
@@ -3422,23 +3455,7 @@ async def retry_all_errors():
                 # parent may itself be getting re-queued in this pass
                 if parent and parent.get("status") not in ("done", "queued", "running"):
                     continue
-            job["status"] = "queued"
-            job["progress"] = 0
-            job["progress_label"] = "tekrar sırada"
-            job["error"] = None
-            job["output"] = None
-            job["prompt_id"] = None
-            job["local_path"] = None
-            if job.get('continue_from') and not job.get('continuum_resume'):
-                job["first_frame_name"] = None
-            job.pop("comfy_step", None)
-            job.pop("comfy_step_max", None)
-            job.pop("progress_source", None)
-            job.pop("_ws_progress_at", None)
-            for key in ('cancel_requested_at', 'cancel_source', 'recovered_from_status', '_reattach'):
-                job.pop(key, None)
-            job["retried_at"] = time.time()
-            job["retry_count"] = int(job.get("retry_count") or 0) + 1
+            _reset_job_for_retry(job)
             queued.append(job["id"])
         _save_jobs()
     if queued:
@@ -4437,6 +4454,8 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
         '{"shots":[{"text":"cinematic SCENE paragraph","sectionId":"scene-1","mode":"t2v"|"continue"}]}\n'
         f"Each shot is one {clip}s clip. Group uninterrupted beats with one sectionId: the first is t2v and later shots are continue. "
         f"A new location, time, or action starts a new sectionId with t2v; the same character alone never makes it continue. "
+        "A camera angle change is t2v; continue means the same shot keeps rolling and its text describes how the same camera move goes on. "
+        "Use 1-3 continue shots after each t2v, and never put cuts or a montage inside one shot. "
         f"Use cinema character names exactly as on the board.\n"
         f"Write exactly {n} shots. "
         "Use character and location names EXACTLY as on the board. "
@@ -4571,12 +4590,16 @@ class CinemaMuxBody(BaseModel):
     score_id: Optional[str] = None
     score_volume: Optional[float] = None
     job_ids: Optional[list[str]] = None
+    level_audio: bool = True
+    color_match: bool = True
 
 
 class ClipsConcatBody(BaseModel):
     job_ids: list[str] = Field(..., min_length=2)
     batch_id: Optional[str] = None
     title: Optional[str] = None
+    level_audio: bool = True
+    color_match: bool = True
 
     @field_validator("job_ids", mode="before")
     @classmethod
@@ -4679,7 +4702,14 @@ async def _cinema_clip_paths(batch_id: str) -> list[Path]:
     return paths
 
 
-async def _mix_cinema_batch(batch_id: str, score_id: str, score_volume: float = 0.16) -> dict:
+async def _mix_cinema_batch(
+    batch_id: str,
+    score_id: str,
+    score_volume: float = 0.16,
+    *,
+    level_audio: bool = True,
+    color_match: bool = True,
+) -> dict:
     try:
         meta = load_meta(MUSIC, score_id)
     except FileNotFoundError:
@@ -4690,17 +4720,23 @@ async def _mix_cinema_batch(batch_id: str, score_id: str, score_volume: float = 
     paths = await _cinema_clip_paths(batch_id)
     CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
     out = CINEMA_FINALS / f"{batch_id}_final.mp4"
-    concat_keep_audio_mix_score(
+    report: dict = {}
+    await asyncio.to_thread(
+        concat_keep_audio_mix_score,
         video_paths=paths,
         audio_path=audio_path,
         out_path=out,
         score_volume=score_volume,
+        level_audio=level_audio,
+        color_match=color_match,
+        report=report,
     )
     return {
         "ok": True,
         "batch_id": batch_id,
         "clips": len(paths),
         "final_url": f"/api/cinema/final/{batch_id}",
+        "polish": report,
     }
 
 
@@ -4783,12 +4819,15 @@ async def _queue_cinema_seamless(
         merged_hits = {"hits": []}
         for b in bound_hits:
             merged_hits["hits"].extend(b.get("hits") or [])
-        take_refs, ref_assignments = [], {}
+        take_refs, ref_assignments, take_manifest = [], {}, None
         if use_continuum:
             try:
                 take_refs, ref_assignments = continuum.reference_plan(bound_hits)
             except ValueError as error:
                 raise HTTPException(400, str(error))
+            # Sections need "<Picture N> is <asset>" lines; bare images let two actors swap looks.
+            rows_by_file = {r['file']: r for b in bound_hits for r in (b.get('rows') or []) if r.get('file')}
+            take_manifest = [rows_by_file.get(f, {'file': f}) for f in take_refs] or None
         reference_mode = 'ref' if take_refs else 't2v'
         lora_src, _graph = _lora_src_for_shot(body, merged_hits, reference_mode)
         take_steps, take_sampler, take_scheduler = _with_lora_preset(
@@ -4843,6 +4882,7 @@ async def _queue_cinema_seamless(
             **({'continuum_run':'studio_' + uuid.uuid4().hex,
                 'continuum_prompts':texts, 'continuum_chunk_seconds':body.duration,
                 'continuum_ref_assignments':ref_assignments,
+                'reference_manifest':take_manifest,
                 'continuum_reference_size':getattr(body, 'continuum_reference_size', 'Match Output'),
                 'h3_models':h3_models.resolve('ref2va' if take_refs else 'fl2va')} if use_continuum else {}),
             "batch_index": take_i,
@@ -5445,6 +5485,127 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
     return {"job": job, "kind": kind, "image_provider": "image_studio", "queued": True}
 
 
+class CinemaShotFrameBody(BaseModel):
+    shot_id: str = Field(..., min_length=1)
+    text: Optional[str] = None
+    structured: Optional[dict[str, Any]] = None
+    title: Optional[str] = None
+    aspect: str = "16:9"
+
+
+@app.post("/api/cinema/shot-frame")
+async def cinema_shot_frame(body: CinemaShotFrameBody):
+    """Queue a Qwen storyboard frame for one Director shot (approve it to use as first frame)."""
+    lib = cinema.load()
+    stored = next((s for s in lib.get("shots") or [] if str(s.get("id") or "") == body.shot_id), None) or {}
+    shot = {**stored, **({"text": body.text} if body.text is not None else {}),
+            **({"structured": body.structured} if body.structured is not None else {})}
+    if not str(shot.get("text") or "").strip():
+        raise HTTPException(400, "Sahne metni boş")
+    refs = cinema.storyboard_frame_refs(str(shot.get("text") or ""), lib)
+    available = []
+    if refs:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{comfy.base_url}/object_info/UNETLoader")
+            available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
+    missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(refs), available_models=available)
+    if missing:
+        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+    setup = lib.get("setup") or {}
+    style = setup.get("style") if setup.get("style") not in (None, "", "auto") else "realistic"
+    prompt = cinema.storyboard_frame_prompt(shot, refs, style_craft_line(normalize_style(style)))
+    title = (body.title or "").strip() or str((shot.get("structured") or {}).get("title") or "").strip()
+    job = {
+        "id": uuid.uuid4().hex,
+        "mode": "qwen_frame",
+        "lane": "director",
+        "film_id": str(lib.get("film_id") or ""),
+        "status": "queued",
+        "progress": 0,
+        "progress_label": "Kare sırada",
+        "prompt": prompt,
+        "scene_title": "Kare · " + (title or body.shot_id[:8]),
+        "created_at": time.time(),
+        "frame_shot_id": body.shot_id,
+        "frame_args": {"prompt": prompt, "refs": [r["file"] for r in refs], "aspect": body.aspect},
+    }
+    async with _lock:
+        _jobs.append(job)
+        _save_jobs()
+    _ensure_queue_loop()
+    return {"job": job, "refs": refs}
+
+
+async def _run_shot_frame(job: dict) -> None:
+    args = job.get("frame_args") or {}
+    refs = []
+    for name in args.get("refs") or []:
+        name = Path(str(name)).name
+        if (COMFY_INPUT / name).is_file():
+            refs.append(name)
+        elif (REFS / name).is_file():
+            refs.append(await comfy.upload_image(REFS / name, name))
+    graph = qwen_still.build_storyboard_frame(
+        prompt=str(args.get("prompt") or ""), negative=cinema.STORYBOARD_FRAME_NEGATIVE,
+        ref_images=refs, aspect=str(args.get("aspect") or "16:9"), steps=24,
+        seed=uuid.uuid4().int % (2**32))
+    prompt_id = str(job.get("prompt_id") or "") if job.get("_reattach") else ""
+    job.pop("_reattach", None)
+    if not prompt_id:
+        prompt_id = await comfy.queue_prompt(graph)
+    job["prompt_id"] = prompt_id
+    job["progress"] = 1
+    job["progress_label"] = "Qwen kare çiziyor"
+    _save_jobs()
+    stop_ws = asyncio.Event()
+
+    async def _on_progress(pct: int, label: str, meta: Optional[dict] = None):
+        if job.get("status") != "running":
+            return
+        job["progress"] = max(1, min(99, int(pct)))
+        job["progress_label"] = label
+        _save_jobs_throttled(0.8)
+
+    ws_task = asyncio.create_task(comfy.watch_prompt(prompt_id, _on_progress, stop_event=stop_ws))
+    source = None
+    try:
+        deadline = time.monotonic() + 30 * 60
+        while time.monotonic() < deadline and source is None:
+            if job.get("status") == "cancelled":
+                return
+            await asyncio.sleep(1.5)
+            history = (await comfy.history(prompt_id)).get(prompt_id) or {}
+            if (history.get("status") or {}).get("status_str") == "error":
+                raise RuntimeError("Qwen kare üretimi ComfyUI'de hata verdi")
+            images = ((history.get("outputs") or {}).get("70") or {}).get("images") or []
+            if images:
+                info = images[0]
+                candidate = (COMFY_OUTPUT / Path(str(info.get("subfolder") or "")) /
+                             Path(str(info.get("filename") or "")).name).resolve()
+                if not candidate.is_relative_to(COMFY_OUTPUT.resolve()) or not candidate.is_file():
+                    raise RuntimeError("Qwen kare çıktısı bulunamadı")
+                source = candidate
+    finally:
+        stop_ws.set()
+        ws_task.cancel()
+    if source is None:
+        raise RuntimeError("Qwen kare üretimi 30 dakika içinde tamamlanmadı")
+    REFS.mkdir(parents=True, exist_ok=True)
+    dest = REFS / f"h3_frame_{uuid.uuid4().hex[:12]}.png"
+    shutil.copy2(source, dest)
+    comfy_name = Path(await comfy.upload_image(dest, dest.name)).name
+    if comfy_name != dest.name:
+        shutil.copy2(dest, REFS / comfy_name)
+    job["frame_name"] = comfy_name
+    job["frame_url"] = f"/api/refs/{comfy_name}"
+    job["status"] = "done"
+    job["progress"] = 100
+    job["progress_label"] = "kare hazır"
+    job["done_at"] = time.time()
+    _save_jobs()
+    slog.info_job(job, "shot frame ready", shot=str(job.get("frame_shot_id") or "")[:8])
+
+
 async def _generate_cinema_image_studio_sheet(
     *, kind: str, name: str, notes: str = "", asset_id: Optional[str] = None,
     quality: str = "736", steps: int = 20, aspect: str = "16:9",
@@ -5936,8 +6097,12 @@ async def _queue_sheets_for_cinema(
     return queued
 
 
+_pending_produce_error: Optional[dict[str, Any]] = None
+
+
 async def _maybe_continue_pending_produce() -> None:
     """After character/creature/location sheets finish, queue the waiting scene clips."""
+    global _pending_produce_error
     lib = cinema.load()
     pend = lib.get("pending_produce")
     if not isinstance(pend, dict):
@@ -5958,12 +6123,15 @@ async def _maybe_continue_pending_produce() -> None:
     payload["prepare_sheets"] = False
     try:
         queued = await cinema_produce(CinemaProduceBody(**payload))
+        _pending_produce_error = None
         slog.info(
             "cinema pending produce scenes",
             count=queued.get("count") if isinstance(queued, dict) else None,
             batch=queued.get("cinema_batch") if isinstance(queued, dict) else None,
         )
     except Exception as e:
+        detail = e.detail if isinstance(e, HTTPException) else str(e)
+        _pending_produce_error = {"id": uuid.uuid4().hex[:8], "detail": detail, "at": time.time()}
         slog.warn("cinema pending produce failed", err=e)
 
 
@@ -6195,6 +6363,79 @@ def _merge_produce_shots_into_lib(
         elif not sid:
             merged.append(s)
     return merged
+
+
+class CinemaLintBody(BaseModel):
+    shots: Optional[list[Any]] = None
+    duration: Optional[float] = None
+
+
+@app.post("/api/cinema/lint")
+async def cinema_lint(body: CinemaLintBody):
+    """Pre-production prompt check — nothing is queued."""
+    lib = cinema.load()
+    raw = body.shots if body.shots is not None else (lib.get("shots") or [])
+    shots = [
+        s for s in (cinema._clean_shot(x, i) for i, x in enumerate(raw))
+        if s.get("enabled", True)
+    ]
+    duration = body.duration or lib.get("duration") or 5
+    return cinema.lint_shots(shots, lib, duration=float(duration))
+
+
+def _film_failed_jobs(lib: dict) -> tuple[list[dict], int]:
+    """Latest failed job per active-film shot that has no done/in-flight clip."""
+    film_shots = {
+        str(s.get("id") or ""): s
+        for s in (lib.get("shots") or [])
+        if isinstance(s, dict) and str(s.get("id") or "")
+    }
+    open_ids = {
+        sid for sid, s in film_shots.items()
+        if str(s.get("text") or "").strip()
+        and s.get("enabled", True)
+        and not _cinema_shot_already_produced(s)
+    }
+    picked: dict[str, dict] = {}
+    covered: set[str] = set()
+    failed = [j for j in _jobs if str(j.get("status") or "") in ("error", "cancelled")]
+    failed.sort(key=lambda j: float(j.get("created_at") or 0), reverse=True)
+    for j in failed:
+        ids = [str(j.get("shot_id") or "")] + [str(x) for x in (j.get("continuum_scene_ids") or [])]
+        hit = {x for x in ids if x in open_ids and x not in covered}
+        if not hit:
+            continue
+        covered.update(hit)
+        picked[str(j.get("id"))] = j
+    return list(picked.values()), len(open_ids - covered)
+
+
+@app.post("/api/cinema/redo-failed")
+async def cinema_redo_failed():
+    """Re-queue failed/cancelled clips of the active film with their original settings."""
+    if not await comfy.healthy():
+        raise HTTPException(503, "ComfyUI kapalı")
+    lib = cinema.load()
+    queued: list[str] = []
+    skipped: list[str] = []
+    async with _lock:
+        jobs, never_made = _film_failed_jobs(lib)
+        jobs.sort(key=lambda j: (1 if j.get("continue_from") else 0, j.get("created_at") or 0))
+        for job in jobs:
+            parent_id = job.get("continue_from")
+            if parent_id:
+                parent = next((j for j in _jobs if j["id"] == parent_id), None)
+                if parent and parent.get("status") not in ("done", "queued", "running"):
+                    skipped.append(job["id"])
+                    continue
+            _reset_job_for_retry(job)
+            queued.append(job["id"])
+        if queued:
+            _save_jobs()
+    if queued:
+        await _free_llm_for_production()
+    slog.info("cinema redo failed", queued=len(queued), skipped=len(skipped))
+    return {"count": len(queued), "ids": queued, "skipped": skipped, "never_made": never_made}
 
 
 @app.post("/api/cinema/produce")
@@ -6727,7 +6968,13 @@ async def cinema_mux(body: CinemaMuxBody):
         raise HTTPException(400, "film müziği yok — bir kez yükle")
     vol = 0.16 if body.score_volume is None else float(body.score_volume)
     try:
-        result = await _mix_cinema_batch(batch_id, score_id, vol)
+        result = await _mix_cinema_batch(
+            batch_id,
+            score_id,
+            vol,
+            level_audio=body.level_audio,
+            color_match=body.color_match,
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -6748,6 +6995,8 @@ async def cinema_concat(body: CinemaMuxBody):
             ClipsConcatBody(
                 job_ids=body.job_ids,
                 batch_id=body.batch_id,
+                level_audio=body.level_audio,
+                color_match=body.color_match,
             )
         )
     lib = cinema.load()
@@ -6758,10 +7007,20 @@ async def cinema_concat(body: CinemaMuxBody):
     paths = await _cinema_clip_paths(batch_id)
     CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
     out = CINEMA_FINALS / f"{batch_id}_final.mp4"
+    report: dict = {}
     try:
-        concat_keep_audio(video_paths=paths, out_path=out)
+        await asyncio.to_thread(
+            concat_keep_audio,
+            video_paths=paths,
+            out_path=out,
+            level_audio=body.level_audio,
+            color_match=body.color_match,
+            report=report,
+        )
     except Exception as e:
         raise HTTPException(500, str(e)[-400:])
+    lib = cinema.load()
+    audio = cinema._clean_audio(lib.get("audio"))
     audio["last_batch"] = batch_id
     lib["audio"] = audio
     cinema.save(lib)
@@ -6770,6 +7029,7 @@ async def cinema_concat(body: CinemaMuxBody):
         "batch_id": batch_id,
         "clips": len(paths),
         "final_url": f"/api/cinema/final/{batch_id}",
+        "polish": report,
     }
 
 
@@ -6792,8 +7052,16 @@ async def clips_concat(body: ClipsConcatBody):
         batch_id = str(uuid.uuid4())[:8]
     CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
     out = CINEMA_FINALS / f"{batch_id}_final.mp4"
+    report: dict = {}
     try:
-        concat_keep_audio(video_paths=paths, out_path=out)
+        await asyncio.to_thread(
+            concat_keep_audio,
+            video_paths=paths,
+            out_path=out,
+            level_audio=body.level_audio,
+            color_match=body.color_match,
+            report=report,
+        )
     except Exception as e:
         raise HTTPException(500, str(e)[-400:])
     lib = cinema.load()
@@ -6810,6 +7078,7 @@ async def clips_concat(body: ClipsConcatBody):
         "clips": len(paths),
         "job_ids": ids,
         "final_url": f"/api/cinema/final/{batch_id}",
+        "polish": report,
     }
 
 
@@ -8175,6 +8444,13 @@ async def _director_chat_impl(body: DirectorChatBody):
         sess["messages"].append({"role": "user", "content": user_msg})
         if isinstance(sess.get("brief"), dict):
             sess["brief"] = merge_session_directives(sess["brief"], sess)
+        fmt = scene_format_from_text(body.message or "", clip_sec=int(sess.get("clip_duration") or 5))
+        if fmt:
+            sess["scene_format"] = fmt
+    if not sess.get("scene_format"):
+        prior = (sess.get("brief") or {}).get("shots") if isinstance(sess.get("brief"), dict) else None
+        if prior:
+            sess["scene_format"] = "single" if len(prior) == 1 else "long"
 
     # Short confirm after a finished plan → finalize previous assistant text (no new LLM wait)
     confirm = re.fullmatch(
@@ -8222,6 +8498,8 @@ async def _director_chat_impl(body: DirectorChatBody):
     sys = (sys or "") + ui_lang_addendum(ui_lang)
     sys += guidance_block(body.lora_names)
     sys = (sys or "") + _prompt_optimize_instruction(body.prompt_rewriter_enabled)
+    if not plan_mode:
+        sys += scene_format_addendum(sess.get("scene_format") or "")
     if plan_mode:
         sys = (sys or "") + "\n\n" + PLAN_MODE_ADDENDUM
         if ui_lang == "en":
@@ -8338,6 +8616,9 @@ async def _director_chat_impl(body: DirectorChatBody):
         or re.search(r'"shotOutline"\s*:\s*\[', content)
     ):
         should_finalize = True
+    format_blocked = should_finalize and not plan_mode and not sess.get("scene_format")
+    if format_blocked:
+        should_finalize = False
 
     has_patch = bool(
         parsed
@@ -8409,9 +8690,11 @@ async def _director_chat_impl(body: DirectorChatBody):
                 sess["silent_audio"] = True
         elif parsed and parsed.get("reply"):
             reply = str(parsed["reply"])
+    if format_blocked:
+        reply = scene_format_question(ui_lang)
 
     sess["messages"].append({"role": "assistant", "content": reply})
-    sess["last_raw"] = content
+    sess["last_raw"] = "" if format_blocked else content
     if isinstance(sess.get("brief"), dict):
         sess["brief"] = _scrub_brief_removed(sess["brief"], sess)
     _sessions[sid] = sess
@@ -9247,6 +9530,15 @@ def _queue_has_prompt(pid: str, items: list) -> bool:
 
 
 async def _run_job(job: dict):
+    if job.get("mode") == "qwen_frame":
+        job["status"] = "running"
+        job["error"] = None
+        job["started_at"] = time.time()
+        job["progress_label"] = "Kare hazırlanıyor"
+        _save_jobs()
+        await _free_llm_for_production()
+        await _run_shot_frame(job)
+        return
     if job.get("mode") == "qwen_sheet":
         job["status"] = "running"
         job["started_at"] = time.time()

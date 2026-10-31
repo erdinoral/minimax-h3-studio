@@ -19,7 +19,9 @@ class FastPreviewGraphTests(unittest.TestCase):
     def test_tae_draft_replaces_only_video_decode(self):
         graph = build_t2v_prompt(text="A quiet street", fast_preview_tae="taeh3.safetensors")
         self.assertEqual(graph["10"]["class_type"], "H3TAEDecode")
-        self.assertEqual(graph["10"]["inputs"]["samples"], ["14", 0])
+        self.assertEqual(graph["10"]["inputs"]["samples"], ["10s", 0])
+        self.assertEqual(graph["10s"]["class_type"], "LTXVSeparateAVLatent")
+        self.assertEqual(graph["10s"]["inputs"]["av_latent"], ["14", 0])
         self.assertEqual(graph["23"]["class_type"], "VAEDecodeAudio")
         self.assertEqual(graph["92"]["class_type"], "SaveVideo")
 
@@ -30,6 +32,7 @@ class FastPreviewGraphTests(unittest.TestCase):
             fast_preview_tae="taeh3.safetensors",
         )
         self.assertEqual(graph["10"]["class_type"], "H3TAEDecode")
+        self.assertEqual(graph["10"]["inputs"]["samples"], ["10s", 0])
 
     def test_multishot_saves_first_shot_early(self):
         graph = build_multishot_prompt(script="One shot")

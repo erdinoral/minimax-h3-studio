@@ -2359,9 +2359,6 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 .gallery-card .gallery-thumb {
   position: relative;
 }
-.gallery-merge-mode .gallery-ord {
-  display: none;
-}
 .gallery-merge-mode .gallery-card {
   cursor: pointer;
 }
@@ -2440,6 +2437,7 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 .gallery-merge-mode .gallery-cont,
 .gallery-merge-mode .gallery-still,
 .gallery-merge-mode .gallery-prompt,
+.gallery-merge-mode .gallery-download,
 .gallery-merge-mode .gallery-del {
   opacity: 0.35;
   pointer-events: none;
@@ -4100,6 +4098,47 @@ select option:disabled {
   flex-wrap: wrap;
   gap: 4px;
   margin: 4px 0 0;
+}
+.cinema-shot-frame-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.cinema-shot-frame-row.is-approved {
+  border-style: solid;
+  border-color: var(--accent, #4caf50);
+}
+.cinema-shot-frame-img {
+  width: 128px;
+  max-height: 128px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  flex: 0 0 auto;
+}
+.cinema-shot-frame-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.cinema-shot-frame-status {
+  font-size: 0.78rem;
+  opacity: 0.85;
+}
+.cinema-shot-frame-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cinema-shot-frame-btns > button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.8rem;
 }
 .cinema-bind {
   font-size: 0.68rem;

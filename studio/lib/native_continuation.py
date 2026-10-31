@@ -26,6 +26,9 @@ def capture(graph, job, frames):
         if node.get('class_type') in ('VAEDecode', 'VAEDecodeAudio', 'H3TAEDecode', 'VAEDecodeTiled'):
             if node['inputs'].get('samples') == ['14', 0]:
                 node['inputs']['samples'] = ['studio_tail', 0]
+        elif node.get('class_type') == 'LTXVSeparateAVLatent':
+            if node['inputs'].get('av_latent') == ['14', 0]:
+                node['inputs']['av_latent'] = ['studio_tail', 0]
     job['continuation_state_key'] = job['id']
     job['continuation_state_frames'] = 39
     return graph

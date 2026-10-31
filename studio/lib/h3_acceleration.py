@@ -35,7 +35,8 @@ def clean_settings(raw):
     if preset in PRESETS and weight != PRESETS[preset]:
         preset = "custom"
     return {"spectrum_enabled": raw.get("spectrum_enabled") is True,
-            "spectrum_preset": preset, "spectrum_blend_weight": weight}
+            "spectrum_preset": preset, "spectrum_blend_weight": weight,
+            "sparse_enabled": raw.get("sparse_enabled") is True}
 
 
 def load_settings(path=None):

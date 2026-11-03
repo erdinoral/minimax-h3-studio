@@ -8,6 +8,8 @@ Director can process each chapter as one ordered Continuum sequence. Each scene 
 
 ### Director: New Video and Continuum children
 
+Scene card actions are **Disable → Duplicate → Regenerate → Delete**. Regenerate repeats only that scene from its recorded render: prompt, reference selection, seed, models, sampling and acceleration settings, and original continuation parent. It creates a separate attempt and keeps the old video. **Produce scene** uses the current card and controls instead. Missing historical settings or reference files are reported rather than silently replaced; legacy clips containing multiple scenes cannot be repeated as a single scene.
+
 Director JSON keeps `mode: "t2v"` as a normal standalone main clip. Consecutive `mode: "continue"` scenes become Continuum children beneath that clip in the production list; each scene retains its ordered prompt. With the Studio native-tail bridge installed, New clips save a bounded AV latent tail and continuations carry 22 frames of motion/audio context, including between memory-bounded child groups. Older clips without this state retain the explicitly reported last-frame handoff. Every continuation section also receives its scene's character/asset references with the same "Picture N is <asset>" ownership lines as the New clip, so two actors do not swap looks mid-chain. Another New Video creates another main clip. Scene cards show the same parent/child arrangement. Existing jobs are preserved; changing scene modes affects future production only. See [native continuation details and limits](studio/docs/NATIVE_CONTINUATION.md).
 
 ## 9.3.1 — Director continuity and production reliability
@@ -527,7 +529,7 @@ So 1080p is very much usable — it just costs time, and quality is reportedly b
 | FL2VA | New video without references, first frame, first–last frame, last-frame Continue, Continuum without references | LightX2V FL2V v1.2 (4 steps, `er_sde`) |
 | Ref2VA | Face lock / references, V2V, audio continue, Director scenes with asset cards, Continuum with references | LightX2V Ref2V (4 steps, `er_sde`) |
 
-Draft downloads the missing FL2VA adapter (LightX2V Ref2V must already be downloaded for Ref2VA shots), preserves character/style adapters, and waits for the download before submitting. The current engine and Spectrum blend remain selected, and subsequent manual step changes are respected. Studio graphs do **not** patch Sage Attention.
+Draft downloads the missing FL2VA adapter (LightX2V Ref2V must already be downloaded for Ref2VA shots), preserves character/style adapters, and waits for the download before submitting. The current engine and Spectrum blend remain selected, and subsequent manual step changes are respected. Studio graphs do **not** patch Sage Attention; instead `comfy_boot.py` starts ComfyUI with `--use-sage-attention` whenever the SageAttention 2 package from `torch.js` is installed (RTX 20 and newer). On an RTX 5060 Ti this was about 5% faster with no visible quality change.
 
 See **SageAttention 3** below if you want those kernels in Comfy itself; H3 Studio no longer uses them.
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import shutil
@@ -187,6 +188,14 @@ def _empty_library() -> dict[str, Any]:
     return {"characters": [], "locations": [], "creatures": [], "vehicles": [], "updated_at": 0}
 
 
+def _library_tracking(data):
+    return {
+        '_deleted_asset_ids': list(dict.fromkeys(str(x) for x in data.get('_deleted_asset_ids', []) if isinstance(x, str))),
+        '_source_signatures': {str(k): str(v) for k, v in data.get('_source_signatures', {}).items()},
+        '_source_aliases': {str(k): str(v) for k, v in data.get('_source_aliases', {}).items()},
+    }
+
+
 # --- restored from stash: asset library + sheet prompts ---
 
 def asset_kind_key(kind: str) -> tuple[str, str]:
@@ -227,6 +236,7 @@ def load_library() -> dict[str, Any]:
         _clean_asset(x, "vehicle") for x in (raw.get("vehicles") or []) if isinstance(x, dict)
     ]
     out["updated_at"] = raw.get("updated_at") or 0
+    out.update(_library_tracking(raw))
     return out
 
 
@@ -246,9 +256,12 @@ def save_library(data: dict[str, Any]) -> dict[str, Any]:
             _clean_asset(x, "vehicle") for x in (data.get("vehicles") or []) if isinstance(x, dict)
         ],
         "updated_at": _now(),
+        **_library_tracking(data),
     }
     LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LIBRARY_FILE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary = LIBRARY_FILE.with_suffix('.tmp')
+    temporary.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(LIBRARY_FILE)
     return out
 
 
@@ -279,6 +292,9 @@ def delete_library_asset(kind: str, asset_id: str) -> bool:
     lib[key] = [x for x in (lib.get(key) or []) if str(x.get("id") or "") != aid]
     if len(lib[key]) == before:
         return False
+    # A film may still use this asset. Opening the common library must not
+    # silently restore a record the user deliberately removed from it.
+    lib.setdefault('_deleted_asset_ids', []).append(key + ':' + aid)
     save_library(lib)
     return True
 
@@ -301,8 +317,79 @@ def upsert_library_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     else:
         items.append(cleaned)
     lib[key] = items
+    marker = key + ':' + cleaned['id']
+    lib['_deleted_asset_ids'] = [x for x in lib.get('_deleted_asset_ids', []) if x != marker]
+    lib.setdefault('_source_signatures', {}).pop(marker, None)
     save_library(lib)
     return cleaned
+
+
+def sync_shared_library() -> dict[str, Any]:
+    """Collect every film's assets into one persistent library, without switching films."""
+    lib = load_library()
+    tracking = _library_tracking(lib)
+    lib.update(tracking)
+    deleted = set(lib['_deleted_asset_ids'])
+    aliases, versions = lib['_source_aliases'], lib['_source_signatures']
+    films = []
+    for path in FILMS_DIR.glob('*.json'):
+        try:
+            film = json.loads(path.read_text(encoding='utf-8'))
+            if isinstance(film, dict):
+                films.append(film)
+        except (OSError, ValueError):
+            continue
+    active = load()
+    # The live film overrides an older archive with the same film id.
+    films = [f for f in films if f.get('film_id') != active.get('film_id')]
+    films.sort(key=lambda f: float(f.get('updated_at') or 0))
+    films.append(active)
+    def signature(asset):
+        content = {k: v for k, v in asset.items() if k not in ('id', 'library_id')}
+        return hashlib.sha256(json.dumps(content, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    before = json.dumps(lib, sort_keys=True, ensure_ascii=False)
+    added = 0
+    for kind, key in [('character','characters'),('creature','creatures'),('vehicle','vehicles'),('location','locations')]:
+        # Use only the newest version of each source card.
+        sources = {}
+        for film in films:
+            for raw in film.get(key) or []:
+                if isinstance(raw, dict) and raw.get('id') and str(raw.get('name') or '').strip():
+                    sources[str(raw['id'])] = raw
+        items = lib[key]
+        by_id = {a['id']: a for a in items}
+        by_content = {signature(a): a['id'] for a in items}
+        for aid, raw in sources.items():
+            asset = _clean_asset(raw, kind)
+            sig = signature(asset)
+            source_key = key + ':' + aid
+            lid = aliases.get(source_key) or str(raw.get('library_id') or aid)
+            marker = key + ':' + lid
+            if marker in deleted:
+                continue
+            if lid not in by_id and sig in by_content:
+                lid = by_content[sig]
+                marker = key + ':' + lid
+            aliases[source_key] = lid
+            if lid in by_id:
+                # Explicitly saved library records are authoritative. Copies in
+                # other films never overwrite their original shared asset.
+                if aid == lid and marker in versions and versions[marker] != sig:
+                    asset['id'] = lid
+                    index = next(i for i, item in enumerate(items) if item['id'] == lid)
+                    items[index] = asset
+                    by_id[lid] = asset
+                    versions[marker] = sig
+                continue
+            asset['id'] = lid
+            items.append(asset)
+            by_id[lid] = asset
+            by_content[sig] = lid
+            versions[marker] = sig
+            added += 1
+    if json.dumps(lib, sort_keys=True, ensure_ascii=False) != before:
+        lib = save_library(lib)
+    return {'library': lib, 'imported': added}
 
 
 def save_film_asset_to_library(kind: str, asset_id: str) -> dict[str, Any]:
@@ -1655,6 +1742,7 @@ def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optiona
     lines = []
     pic_i = start_index
     used_files: set[str] = set()
+    described_assets: set[str] = set()
     image_rows = list(bound_images or [])
     if not image_rows:
         for h in hits:
@@ -1672,9 +1760,15 @@ def annotate_prompt(text: str, hits: list[dict[str, Any]], bound_images: Optiona
         call = row.get("name") or label
         notes = (h.get("notes") or "").strip()
         voice = (h.get("voice") or "").strip()
-        note_bit = f" Description: {notes}." if notes else ""
+        asset_key = str(h.get("id") or label) if h else ""
+        # Repeating a long description for every view of one asset bloats the
+        # text conditioning without adding information.
+        repeat_view = bool(asset_key) and asset_key in described_assets
+        if asset_key:
+            described_assets.add(asset_key)
+        note_bit = f" Another view of {label}." if repeat_view else f" Description: {notes}." if notes else ""
         voice_bit = ""
-        if h.get("kind") == "character" and voice:
+        if h.get("kind") == "character" and voice and not repeat_view:
             voice_bit = (
                 f" SPEAKER LOCK: {label} always speaks with this identical voice — {voice}."
             )
@@ -1780,6 +1874,7 @@ def film_audio_preamble(audio: Optional[dict[str, Any]] = None) -> str:
         f"Only tagged spoken words are audible. Speak each tag in the language named at its start; "
         f"tags without a language are in {lang}. "
         "Do not speak instructions, tag names, language names, or placeholders. "
+        "Each tag is spoken exactly once per clip; never repeat, echo or restart a line. "
         "The same named person must sound identical in every shot. "
         "No background music and no original score — underscore is mixed later."
     )

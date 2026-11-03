@@ -7,6 +7,7 @@ before main.py loads. Studio already tracks progress via its own API.
 """
 from __future__ import annotations
 
+import importlib.util
 import runpy
 import shutil
 import sys
@@ -38,6 +39,10 @@ def main() -> None:
         shutil.copy2(module, destination / module.name)
     sys.path.insert(0, str(app_dir))
     sys.argv[0] = str(app_dir / "main.py")
+    # torch.js installs SageAttention 2 only where it has kernels (RTX 20 and newer);
+    # ComfyUI exits at startup if the flag is passed without the package.
+    if importlib.util.find_spec("sageattention") and "--use-sage-attention" not in sys.argv:
+        sys.argv.append("--use-sage-attention")
     _disable_tqdm()
     runpy.run_path(str(app_dir / "main.py"), run_name="__main__")
 

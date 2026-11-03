@@ -2,7 +2,7 @@
 import copy
 import re
 from pathlib import Path
-from .comfy import build_t2v_prompt, build_ref2va_prompt
+from .comfy import build_t2v_prompt, build_ref2va_prompt, enhance_ref_prompt
 from . import asset_references
 
 REQUIRED_NODES = ('H3StudioSaveContinuationTail', 'H3StudioLoadContinuationTail',
@@ -78,6 +78,8 @@ def build(job):
             by_file = {row['file']: row for row in job['reference_manifest']}
             rows = [by_file.get(name, {'file': name}) for name in active]
             text = asset_references.prompt(text, rows)
+        if active:
+            text = enhance_ref_prompt(text, n_images=len(active), role="asset_native")
         kwargs = dict(text=text, width=job['width'], height=job['height'], length=124,
                       seed=int(job['seed']) + index, steps=job['steps'],
                       sampler=job.get('sampler') or 'res_multistep', scheduler=job.get('scheduler') or 'simple',

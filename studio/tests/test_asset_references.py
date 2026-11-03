@@ -33,6 +33,16 @@ class ReferencePlanTests(unittest.TestCase):
             self.assertIn(name,prompt)
         self.assertNotIn('<Picture 1>',prompt)
 
+    def test_multi_view_asset_describes_identity_and_voice_once(self):
+        ada={'id':'ada','kind':'character','name':'Ada','notes':'LONG IDENTITY TEXT','voice':'warm alto'}
+        rows=[{'file':f'ada{n}.png','name':f'ada{n}','asset':ada} for n in (1,2,3)]
+        prompt=cinema.annotate_prompt('Ada walks.',[],rows)
+        self.assertEqual(prompt.count('LONG IDENTITY TEXT'),1)
+        self.assertEqual(prompt.count('warm alto'),1)
+        for n in (1,2,3):
+            self.assertIn(f'<Picture {n}> is ada{n}',prompt)
+        self.assertIn('Another view of Ada.',prompt)
+
     def test_explicit_empty_never_matches_names(self):
         plan=asset_references.resolve('Car and Ada',[],film(),lambda f: True)
         self.assertEqual(plan['ref_images'],[])

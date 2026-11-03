@@ -16,11 +16,11 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=frame301" />
+  <link rel="stylesheet" href="/static/app.css?v=lora-search312" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/film-workspace.css?v=cinema112" />
+  <link rel="stylesheet" href="/static/film-workspace.css?v=queue-dialog303" />
 </head>
 <body>
   <header class="topbar">
@@ -362,6 +362,10 @@
               <option value="" data-i18n="ayar.loraNoneOpt">Yok (varsayılan)</option>
             </select>
           </label>
+          <div class="lora-tools">
+            <input type="text" class="lora-search" data-lora-search="lora-check-list" placeholder="LoRA ara…" data-i18n-placeholder="lora.search" aria-label="LoRA ara" data-i18n-aria-label="lora.search" autocomplete="off" />
+            <button type="button" class="btn-ghost" data-lora-clear="lora-check-list" data-i18n="lora.clearAll">Tümünü temizle</button>
+          </div>
           <div class="lora-check-list" id="lora-check-list" aria-label="LoRA seçimi" data-i18n-aria-label="ui.lora-check-list.aria-label"></div>
           <div class="row-btns">
             <button type="button" class="btn-secondary" id="btn-lora-apply">Uygula</button>
@@ -681,9 +685,9 @@
               <input type="checkbox" id="cinema-post-upscale" />
               <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
             </label>
+            <span id="cinema-refmod-slot"></span>
             <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
-          <p class="muted mode-hint" data-i18n="cinema.chainHelp">Yeni video ana kliptir. Ardışık Devam sahneleri, onun altında bir Continuum sekansı olarak üretilir.</p>
           <label><span id="cinema-steps-label">Adım</span>
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
           </label>
@@ -705,6 +709,10 @@
                 <select id="cinema-lora-select" class="hidden" multiple>
                   <option value="" data-i18n="ayar.loraNoneOpt">Yok (varsayılan)</option>
                 </select>
+                <div class="lora-tools">
+                  <input type="text" class="lora-search" data-lora-search="cinema-lora-check-list" placeholder="LoRA ara…" data-i18n-placeholder="lora.search" aria-label="LoRA ara" data-i18n-aria-label="lora.search" autocomplete="off" />
+                  <button type="button" class="btn-ghost" data-lora-clear="cinema-lora-check-list" data-i18n="lora.clearAll">Tümünü temizle</button>
+                </div>
                 <div class="lora-check-list" id="cinema-lora-check-list" aria-label="Director LoRA selection"></div>
                 <footer class="cinema-lora-modal-footer">
                 <button type="button" class="btn-ghost" data-lora-guide="cinema-lora-select" >LoRA rehberi</button>
@@ -718,16 +726,18 @@
           <p class="muted mode-hint hidden" id="cinema-prod-hint"></p>
         </div>
       </div>
-      <div class="cinema-image-provider cinema-asset-method" role="group" aria-labelledby="cinema-image-provider-label">
-        <span id="cinema-image-provider-label" data-i18n="cinema.imageProvider">Asset üretim yöntemi</span>
-        <div class="ios-segment" id="cinema-image-provider">
-          <button type="button" class="on" data-image-provider="minimax" aria-pressed="true">H3</button>
-          <button type="button" data-image-provider="image_studio" aria-pressed="false">Qwen</button>
-        </div>
-        <span class="muted" id="cinema-image-provider-status" aria-live="polite"></span>
-      </div>
       <div class="cinema-workspace-toolbar">
+        <div class="cinema-workspace-tools">
         <button type="button" class="cinema-library-heading" id="btn-cinema-library-toggle" aria-pressed="false" aria-controls="cinema-asset-stack"><span id="cinema-library-toggle-label" data-i18n="ui.cinema-library-toggle-label">Kütüphane</span><span class="cinema-library-chevron" aria-hidden="true">▾</span></button>
+        <div class="cinema-image-provider cinema-asset-method cinema-asset-method-compact" role="group" aria-labelledby="cinema-image-provider-label">
+          <span id="cinema-image-provider-label" data-i18n="cinema.imageProvider">Asset üretim yöntemi</span>
+          <div class="ios-segment" id="cinema-image-provider">
+            <button type="button" class="on" data-image-provider="minimax" aria-pressed="true">H3</button>
+            <button type="button" data-image-provider="image_studio" aria-pressed="false">Qwen</button>
+          </div>
+          <span class="muted" id="cinema-image-provider-status" aria-live="polite"></span>
+        </div>
+        </div>
         <div class="cinema-workspace-actions">
           <button type="button" class="btn-secondary" id="btn-cinema-add-scene" data-i18n="cinema.addScene">+ Sahne ekle</button>
           <button type="button" class="btn-ghost" id="btn-cinema-add-t2v" data-i18n="cinema.addT2v">+ Bölüm ekle</button>
@@ -1343,19 +1353,19 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=frame301" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=lora-search310" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
-  <script src="/static/app.js?v=frame301" charset="utf-8"></script>
+  <script src="/static/app.js?v=lora-search311" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>
   <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
-<script src="/static/h3-enhancements.js?v=2"></script>
+<script src="/static/h3-enhancements.js?v=3"></script>
   <script src="/static/video-workflows.js?v=12"></script>
   <script src="/static/scene-selectors.js?v=3"></script>
   <script src="/static/scene-settings.js?v=3"></script>

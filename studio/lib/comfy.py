@@ -54,6 +54,22 @@ def enhance_ref_prompt(
                 "No opening portrait, turntable, character sheet, studio backdrop, reference montage "
                 "or dissolve into the scene.\n\n" + prompt
             )
+    elif role == "asset_native":
+        # Native latent continuation has no first-frame picture: every numbered
+        # image is an identity reference that H3 may otherwise paste into frame.
+        marker = "NATIVE CONTINUATION:"
+        if not prompt.startswith(marker):
+            pics = ", ".join(f"<Picture {i}>" for i in range(1, n_images + 1))
+            prompt = (
+                marker + " The video continues the previous clip's moving scene from its "
+                "carried context; this is not a new establishing shot. "
+                f"{pics} {'is an appearance reference' if n_images == 1 else 'are appearance references'} "
+                "only, not filmed frames. Use each only for its assigned subject identity, wardrobe, "
+                "vehicle geometry or environment materials. Never display, paste, enlarge, overlay "
+                "or cut to a reference photograph: no floating heads, portrait inserts, studio "
+                "backdrops, character sheets or reference montage. Each person appears exactly once, "
+                "at the position and scale the scene describes.\n\n" + prompt
+            )
     elif role in ("face_continue", "asset_continue"):
         # Picture 1 is the previous final frame, not a portrait. Portraits
         # follow only as identity references; never ask H3 to animate them.

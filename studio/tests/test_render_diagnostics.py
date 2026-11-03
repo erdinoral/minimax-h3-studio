@@ -11,6 +11,7 @@ class ReportTests(unittest.IsolatedAsyncioTestCase):
         job={'id':'x','status':'cancelled','prompt':'PRIVATE PROMPT', 'api_key':'SECRET',
              'local_path':'C:/private/movie.mp4','ref_images':['private-face.png'],
              'h3_models':{'unet':'C:/private/model.safetensors'},'cancel_source':'stop',
+             'cancel_stage':'running','cancel_progress':37,
              'lora_name':'C:/private/style.safetensors'}
         report=render_report(job)
         encoded=json.dumps(report)
@@ -18,6 +19,7 @@ class ReportTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(excluded, encoded)
         self.assertEqual(report['models']['unet'],'model.safetensors')
         self.assertEqual(report['job']['cancel_source'],'stop')
+        self.assertEqual((report['job']['cancel_stage'],report['job']['cancel_progress']),('running',37))
         self.assertFalse(report['engine']['history_available'])
         self.assertIsNone(report['engine']['completed'])
 

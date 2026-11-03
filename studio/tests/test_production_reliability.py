@@ -55,7 +55,32 @@ class CancellationReliability(unittest.IsolatedAsyncioTestCase):
         stop.assert_not_awaited()
         self.assertEqual(pending['status'], 'cancelled')
         self.assertEqual(pending['cancel_source'], 'queue_stop')
+        self.assertEqual(pending['cancel_stage'], 'queued')
         self.assertGreater(pending['cancel_requested_at'], 0)
+
+    def test_low_steps_are_flagged_only_without_an_effective_speed_adapter(self):
+        specs = {'turbo.safetensors': {'id': 'turbo-6step', 'steps': 6},
+                 'speed.safetensors': {'id': 'x', 'category': 'speed'},
+                 'style.safetensors': {'id': 'realism', 'steps': None}}
+        with patch.object(server, 'find_spec', side_effect=lambda lora_id='', file='': specs.get(file)):
+            self.assertTrue(server._low_step_warning({'steps': 6}, 'style.safetensors'))
+            self.assertTrue(server._low_step_warning({'steps': 6}, None))
+            self.assertFalse(server._low_step_warning({'steps': 6}, 'style.safetensors|turbo.safetensors'))
+            self.assertFalse(server._low_step_warning({'steps': 4}, 'speed.safetensors'))
+            self.assertFalse(server._low_step_warning({'steps': 20}, 'style.safetensors'))
+
+    async def test_single_stop_records_whether_the_job_had_started_rendering(self):
+        running = {'id': 'running', 'status': 'running', 'progress': 41}
+        queued = {'id': 'queued', 'status': 'queued', 'progress': 0}
+        with patch.object(server, '_lock', asyncio.Lock()), patch.object(server, '_jobs', [running, queued]), patch.object(server, '_save_jobs'), patch.object(server.comfy, 'interrupt', new_callable=AsyncMock):
+            await server.cancel_job('running')
+            await server.cancel_job('queued')
+        self.assertEqual((running['cancel_stage'], running['cancel_progress']), ('running', 41))
+        self.assertEqual((queued['cancel_stage'], queued['cancel_source']), ('queued', 'job_stop'))
+        with patch.object(server, '_lock', asyncio.Lock()), patch.object(server, '_jobs', [running]), patch.object(server, '_save_jobs'), patch.object(server.comfy, 'healthy', new_callable=AsyncMock, return_value=True), patch.object(server, '_free_llm_for_production', new_callable=AsyncMock):
+            result = await server.retry_job('running')
+        self.assertNotIn('cancel_stage', result)
+        self.assertNotIn('cancel_progress', result)
 
     async def test_explicit_cancel_is_never_recovered(self):
         job = {'id': 'x', 'status': 'cancelled', 'prompt_id': 'p', 'cancel_requested_at': 1}

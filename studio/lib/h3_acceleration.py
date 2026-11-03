@@ -1,10 +1,23 @@
 """Persisted Spectrum video blend; independent of solver step scheduling."""
 import json
 import math
+import contextvars
+from contextlib import contextmanager
 from pathlib import Path
 
 SETTINGS_PATH = Path(__file__).resolve().parents[1] / "data" / "h3_acceleration.json"
 PRESETS = {"light": 0.25, "balanced": 0.5, "strong": 0.75}
+_render_settings = contextvars.ContextVar('h3_render_acceleration', default=None)
+
+
+@contextmanager
+def render_settings(settings):
+    """Per-render replay settings; never change the application's global controls."""
+    token = _render_settings.set(clean_settings(settings))
+    try:
+        yield
+    finally:
+        _render_settings.reset(token)
 
 
 def graph_settings(graph):
@@ -40,6 +53,8 @@ def clean_settings(raw):
 
 
 def load_settings(path=None):
+    if path is None and _render_settings.get() is not None:
+        return dict(_render_settings.get())
     try:
         return clean_settings(json.loads((path or SETTINGS_PATH).read_text(encoding="utf-8")))
     except (OSError, ValueError, TypeError):

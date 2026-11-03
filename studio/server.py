@@ -32,6 +32,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
 
 from lib import h3_enhancements, continuum, flow_refine, video_refine, native_continuation
 from lib import h3_acceleration, render_control, diagnostics
+from lib import shot_reproduce
 from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
@@ -739,6 +740,27 @@ def _with_auto_continuation_loras(
     return "|".join(names), weights
 
 
+LOW_STEP_THRESHOLD = 12
+
+
+def _has_speed_adapter(lora_name: Optional[str]) -> bool:
+    for file in (lora_name or "").split("|"):
+        spec = find_spec(file=file) if file else None
+        if spec and (spec.get("category") == "speed" or "turbo" in str(spec.get("id") or "")
+                     or (spec.get("steps") or 20) < 20):
+            return True
+    return False
+
+
+def _low_step_warning(job: dict, effective_lora_name: Optional[str]) -> bool:
+    """Undistilled H3 checkpoints need ~20 steps; few steps only work with a speed adapter."""
+    try:
+        steps = int(job.get("steps") or 0)
+    except (TypeError, ValueError):
+        return False
+    return 0 < steps < LOW_STEP_THRESHOLD and not _has_speed_adapter(effective_lora_name)
+
+
 def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]:
     name = (job.get("lora_name") or "").strip()
     if not name:
@@ -1108,6 +1130,7 @@ async def _reattach_completed_legacy_cancel(job: dict) -> bool:
 
 
 def _mark_user_cancelled(job: dict, source: str) -> None:
+    job.update(cancel_stage=job.get('status'), cancel_progress=job.get('progress'))
     job.update(status='cancelled', error='iptal', progress_label='iptal',
                cancel_requested_at=time.time(), cancel_source=source,
                render_pause_requested=False, render_paused=False, render_control_ready=False)
@@ -1148,6 +1171,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "width": job.get("width"),
         "height": job.get("height"),
         "mode": job.get("mode") or "t2v",
+        "reproduction_snapshot": job.get('reproduction_snapshot') or shot_reproduce.snapshot(job),
         "silent_audio": bool(job.get('silent_audio')),
         "seed": job.get("seed"),
         "aspect": job.get("aspect"),
@@ -3432,7 +3456,8 @@ def _reset_job_for_retry(job: dict) -> None:
     job.pop("comfy_step_max", None)
     job.pop("progress_source", None)
     job.pop("_ws_progress_at", None)
-    for key in ('cancel_requested_at', 'cancel_source', 'recovered_from_status', '_reattach'):
+    for key in ('cancel_requested_at', 'cancel_source', 'cancel_stage', 'cancel_progress',
+                'recovered_from_status', '_reattach'):
         job.pop(key, None)
     job["retried_at"] = time.time()
     job["retry_count"] = int(job.get("retry_count") or 0) + 1
@@ -3593,7 +3618,8 @@ _QUEUE_SAVE_DROP_KEYS = (
     "effective_lora_name", "effective_lora_strength", "effective_spectrum",
     "render_pause_requested", "render_paused", "render_control_token", "render_control_ready",
     "comfy_step", "comfy_step_max", "progress_source", "_ws_progress_at",
-    "cancel_requested_at", "cancel_source", "recovered_from_status", "_reattach", "queue_position",
+    "cancel_requested_at", "cancel_source", "cancel_stage", "cancel_progress",
+    "recovered_from_status", "_reattach", "queue_position",
 )
 _QUEUE_SAVE_LINK_KEYS = ("continue_from", "director_root_id", "director_parent_id")
 
@@ -5178,6 +5204,12 @@ async def cinema_library_get(kind: Optional[str] = None):
     return {"ok": True, **cinema.list_library()}
 
 
+@app.post('/api/cinema/library/sync')
+async def cinema_library_sync():
+    """Register assets from all films in the single shared library."""
+    return {'ok': True, **cinema.sync_shared_library()}
+
+
 class CinemaLibrarySaveBody(BaseModel):
     kind: str = "character"
     asset_id: str = Field(..., min_length=1)
@@ -6232,6 +6264,59 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
     if queued.get("jobs"):
         _save_jobs()
     return queued
+
+
+class CinemaReproduceBody(BaseModel):
+    shot_id: str
+    source_job_id: Optional[str] = None
+    expected_film_id: str
+
+
+@app.post('/api/cinema/reproduce-one')
+async def cinema_reproduce_one(body: CinemaReproduceBody):
+    """Clone exactly one stored render; current card/model/ref selections are ignored."""
+    if not await comfy.healthy():
+        raise HTTPException(503, 'ComfyUI kapalı')
+    async with _lock:
+        lib = cinema.load()
+        if lib.get('film_id') != body.expected_film_id:
+            raise HTTPException(409, 'Film değişti; sayfayı yenileyin.')
+        if not any(s.get('id') == body.shot_id for s in lib.get('shots') or []):
+            raise HTTPException(404, 'Sahne bulunamadı')
+        candidates = {j['id']: j for j in [*_gallery, *_jobs]
+                      if j.get('film_id') == body.expected_film_id
+                      and (j.get('shot_id') == body.shot_id or body.shot_id in (j.get('continuum_scene_ids') or []))}
+        source = (candidates.get(body.source_job_id) if body.source_job_id else
+                  max(candidates.values(), key=lambda j: float(j.get('created_at') or 0), default=None))
+        if not source:
+            raise HTTPException(404, 'Bu sahnenin önceki üretim kaydı yok. Önce Sahneyi üret ile üretin.')
+        duplicate = next((j for j in _jobs if j.get('reproduce_of') == source['id']
+                          and j.get('status') in ('queued', 'running')), None)
+        if duplicate:
+            return {'job': duplicate, 'already_queued': True}
+        recorded = source.get('reproduction_snapshot') or source
+        if not recorded.get('acceleration_settings') or not recorded.get('h3_models'):
+            try:
+                history = await comfy.history(source.get('prompt_id')) if source.get('prompt_id') else {}
+                record = history.get(source.get('prompt_id'), {})
+                recovered = shot_reproduce.recover_settings(recorded, (record.get('prompt') or [None, None, {}])[2])
+                source = {**source, 'reproduction_snapshot': recovered}
+            except (OSError, ValueError, KeyError, IndexError, httpx.HTTPError):
+                pass  # clone() explains missing provenance; never guess current settings.
+        try:
+            job = shot_reproduce.clone(source)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if job.get('continue_from'):
+            parent = _clip_record(job['continue_from'])
+            if not parent or parent.get('status') != 'done':
+                raise HTTPException(409, 'Kayıtlı önceki klip hazır değil; devam bağlantısı değiştirilmeyecek.')
+        files = [*(job.get('ref_images') or []), job.get('first_frame_name'), job.get('last_frame_name')]
+        if any(f and not ((REFS / f).is_file() or (COMFY_INPUT / f).is_file()) for f in files):
+            raise HTTPException(409, 'Kayıtlı referans görseli bulunamadı; farklı referansla üretim yapılmadı.')
+        _jobs.append(job)
+        _save_jobs()
+    return {'job': job, 'already_queued': False}
 
 
 def _cinema_shot_already_produced(
@@ -9530,6 +9615,13 @@ def _queue_has_prompt(pid: str, items: list) -> bool:
 
 
 async def _run_job(job: dict):
+    # Keep future repeats independent of subsequent global acceleration changes.
+    job.setdefault('acceleration_settings', h3_acceleration.load_settings())
+    with h3_acceleration.render_settings(job['acceleration_settings']):
+        return await _run_job_impl(job)
+
+
+async def _run_job_impl(job: dict):
     if job.get("mode") == "qwen_frame":
         job["status"] = "running"
         job["error"] = None
@@ -9610,10 +9702,17 @@ async def _run_job(job: dict):
         ]
         last_frame = job.get("last_frame_name")
         ref_videos = [str(x) for x in (job.get("ref_videos") or []) if x]
-        lora_name, lora_strength = _with_auto_continuation_loras(job, *_lora_for_graph(job))
+        if job.get('reproduce_of'):
+            lora_name, lora_strength = job.get('lora_name'), job.get('lora_strength')
+        else:
+            lora_name, lora_strength = _with_auto_continuation_loras(job, *_lora_for_graph(job))
         job["effective_lora_name"] = lora_name or ""
         job["effective_lora_strength"] = lora_strength
+        job["low_step_warning"] = _low_step_warning(job, lora_name)
+        if job["low_step_warning"]:
+            slog.warn_job(job, "low steps without speed adapter", steps=job.get("steps"))
         models = job.get("h3_models") or h3_models.resolve(h3_models.graph_for_mode(mode))
+        job['h3_models'] = dict(models)
         prompt_text = str(job.get("prompt") or "").strip()
         if job.get("continue_from") and first and "CONTINUATION LOCK" not in prompt_text:
             if mode == "face_continue" or face_refs:
@@ -9841,6 +9940,8 @@ async def _run_job(job: dict):
         if job.get('prepare_refine'):
             prompt = flow_refine.capture(prompt, job)
         job['effective_spectrum'] = h3_acceleration.graph_settings(prompt)
+        # Freeze inputs before output last-frame extraction mutates job fields.
+        job['reproduction_snapshot'] = shot_reproduce.snapshot(job)
         await render_control.prepare(COMFY_URL, prompt, job)
         prompt_id = await comfy.queue_prompt(prompt, render_control_token=job.get('render_control_token'))
         job["prompt_id"] = prompt_id

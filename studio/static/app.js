@@ -396,6 +396,78 @@
   function tConfirm(key, map) {
     return confirm(tf(key, map || {}));
   }
+  /** Explanations stay out of the layout: hover (1s delay) or click opens, leaving closes. */
+  function infoTipHtml(text) {
+    const safe = htmlEsc(text);
+    return `<button type="button" class="info-tip" aria-label="${safe}">?<span class="info-tip-pop" role="tooltip">${safe}</span></button>`;
+  }
+  document.addEventListener("click", (e) => {
+    const tip = e.target.closest?.(".info-tip");
+    document.querySelectorAll(".info-tip.open").forEach((open) => { if (open !== tip) open.classList.remove("open"); });
+    if (!tip) return;
+    e.preventDefault();
+    e.stopPropagation();
+    tip.classList.toggle("open");
+  }, true);
+  document.addEventListener("mouseout", (e) => {
+    const tip = e.target.closest?.(".info-tip");
+    if (tip && !tip.contains(e.relatedTarget)) tip.classList.remove("open");
+  });
+  /** Native prompt/confirm garble Turkish on some Windows WebView builds and ignore the app theme. */
+  function askDialog({ title, message = "", label = "", value = null, okLabel = tt("film.ws.ok") }) {
+    return new Promise((resolve) => {
+      const dialog = document.createElement("dialog");
+      dialog.className = "film-import-dialog ui-ask-dialog";
+      const heading = document.createElement("h2");
+      heading.textContent = title;
+      dialog.append(heading);
+      if (message) {
+        const p = document.createElement("p");
+        p.textContent = message;
+        dialog.append(p);
+      }
+      let input = null;
+      if (value !== null) {
+        const field = document.createElement("label");
+        field.textContent = label;
+        input = document.createElement("input");
+        input.type = "text";
+        input.value = value;
+        field.append(input);
+        dialog.append(field);
+      }
+      const actions = document.createElement("div");
+      actions.className = "ui-ask-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = tt("cinema.sceneCancel");
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.className = "ui-ask-ok";
+      ok.textContent = okLabel;
+      actions.append(cancel, ok);
+      dialog.append(actions);
+      let done = false;
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        dialog.close();
+        dialog.remove();
+        resolve(result);
+      };
+      const accept = () => finish(input ? input.value : true);
+      const reject = () => finish(input ? null : false);
+      dialog.addEventListener("cancel", (ev) => { ev.preventDefault(); reject(); });
+      cancel.addEventListener("click", reject);
+      ok.addEventListener("click", accept);
+      input?.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") { ev.preventDefault(); accept(); }
+      });
+      document.body.append(dialog);
+      dialog.showModal();
+      if (input) { input.focus(); input.select(); } else ok.focus();
+    });
+  }
   function uiLang() {
     return typeof h3Lang === "function" ? h3Lang() : "tr";
   }
@@ -2879,6 +2951,9 @@
       '<button type="button" class="btn-ghost cinema-shot-duplicate">' +
       tt("cinema.sectionDuplicate") +
       "</button>" +
+      '<button type="button" class="btn-ghost cinema-shot-reproduce" title="' +
+      htmlEsc(tt("cinema.reproduceExactHelp")) + '"' + (jobBusy ? ' disabled' : '') + '>' +
+      tt("cinema.sectionReproduce") + "</button>" +
       '<button type="button" class="btn-ghost cinema-shot-del">' +
       tt("cinema.del") +
       "</button></div>" +
@@ -2890,7 +2965,7 @@
       "</p>" +
       '<div class="cinema-shot-actions">' +
       '<button type="button" class="cta cinema-shot-produce">' +
-      tt(jobBusy ? "cinema.queueAnother" : existingJob?.status === "done" ? "cinema.sectionReproduce" : "cinema.sectionProduce") +
+      tt("cinema.sectionProduce") +
       "</button>" +
       '<button type="button" class="btn-secondary cinema-shot-edit">' +
       tt("cinema.sectionEdit") +
@@ -3314,7 +3389,10 @@
       btn.setAttribute("aria-pressed", String(on));
     });
     const methodHint = $("cinema-image-provider-status");
-    if (methodHint) methodHint.textContent = tt("cinema.methodHint." + cinemaImageProductionMethod());
+    if (methodHint) {
+      methodHint.textContent = tt("cinema.methodHint." + cinemaImageProductionMethod());
+      methodHint.closest('.cinema-asset-method')?.setAttribute('title', methodHint.textContent);
+    }
     if (seed && document.activeElement !== seed && !lock?.checked) {
       seed.value = String(c.seed != null && c.seed !== "" ? c.seed : -1);
     }
@@ -3911,12 +3989,8 @@
     }
     const modeHint = $("cinema-mode-hint");
     if (modeHint) {
-      modeHint.textContent =
-        mode === "seamless"
-          ? continuumReady
-            ? tt("cinema.modeSeamlessHint")
-            : ""
-          : tt("cinema.modeAssetsHint");
+      modeHint.textContent = mode === "seamless" ? "" : tt("cinema.modeAssetsHint");
+      modeHint.classList.toggle("hidden", !modeHint.textContent);
     }
     const hint = $("cinema-hint");
     if (hint) {
@@ -4058,22 +4132,35 @@ function setCinemaAssetTab(kind, tab, skipLibraryLoad = false) {
   }
 
   let cinemaLibraryModal = null;
-  let cinemaLibraryPlaceholder = null;
+  let cinemaLibraryDetail = null;
+  let cinemaLibraryKind = "character";
+  let cinemaLibraryQuery = "";
 function setCinemaLibraryView(open) {
-    const stack = $("cinema-asset-stack");
-    if (stack && !cinemaLibraryModal) {
-      cinemaLibraryPlaceholder = document.createComment("asset stack home");
-      stack.before(cinemaLibraryPlaceholder);
+    if (!cinemaLibraryModal) {
       cinemaLibraryModal = document.createElement("dialog");
-      cinemaLibraryModal.className = "cinema-library-modal";
+      cinemaLibraryModal.className = "cinema-library-modal cinema-library-browser";
       cinemaLibraryModal.setAttribute("aria-labelledby", "cinema-library-modal-title");
-      const header = document.createElement("header");
-      const title = document.createElement("h2");title.id = "cinema-library-modal-title";
-      const close = document.createElement("button");close.type = "button";close.className = "btn-secondary";close.textContent = "×";
-      close.setAttribute("aria-label", "Close library / Kütüphaneyi kapat");
-      close.onclick = () => setCinemaLibraryView(false);
-      header.append(title, close);cinemaLibraryModal.append(header);
-      document.querySelector("#view-cinema .cinema-panel").append(cinemaLibraryModal);
+      cinemaLibraryModal.innerHTML = '<header><h2 id="cinema-library-modal-title"></h2>' +
+        '<button type="button" class="btn-ghost cinema-library-close">×</button></header>' +
+        '<div class="cinema-library-toolbar"><div class="chips cinema-library-kinds" role="group"></div>' +
+        '<input type="search" class="cinema-library-search" /></div>' +
+        '<div class="cinema-library-gallery gallery-grid"></div>';
+      document.body.append(cinemaLibraryModal);
+      cinemaLibraryModal.querySelector(".cinema-library-close").onclick = () => setCinemaLibraryView(false);
+      cinemaLibraryModal.querySelector(".cinema-library-search").addEventListener("input", event => {
+        cinemaLibraryQuery = event.target.value;
+        renderCinemaLibraryBrowser();
+      });
+      cinemaLibraryModal.addEventListener("click", event => {
+        const kind = event.target.closest("[data-library-kind]");
+        if (kind) {
+          cinemaLibraryKind = kind.dataset.libraryKind;
+          renderCinemaLibraryBrowser();
+          return;
+        }
+        const card = event.target.closest(".cinema-lib-open");
+        if (card) openCinemaLibraryDetail(card.dataset.kind, card.dataset.id);
+      });
       cinemaLibraryModal.addEventListener("cancel", event => {event.preventDefault();setCinemaLibraryView(false);});
       cinemaLibraryModal.addEventListener("close", () => {if(state.cinemaLibraryView)setCinemaLibraryView(false);});
       cinemaLibraryModal.addEventListener("click", event => {
@@ -4082,9 +4169,14 @@ function setCinemaLibraryView(open) {
       });
     }
     if (cinemaLibraryModal) {
-      cinemaLibraryModal.querySelector("h2").textContent = tt("cinema.tabLibrary");
-      if(open){cinemaLibraryModal.append(stack);if(!cinemaLibraryModal.open)cinemaLibraryModal.showModal();}
-      else{if(cinemaLibraryModal.open)cinemaLibraryModal.close();if(stack)cinemaLibraryPlaceholder.after(stack);}
+      cinemaLibraryModal.querySelector("h2").textContent = tt("cinema.sharedLibrary");
+      cinemaLibraryModal.querySelector(".cinema-library-close").setAttribute("aria-label", tt("cinema.libraryClose"));
+      const search = cinemaLibraryModal.querySelector(".cinema-library-search");
+      search.placeholder = tt("cinema.librarySearch");
+      search.setAttribute("aria-label", tt("cinema.librarySearch"));
+      search.value = cinemaLibraryQuery;
+      if(open){renderCinemaLibraryBrowser();if(!cinemaLibraryModal.open)cinemaLibraryModal.showModal();}
+      else{cinemaLibraryDetail?.close();if(cinemaLibraryModal.open)cinemaLibraryModal.close();}
     }
 
     state.cinemaLibraryView = !!open;
@@ -4094,13 +4186,81 @@ function setCinemaLibraryView(open) {
     btn?.setAttribute("aria-pressed", open ? "true" : "false");
     btn?.classList.toggle("is-open", !!open);
     if (label) label.textContent = tt(open ? "cinema.backToFilmCards" : "cinema.tabLibrary");
-    for (const kind of ["character", "creature", "vehicle", "location"]) {
-      const meta = cinemaKindMeta(kind);
-      setCinemaAssetTab(kind, open ? "library" : "list", true);
-      setCinemaFold(meta.fold, true);
-    }
-    syncCinemaFold();
     if (open) void loadCinemaLibrary();
+  }
+
+  function renderCinemaLibraryBrowser() {
+    if (!cinemaLibraryModal) return;
+    const kinds = {character: "cinema.chars", creature: "cinema.creatures",
+      vehicle: "cinema.vehicles", location: "cinema.locs"};
+    cinemaLibraryModal.querySelector(".cinema-library-kinds").innerHTML = Object.entries(kinds).map(([kind, label]) =>
+      '<button type="button" class="chip' + (kind === cinemaLibraryKind ? ' on' : '') +
+      '" data-library-kind="' + kind + '" aria-pressed="' + (kind === cinemaLibraryKind) + '">' +
+      htmlEsc(tt(label)) + '<span class="cinema-library-count">' + cinemaLibraryEntries(kind).length + '</span></button>').join("");
+    const query = cinemaLibraryQuery.trim().toLocaleLowerCase();
+    const items = cinemaLibraryEntries(cinemaLibraryKind)
+      .filter(item => !query || String(item.name || "").toLocaleLowerCase().includes(query))
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), uiLang(), {numeric:true}));
+    cinemaLibraryModal.querySelector(".cinema-library-gallery").innerHTML = items.length
+      ? items.map(item => cinemaLibraryCardHtml(item, cinemaLibraryKind)).join("")
+      : '<p class="muted cinema-library-empty">' + htmlEsc(tt(query ? "cinema.libraryNoMatch" : "cinema.libEmpty")) + '</p>';
+  }
+
+  function openCinemaLibraryDetail(kind, id) {
+    const item = cinemaLibraryEntries(kind).find(item => String(item.id) === String(id));
+    if (!item) return;
+    if (!cinemaLibraryDetail) {
+      cinemaLibraryDetail = document.createElement("dialog");
+      cinemaLibraryDetail.className = "cinema-library-detail";
+      document.body.append(cinemaLibraryDetail);
+      cinemaLibraryDetail.addEventListener("click", event => {
+        if (event.target.closest(".cinema-library-detail-close")) {cinemaLibraryDetail.close();return;}
+        const action = event.target.closest(".cinema-lib-pull, .cinema-lib-save, .cinema-lib-del");
+        if (!action) return;
+        if (action.classList.contains("cinema-lib-del") && !tConfirm("confirm.deleteCard")) return;
+        action.disabled = true;
+        const {kind, id} = cinemaLibraryDetail.dataset;
+        void (async () => {
+          try {
+            if (action.classList.contains("cinema-lib-pull")) await pullCinemaLibraryAsset(kind, id);
+            else if (action.classList.contains("cinema-lib-save")) await saveCinemaAssetToLibrary(kind, id);
+            else {
+              const r = await fetch('/api/cinema/library/' + encodeURIComponent(kind) + '/' + encodeURIComponent(id), {method:'DELETE'});
+              const data = await r.json().catch(() => ({}));
+              if (!r.ok) throw Error(errDetail(data));
+              toast(tt("cinema.libDeleted"));
+            }
+            cinemaLibraryDetail.close();
+            await loadCinemaLibrary();
+          } catch (error) {toast(String(error.message || error));}
+          finally {action.disabled = false;}
+        })();
+      });
+    }
+    cinemaLibraryDetail.dataset.kind = kind;
+    cinemaLibraryDetail.dataset.id = id;
+    const images = cinemaAssetImages(item);
+    const thumb = cinemaLibraryThumbnail(item, kind);
+    const name = item.name || tt("cinema.untitled");
+    cinemaLibraryDetail.innerHTML = '<header><h2 id="cinema-library-detail-title">' + htmlEsc(name) + '</h2>' +
+      '<button type="button" class="btn-ghost cinema-library-detail-close" aria-label="' + htmlEsc(tt("cinema.libraryDetailClose")) + '">×</button></header>' +
+      '<div class="cinema-library-detail-content">' + (thumb ? '<img class="cinema-library-detail-image" src="' +
+      htmlEsc(thumb.url || cinemaRefUrl(thumb.file)) + '" alt="' + htmlEsc(name) + '" />' : '') +
+      '<div><p class="cinema-library-description">' + htmlEsc(item.notes || tt("cinema.libraryNoDescription")) + '</p>' +
+      (item.voice ? '<p class="cinema-library-description"><b>' + htmlEsc(tt("cinema.voice")) + '</b><br>' + htmlEsc(item.voice) + '</p>' : '') +
+      (images.length > 1 ? '<div class="cinema-library-detail-views">' + images.map(im =>
+        '<button type="button" class="btn-ghost" data-library-preview="' + htmlEsc(im.url || cinemaRefUrl(im.file)) + '"><img src="' +
+        htmlEsc(im.url || cinemaRefUrl(im.file)) + '" alt="' + htmlEsc(im.name || name) + '" /></button>').join('') + '</div>' : '') +
+      '<div class="row-btns">' + (item._fromFilmOnly
+        ? '<button type="button" class="cta cinema-lib-save">' + htmlEsc(tt("cinema.saveToLibrary")) + '</button>'
+        : '<button type="button" class="cta cinema-lib-pull">' + htmlEsc(tt("cinema.pullLib")) + '</button>' +
+          '<button type="button" class="btn-ghost cinema-lib-del">' + htmlEsc(tt("cinema.del")) + '</button>') +
+      '</div></div></div>';
+    cinemaLibraryDetail.setAttribute("aria-labelledby", "cinema-library-detail-title");
+    cinemaLibraryDetail.querySelectorAll("[data-library-preview]").forEach(button => button.onclick = () => {
+      cinemaLibraryDetail.querySelector(".cinema-library-detail-image").src = button.dataset.libraryPreview;
+    });
+    if (!cinemaLibraryDetail.open) cinemaLibraryDetail.showModal();
   }
 
 function cinemaSheetRefUi(kind) {
@@ -4313,7 +4473,10 @@ async function clearCinemaSheetRef(kind) {
 
 async function loadCinemaLibrary() {
     try {
-      const data = await fetch("/api/cinema/library").then((r) => r.json());
+      const response = await fetch("/api/cinema/library/sync", {method:"POST"});
+      if (!response.ok) throw Error("Shared library unavailable");
+      const result = await response.json();
+      const data = result.library || result;
       state.cinemaLibrary = {
         characters: Array.isArray(data.characters) ? data.characters : [],
         locations: Array.isArray(data.locations) ? data.locations : [],
@@ -4335,45 +4498,22 @@ async function loadCinemaLibrary() {
     if (state.cinemaLibraryView) syncCinemaFold();
   }
 
+  function cinemaLibraryThumbnail(item, kind) {
+    const images = cinemaAssetImages(item);
+    if (kind !== "character") return images[0];
+    return images.find(image => /portrait|headshot|face/i.test([image.file, image.name, image.role, image.reference_role].filter(Boolean).join(" ")))
+      || images.find(image => image.file === item.image) || images[0];
+  }
+
 function cinemaLibraryCardHtml(item, kind) {
-    const imgs = cinemaAssetImages(item);
-    const thumb = imgs[0];
-    const src = thumb
-      ? htmlEsc(thumb.url || cinemaRefUrl(thumb.file))
-      : "";
-    return (
-      '<div class="cinema-lib-card" data-id="' +
-      htmlEsc(item.id) +
-      '" data-kind="' +
-      kind +
-      '">' +
-      (src
-        ? '<img class="cinema-lib-thumb" src="' +
-          src +
-          '" alt="" data-full="' +
-          src +
-          '" data-file="' +
-          htmlEsc(thumb?.file || "") +
-          '" data-name="' +
-          htmlEsc((item.name || "asset") + ".png") +
-          '" />'
-        : '<div class="cinema-lib-thumb is-empty"></div>') +
-      '<div class="cinema-lib-meta">' +
-      "<b>" +
-      htmlEsc(item.name || tt("cinema.untitled")) +
-      "</b>" +
-      '<span class="muted">' +
-      htmlEsc((item.notes || "").slice(0, 80)) +
-      "</span>" +
-      '<div class="row-btns">' +
-      (item._fromFilmOnly
-        ? '<span class="muted">' + htmlEsc(tt("cinema.tabList")) + "</span>" +
-          '<button type="button" class="btn-secondary cinema-lib-save">' + htmlEsc(tt("cinema.saveToLibrary")) + "</button>"
-        : '<button type="button" class="cta cinema-lib-pull">' + htmlEsc(tt("cinema.pullLib")) + "</button>" +
-          (item._inFilm ? '<span class="muted">' + htmlEsc(tt("cinema.libInFilm") || "Filmde") + "</span>" : "") +
-          '<button type="button" class="btn-ghost cinema-lib-del">' + htmlEsc(tt("cinema.del")) + "</button>") +
-      "</div></div></div>"
-    );
+    const thumb = cinemaLibraryThumbnail(item, kind);
+    const name = item.name || tt("cinema.untitled");
+    const bodyPreview = kind === "character" && thumb && !/portrait|headshot|face/i.test([thumb.file, thumb.name, thumb.role, thumb.reference_role].filter(Boolean).join(" "));
+    return '<button type="button" class="gallery-card cinema-lib-card cinema-lib-open" data-id="' + htmlEsc(item.id) +
+      '" data-kind="' + htmlEsc(kind) + '" aria-label="' + htmlEsc(name) + '">' +
+      (thumb ? '<span class="cinema-lib-picture' + (bodyPreview ? ' is-body-preview' : '') + '"><img class="cinema-lib-thumb" src="' + htmlEsc(thumb.url || cinemaRefUrl(thumb.file)) + '" alt="" loading="lazy" /></span>'
+        : '<span class="cinema-lib-thumb is-empty" aria-hidden="true">' + htmlEsc(name.slice(0, 1).toLocaleUpperCase()) + '</span>') +
+      '<span class="cinema-lib-name">' + htmlEsc(name) + '</span></button>';
   }
 
 function cinemaLibraryEntries(kind) {
@@ -4381,7 +4521,7 @@ function cinemaLibraryEntries(kind) {
     const filmItems = ensureCinema()[meta.key] || [];
     const inFilm = new Set(
       filmItems.flatMap((x) =>
-        [String(x.library_id || ""), String(x.id || ""), String(x.name || "").toLowerCase()].filter(Boolean)
+        [String(x.library_id || ""), String(x.id || "")].filter(Boolean)
       )
     );
     const savedItems = (state.cinemaLibrary && state.cinemaLibrary[meta.key]) || [];
@@ -4389,25 +4529,15 @@ function cinemaLibraryEntries(kind) {
       ...x,
       _inFilm:
         inFilm.has(String(x.id || "")) ||
-        inFilm.has(String(x.library_id || "")) ||
-        inFilm.has(String(x.name || "").toLowerCase()),
+        inFilm.has(String(x.library_id || "")),
     }));
-    const savedKeys = new Set(savedItems.flatMap((x) =>
-      [String(x.id || ""), String(x.library_id || ""), String(x.name || "").toLowerCase()].filter(Boolean)
-    ));
-    for (const asset of filmItems) {
-      if (!asset?.id) continue;
-      if (savedKeys.has(String(asset.library_id || "")) ||
-          savedKeys.has(String(asset.id || "")) ||
-          savedKeys.has(String(asset.name || "").toLowerCase())) continue;
-      items.push({ ...asset, _fromFilmOnly: true, _inFilm: true });
-    }
     return items;
   }
 
 function renderCinemaLibrary(kind) {
     const meta = cinemaKindMeta(kind);
     const root = $(meta.libHost);
+    if (state.cinemaLibraryView && cinemaLibraryKind === meta.kind) renderCinemaLibraryBrowser();
     if (!root) return;
     const items = cinemaLibraryEntries(kind);
     if (!items.length) {
@@ -4502,8 +4632,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     } else {
       await loadCinema();
     }
-    setCinemaAssetTab(meta.kind, "library");
-    setCinemaFold(meta.fold, true);
+    if (!state.cinemaLibraryView) {
+      setCinemaAssetTab(meta.kind, "library");
+      setCinemaFold(meta.fold, true);
+    }
     renderCinema();
     if (filmWorkspace) filmWorkspace.render();
     toast(tf("cinema.pulledLib", { name: data.asset?.name || "" }));
@@ -5425,14 +5557,39 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
+  async function reproduceCinemaOne(shotId, button) {
+    if (button) button.disabled = true;
+    try {
+      // Do not save current controls or recompose the edited card: this action
+      // deliberately repeats the historical job, including its parent and seed.
+      const cine = ensureCinema();
+      const shotIndex = (cine.shots || []).findIndex(s => s.id === shotId);
+      const source = cinemaJobForShot(shotId, shotIndex);
+      const r = await fetch("/api/cinema/reproduce-one", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({shot_id: shotId, expected_film_id: cine.film_id,
+          source_job_id: source?.id || null}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 404 && data.detail === "Not Found") {
+        throw new Error(tt("cinema.reproduceRestart"));
+      }
+      if (!r.ok) throw new Error(errDetail(data));
+      toast(tt("cinema.reproduceExactQueued"));
+      setProdLane("director");
+      await refreshJobs();
+      renderCinemaShots();
+    } catch (e) {
+      toast(String(e.message || e));
+    } finally {
+      if (button?.isConnected) button.disabled = false;
+    }
+  }
+
   async function produceCinemaOne(shotId, button) {
     const shot = cinemaShotById(shotId);
     if (!shot || !(shot.text || "").trim()) {
       toast(tt("cinema.addShotFirst"));
-      return;
-    }
-    if (cinemaStudioMode() !== "assets") {
-      toast(tt("cinema.singleAssetsOnly"));
       return;
     }
     if (button) button.disabled = true;
@@ -8547,12 +8704,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             ? ""
             : "";
       const err = j.status === "error" && j.error ? ` — ${String(j.error).slice(0, 60)}` : "";
+      const lowSteps = j.low_step_warning
+        ? ` <small class="muted" title="${htmlEsc(tf("job.lowStepsTitle", { n: j.steps }))}">⚠ ${htmlEsc(tf("job.lowSteps", { n: j.steps }))}</small>`
+        : "";
       const sira = activeOrder.has(j.id)
         ? `<span class="job-sira">#${activeOrder.get(j.id)}</span> `
         : "";
       const stName = tt("job." + j.status);
       const stText = stName.indexOf("job.") === 0 ? j.status : stName;
-      left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${htmlEsc((j.scene_title || j.prompt || "").slice(0, 60))}${err}`;
+      left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${htmlEsc((j.scene_title || j.prompt || "").slice(0, 60))}${err}${lowSteps}`;
       if (j.director_chain_role) {
         const badge = document.createElement('small');
         badge.className = 'director-chain-badge';
@@ -8672,6 +8832,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         stop.title = tt("job.stopTitle");
         stop.onclick = async (e) => {
           e.stopPropagation();
+          // The list re-renders and shifts while rendering; a stray click must not discard work.
+          const confirmKey = j.status === "running" ? "job.stopConfirmRunning" : "job.stopConfirmQueued";
+          if (!tConfirm(confirmKey, { title: (j.scene_title || j.prompt || "").slice(0, 80) })) return;
           stop.disabled = true;
           try {
             const r = await fetch(`/api/jobs/${j.id}/cancel`, { method: "POST" });
@@ -9770,9 +9933,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       checks.innerHTML = LORA_CATEGORIES.map(category => {
         const items = catalog.filter(spec => spec.id && spec.file && spec.ready && loraCategory(spec) === category);
         if (!items.length) return "";
-        return `<details class="lora-category" data-category="${htmlEsc(category)}" ${expanded.has(category) ? "open" : ""}><summary>${htmlEsc(loraCategoryLabel(category))}</summary><div class="lora-category-items">` +
+        return `<details class="lora-category" data-category="${htmlEsc(category)}" ${expanded.has(category) && !checks.querySelector(`details[data-category="${CSS.escape(category)}"][data-search-opened]`) ? "open" : ""}><summary>${htmlEsc(loraCategoryLabel(category))}</summary><div class="lora-category-items">` +
           items.map(spec => `<div class="lora-pick-row"><label><input type="checkbox" aria-label="${htmlEsc(spec.label)}" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label><input type="number" data-lora-weight="${htmlEsc(spec.file)}" aria-label="${htmlEsc(spec.label)} ${window.h3Lang?.() === "en" ? "weight" : "ağırlık"}" min="-6" max="6" step="0.05" value="${loraWeight(spec)}" style="width:75px" /></div>`).join("") + "</div></details>";
       }).join("");
+      applyLoraSearch(hostId);
       const syncLoraChecks = () => {
         const boxes = [...checks.querySelectorAll('input[type="checkbox"]')];
         const speedBoxes = boxes.filter(box => box.checked && (state.loraCatalog || []).some(spec => spec.id === box.value && spec.preset));
@@ -9813,6 +9977,51 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     updateLoraHint();
     fillLoraShop();
   }
+
+  function applyLoraSearch(hostId) {
+    const checks = $(hostId);
+    if (!checks) return;
+    const query = (document.querySelector(`[data-lora-search="${hostId}"]`)?.value || "").trim().toLocaleLowerCase();
+    let matches = 0;
+    checks.querySelectorAll("details.lora-category").forEach((group) => {
+      let visible = 0;
+      group.querySelectorAll(".lora-pick-row").forEach((row) => {
+        const file = row.querySelector("[data-lora-weight]")?.dataset.loraWeight || "";
+        const hit = !query || `${row.textContent} ${file}`.toLocaleLowerCase().includes(query);
+        row.hidden = !hit;
+        if (hit) visible += 1;
+      });
+      group.hidden = !visible;
+      matches += visible;
+      if (query && visible && !group.open) {
+        group.open = true;
+        group.dataset.searchOpened = "1";
+      } else if (!query && group.dataset.searchOpened) {
+        group.open = false;
+        delete group.dataset.searchOpened;
+      }
+    });
+    let empty = checks.querySelector(".lora-search-empty");
+    if (query && !matches && checks.querySelector("details.lora-category")) {
+      if (!empty) {
+        empty = document.createElement("p");
+        empty.className = "muted lora-search-empty";
+        checks.append(empty);
+      }
+      empty.textContent = tt("lora.searchEmpty");
+    } else {
+      empty?.remove();
+    }
+  }
+  document.addEventListener("input", (e) => {
+    const hostId = e.target.dataset?.loraSearch;
+    if (hostId) applyLoraSearch(hostId);
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest?.("[data-lora-clear]")) return;
+    syncLoraSelection([], false);
+    if (state.cinemaLoaded) void saveCinema(true);
+  });
 
   function loraSizeLabel(spec) {
     const n = Number(spec?.bytes || 0);
@@ -9969,7 +10178,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const paint = () => {
         const weight = Number(current.spectrum_blend_weight ?? 0.5);
         const presets = current.spectrum_presets || [{id:"light",blend_weight:0.25},{id:"balanced",blend_weight:0.5},{id:"strong",blend_weight:0.75}];
-        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend><div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><p class="muted">${en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0."}</p><p class="muted">${en ? "Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir."}</p><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sol-Attn<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Sol-Attn sparse attention" : "Sol-Attn seyrek dikkat"}" id="h3-sparse-enabled" data-acceleration="sparse" ${current.sparse_enabled ? "checked" : ""}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "ComfyUI core block sparse attention (tau 1.3, from 20%). Faster on long clips; applies to new jobs." : "ComfyUI'ın yerleşik seyrek dikkat hızlandırması (tau 1.3, %20'den sonra). Uzun kliplerde hızlandırır; yeni işlerde geçerli."}</p>`;
+        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span>${infoTipHtml(en ? "Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir.")}</label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend>${infoTipHtml(en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0.")}<div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sol-Attn<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Sol-Attn sparse attention" : "Sol-Attn seyrek dikkat"}" id="h3-sparse-enabled" data-acceleration="sparse" ${current.sparse_enabled ? "checked" : ""}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "ComfyUI's built-in sparse attention acceleration" : "ComfyUI'ın yerleşik seyrek dikkat hızlandırması"}</p>`;
       };
       const save = async changes => {
         panel.querySelectorAll("button, input").forEach(control => control.disabled = true);
@@ -10645,6 +10854,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           : root.id.includes("loc")
             ? "location"
             : "character";
+      const open = e.target.closest(".cinema-lib-open");
+      if (open) {
+        e.preventDefault();
+        openCinemaLibraryDetail(kind, open.dataset.id);
+        return;
+      }
       const pull = e.target.closest(".cinema-lib-pull");
       const save = e.target.closest(".cinema-lib-save");
       if (save) {
@@ -11310,6 +11525,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (id) setCinemaShotFrame(id, "");
       return;
     }
+    const reproduce = e.target.closest(".cinema-shot-reproduce");
+    if (reproduce) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = reproduce.closest(".cinema-shot")?.dataset.id;
+      if (id) void reproduceCinemaOne(id, reproduce);
+      return;
+    }
     const produce = e.target.closest(".cinema-shot-produce");
     if (produce) {
       e.preventDefault();
@@ -11716,7 +11939,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       del.className = "btn-ghost job-action-delete";
       del.textContent = tt("queue.deleteSave");
       del.onclick = async () => {
-        if (!tConfirm("confirm.queueSaveDelete", { name: s.name, n: s.count })) return;
+        const sure = await askDialog({
+          title: tt("queue.deleteSave"),
+          message: tf("confirm.queueSaveDelete", { name: s.name, n: s.count }),
+          okLabel: tt("queue.deleteSave"),
+        });
+        if (!sure) return;
         try {
           await queueSaveRequest(`/api/queue/saves/${encodeURIComponent(s.id)}`, { method: "DELETE" });
           tToast("toast.queueSaveDeleted");
@@ -11747,10 +11975,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!active.length) return tToast("queue.saveNothing");
     const when = new Date().toLocaleString(uiLang() === "en" ? "en-GB" : "tr-TR",
       { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-    const warn = active.some((j) => j.status === "running") ? `${tt("queue.saveRunningWarn")}\n\n` : "";
-    const name = window.prompt(`${warn}${tt("queue.saveName")}`, `${tt("queue.save")} ${when}`);
-    if (name === null) return;
     const button = e.currentTarget;
+    const name = await askDialog({
+      title: tt("queue.save"),
+      message: active.some((j) => j.status === "running") ? tt("queue.saveRunningWarn") : "",
+      label: tt("queue.saveName"),
+      value: `${tt("queue.save")} ${when}`,
+      okLabel: tt("queue.save"),
+    });
+    if (name === null) return;
     button.disabled = true;
     try {
       const data = await queueSaveRequest("/api/queue/saves", {

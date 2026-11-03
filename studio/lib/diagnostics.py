@@ -6,7 +6,7 @@ def basename(value):
 def render_report(job, entry=None):
     fields = ('id','status','mode','width','height','duration','steps','seed','sampler','scheduler',
               'created_at','started_at','done_at','prompt_id','cancel_requested_at','cancel_source',
-              'recovered_from_status','effective_spectrum','native_context_chunks','continuity_method',
+              'cancel_stage','cancel_progress','low_step_warning','recovered_from_status','effective_spectrum','native_context_chunks','continuity_method',
               'continuum_chunk_seconds','continuum_reference_size','continuum_grouping')
     status = (entry or {}).get('status') or {}
     return {'schema':'h3-studio-render-diagnostics/v1',

@@ -59,9 +59,20 @@ class NativeContinuation(unittest.TestCase):
                    continuum_prompts=['@R1 rises', '@R2 greets @R1'])
         with patch('lib.comfy.apply_spectrum', side_effect=lambda g, **kw: g):
             graph = native_continuation.build(job)
-        self.assertEqual(graph['n0_104']['inputs']['prompt'], '<Picture 1> rises')
+        self.assertTrue(graph['n0_104']['inputs']['prompt'].endswith('\n\n<Picture 1> rises'))
         self.assertNotIn('n0_201', graph)
-        self.assertEqual(graph['n1_104']['inputs']['prompt'], '<Picture 2> greets <Picture 1>')
+        self.assertTrue(graph['n1_104']['inputs']['prompt'].endswith('\n\n<Picture 2> greets <Picture 1>'))
+
+    def test_reference_sections_forbid_pasting_reference_photographs(self):
+        job = self.job()
+        job.update(ref_images=['boy.png'], continuum_prompts=['The boy stays seated'])
+        with patch('lib.comfy.apply_spectrum', side_effect=lambda g, **kw: g):
+            graph = native_continuation.build(job)
+        prompt = graph['n0_104']['inputs']['prompt']
+        self.assertTrue(prompt.startswith('NATIVE CONTINUATION:'))
+        self.assertIn('<Picture 1> is an appearance reference only, not filmed frames', prompt)
+        self.assertIn('no floating heads', prompt)
+        self.assertNotIn('NATIVE CONTINUATION:', native_continuation.build(self.job())['n0_104']['inputs']['prompt'])
 
     def test_missing_or_incompatible_state_fails_closed(self):
         job = self.job()

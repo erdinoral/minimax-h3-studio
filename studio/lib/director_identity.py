@@ -1,10 +1,26 @@
 """Resolve Director visual cast before composing or queuing film prompts."""
 import copy
 import re
-from . import cinema
+from . import backdrop, cinema
+
+
+def shot_backdrop(shot):
+    return backdrop.normalize((shot.get("structured") or {}).get("backdrop"))
 
 
 def prepare_shot(shot, lib):
+    out = _prepare_cast(shot, lib)
+    if shot_backdrop(shot):
+        # A keyed shot has no set: location plates would paint one back in.
+        locations = {a.get("id") for a in lib.get("locations", [])}
+        bindings = out.get("bindings")
+        if bindings is None:
+            bindings = [{"asset_id":a["id"]} for a in cinema.match_prompt(str(shot.get("text") or ""), lib)]
+        out["bindings"] = [b for b in bindings if b.get("asset_id") not in locations]
+    return out
+
+
+def _prepare_cast(shot, lib):
     out = copy.deepcopy(shot)
     text = str(shot.get("text") or "")
     cast = str((shot.get("structured") or {}).get("character") or "").strip()
@@ -55,7 +71,7 @@ def prompt_for_shot(shot, lib, silent=False):
          + ". Keep each actor's identity separate. Do not transfer facial features, hair, costume or voice between actors."
          if actors else ""),
     ) if part)
-    return cinema.apply_look(str(shot.get("text") or ""),head)
+    return cinema.apply_look(backdrop.apply(str(shot.get("text") or ""), shot_backdrop(shot)),head)
 
 
 def manifest(plan):

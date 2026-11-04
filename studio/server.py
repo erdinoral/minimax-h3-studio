@@ -33,6 +33,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
 from lib import h3_enhancements, continuum, flow_refine, video_refine, native_continuation
 from lib import h3_acceleration, render_control, diagnostics
 from lib import shot_reproduce
+from lib import backdrop as chroma_backdrop
 from lib.comfy import (
     ComfyClient,
     build_t2v_prompt,
@@ -1389,6 +1390,8 @@ class GenerateBody(BaseModel):
     purpose: Optional[str] = None
     prompt_rewriter_enabled: bool = False
     lane: Optional[str] = None
+    # "green" | "blue": chroma key screen instead of a set
+    backdrop: Optional[str] = None
     lora_id: Optional[str] = None
     lora_name: Optional[str] = None
     lora_strength: Optional[float] = None
@@ -1480,6 +1483,7 @@ class BatchBody(BaseModel):
     post_pass: Optional[str] = None
     # Continue shots resume from the parent's saved latent AV tail instead of its last frame.
     native_continue: bool = False
+    backdrop: Optional[str] = None
 
 
 class CinemaProduceBody(BaseModel):
@@ -2760,6 +2764,9 @@ async def generate(body: GenerateBody):
         )
         if rewritten and rewritten.strip():
             body.prompt = rewritten.strip()
+    body.prompt = chroma_backdrop.apply(body.prompt, body.backdrop)
+    if body.continuum_segment_prompts:
+        body.continuum_segment_prompts = [chroma_backdrop.apply(p, body.backdrop) for p in body.continuum_segment_prompts]
 
     mode = (body.mode or "").strip().lower()
     reference_plan = None if body.sheet_job else _asset_plan(
@@ -3187,6 +3194,7 @@ async def batch(body: BatchBody):
             )
             rewritten_prompts.append((rp or p).strip() or p)
         prompts = rewritten_prompts
+    prompts = [chroma_backdrop.apply(p, getattr(body, "backdrop", None)) for p in prompts]
     shot_modes = [str(m or "").strip().lower() for m in (body.modes or [])]
     use_per_shot = bool(shot_modes)
     # Global chain tip = optional; within-batch chain = shots 2+ continue from shot 1…N-1

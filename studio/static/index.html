@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=lora-search312" />
+  <link rel="stylesheet" href="/static/app.css?v=backdrop316" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -347,6 +347,11 @@
       <div class="h3-workflow-card" id="video-workflow-controls"></div>
       <textarea id="prompt" rows="3" placeholder="Sahneyi, kamerayı, diyalogu ve sesi anlat… (Ctrl+Enter = sıraya ekle)"></textarea>
       <div class="gen-actions">
+        <select id="scene-backdrop" class="backdrop-select" autocomplete="off" aria-label="Arka plan" data-i18n-aria-label="backdrop.label" title="Yeşil veya mavi perde: mekân yerine düz, ayrılabilir arka plan" data-i18n-title="backdrop.title">
+          <option value="" data-i18n="backdrop.none">Arka plan</option>
+          <option value="green" data-i18n="backdrop.green">Yeşil perde</option>
+          <option value="blue" data-i18n="backdrop.blue">Mavi perde</option>
+        </select>
         <button type="button" class="btn-ghost" id="btn-prompt-rewrite" title="LLM ile prompt düzenle (üretmeden)" data-i18n-title="ui.btn-prompt-rewrite.title">Rewrite</button>
         <button type="button" class="cta" id="btn-generate">Üret</button>
       </div>
@@ -1058,6 +1063,9 @@
                   <select id="cinema-scene-type"><option value="t2v" data-i18n="scene.editor.2">Yeni video</option><option value="continue" data-i18n="scene.editor.3">Devam videosu</option></select>
                 </label>
                 <label class="cinema-scene-lang"><span data-i18n="scene.editor.4">Süre (sn)</span><input id="cinema-scene-duration" type="number" min="2" max="15" step="1" value="5" /></label>
+                <label class="cinema-scene-lang" title="Yeşil veya mavi perde: mekân yerine düz, ayrılabilir arka plan" data-i18n-title="backdrop.title"><span data-i18n="backdrop.label">Arka plan</span>
+                  <select id="cinema-scene-backdrop" data-scene-field="backdrop"><option value="" data-i18n="backdrop.set">Mekân</option><option value="green" data-i18n="backdrop.green">Yeşil perde</option><option value="blue" data-i18n="backdrop.blue">Mavi perde</option></select>
+                </label>
               </div>
               <label><span data-i18n="scene.editor.5">Karakter çağırmaları</span><textarea id="cinema-scene-character" rows="2" data-scene-field="character" placeholder="Master Kyros, Seraph Vane"></textarea></label>
               <label><span data-i18n="scene.editor.6">Mekan / durum</span><textarea id="cinema-scene-location" rows="3" data-scene-field="location" data-i18n-placeholder="scene.editor.50" placeholder="Bu sahnede ne oluyor?"></textarea></label>
@@ -1353,14 +1361,14 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=lora-search310" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=w6a8hint1" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
-  <script src="/static/app.js?v=lora-search311" charset="utf-8"></script>
+  <script src="/static/app.js?v=w6a8hint1" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>

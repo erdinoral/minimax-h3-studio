@@ -33,7 +33,7 @@ class ContinuationTests(unittest.IsolatedAsyncioTestCase):
             h3_models=NS(resolve=lambda g:{'graph':g},graph_for_mode=lambda m:'fl2va' if m=='continue' else 'ref2va'),
             enhance_ref_prompt=lambda p,**kw:p, _jobs=jobs,_save_jobs=lambda:None,
             slog=NS(info=lambda *a,**kw:None), apply_trigger=lambda p,_:p,find_spec=lambda **kw:None,
-            apply_selected_triggers=lambda p,**kw:p,
+            apply_selected_triggers=lambda p,**kw:p, chroma_backdrop=NS(apply=lambda p,_:p),
             cinema=NS(load=lambda:{},bind_prompt=lambda *a,**kw:{'prompt':'reference composition','hits':[1],'ref_images':['portrait.png'],'has_character':True,'has_location':False},
                       bound_character_portraits=lambda *a:['portrait.png'],bound_vehicle_stills=lambda *a:[],
                       mentioned_character_lock=lambda *a:''))

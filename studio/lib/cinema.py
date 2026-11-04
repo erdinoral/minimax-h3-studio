@@ -13,6 +13,8 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 
+from . import backdrop as chroma_backdrop
+
 STUDIO_ROOT = Path(__file__).resolve().parent.parent
 CINEMA_FILE = STUDIO_ROOT / "data" / "cinema.json"
 FILMS_DIR = STUDIO_ROOT / "data" / "films"
@@ -807,6 +809,7 @@ _STRUCTURED_KEYS = (
     "camera_target",
     "transition",
     "beats",
+    "backdrop",
 )
 
 
@@ -815,6 +818,7 @@ def _clean_structured(raw: Any) -> dict[str, str]:
     out: dict[str, str] = {}
     for key in _STRUCTURED_KEYS:
         out[key] = str(src.get(key) or "").strip()
+    out["backdrop"] = chroma_backdrop.normalize(out["backdrop"])
     return out
 
 
@@ -871,13 +875,15 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
 
     style = s.get("visual_style") or "Live-action, cinematic"
     parts: list[str] = [f"[Shot 1] {style}"]
-    if s.get("location"):
+    # A chroma key screen replaces the set; stored location fields come back when it is turned off.
+    keyed = bool(chroma_backdrop.normalize(s.get("backdrop")))
+    if s.get("location") and not keyed:
         parts.append(f"Location: {s['location']}")
     if s.get("character"):
         parts.append(f"Main character: {s['character']}")
     if s.get("reference_subjects"):
         parts.append(f"Subject references: {s['reference_subjects']}. Keep each subject's identity and costume separate.")
-    if s.get("reference_environment"):
+    if s.get("reference_environment") and not keyed:
         parts.append(f"Environment reference: {s['reference_environment']}. Preserve its layout and lighting.")
     if s.get("opening_frame"):
         parts.append(f"Opening composition: {s['opening_frame']}")

@@ -13,7 +13,7 @@ async function setup() {
   const host = {isConnected:true};
   const context = {
     window:{h3Lang:() => 'tr'}, document:{getElementById:() => panel},
-    toast:error => errors.push(error), errDetail:data => data.detail,
+    toast:error => errors.push(error), errDetail:data => data.detail, infoTipHtml:() => '',
     fetch:async (url, options) => {
       if (options) requests.push(JSON.parse(options.body));
       return {ok, json:async () => reply};

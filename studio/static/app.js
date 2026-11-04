@@ -2527,6 +2527,7 @@
       camera_target: "",
       transition: "",
       beats: "",
+      backdrop: "",
     };
   }
 
@@ -2636,6 +2637,7 @@
       out[k] = String(src[k] || "").trim();
     });
     if (!out.dialogue_lang) out.dialogue_lang = "auto";
+    if (out.backdrop !== "green" && out.backdrop !== "blue") out.backdrop = "";
     return out;
   }
 
@@ -2785,10 +2787,11 @@
     if (!hasBody) return "";
     const style = s.visual_style || "Live-action, cinematic";
     const parts = ["[Shot 1] " + style];
-    if (s.location) parts.push("Location: " + s.location);
+    const keyed = !!s.backdrop;
+    if (s.location && !keyed) parts.push("Location: " + s.location);
     if (s.character) parts.push("Main character: " + s.character);
     if (s.reference_subjects) parts.push("Subject references: " + s.reference_subjects + ". Keep each subject's identity and costume separate.");
-    if (s.reference_environment) parts.push("Environment reference: " + s.reference_environment + ". Preserve its layout and lighting.");
+    if (s.reference_environment && !keyed) parts.push("Environment reference: " + s.reference_environment + ". Preserve its layout and lighting.");
     if (s.opening_frame) parts.push("Opening composition: " + s.opening_frame);
     if (s.transition) parts.push("Transition from previous clip: " + s.transition + ".");
     if (s.action) parts.push("Action: " + s.action);
@@ -3087,6 +3090,18 @@
         const key = el.dataset.sceneField;
         if (!key) return;
         el.value = s[key] || (key === "dialogue_lang" ? "auto" : "");
+      });
+    syncSceneBackdropFields();
+  }
+
+  /** A chroma key screen replaces the set; location text is kept for when it is turned off. */
+  function syncSceneBackdropFields() {
+    const keyed = !!$("cinema-scene-backdrop")?.value;
+    $("cinema-scene-modal")
+      ?.querySelectorAll('[data-scene-field="location"], [data-scene-field="reference_environment"]')
+      .forEach((el) => {
+        el.disabled = keyed;
+        el.closest("label")?.classList.toggle("backdrop-muted", keyed);
       });
   }
 
@@ -8651,17 +8666,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (state.queueDragging) return;
     const ul = $("job-list");
     ul.innerHTML = "";
-    // Active = eski üretim sırası (FIFO). Finished = yeniler üstte (40 cap).
-    const finishedRank = (j) => {
-      if (j.status === "error" || j.status === "cancelled") return 0;
-      return 1;
-    };
-    const byFinishedThenRecent = (a, b) => {
-      const ra = finishedRank(a);
-      const rb = finishedRank(b);
-      if (ra !== rb) return ra - rb;
-      return (Number(b.created_at) || 0) - (Number(a.created_at) || 0);
-    };
+    // Active = eski üretim sırası (FIFO). Finished = yeniler üstte (40 cap), durumdan bağımsız.
+    const byRecent = (a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0);
     const filmId = String(ensureCinema().film_id || "");
     const laneJobs = state.jobs.filter((j) => {
       if (jobLane(j) !== state.prodLane) return false;
@@ -8673,7 +8679,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       .sort(queueOrderCmp);
     const finished = laneJobs
       .filter((j) => j.status !== "running" && j.status !== "queued")
-      .sort(byFinishedThenRecent)
+      .sort(byRecent)
       .slice(0, 40);
     const jobs = state.prodLane === 'director'
       ? globalThis.H3DirectorChains.orderJobs(active.concat(finished), laneJobs)
@@ -9664,6 +9670,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         quality: state.quality,
         seed: numOr("seed", -1),
         ...collectGenerateKnobs(),
+        backdrop: $("scene-backdrop")?.value || null,
         mode: isContinue
           ? "continue"
           : isFace
@@ -9790,6 +9797,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   $("btn-generate").onclick = () => submitGenerate();
+  $("scene-backdrop")?.addEventListener("change", (e) => {
+    e.target.dataset.backdrop = e.target.value;
+  });
   $("btn-fast-preset")?.addEventListener("click", () => applySpeedProfile("draft"));
   $("btn-speed-quick")?.addEventListener("click", () => applySpeedProfile("quick"));
   $("btn-speed-quality")?.addEventListener("click", () => applySpeedProfile("quality"));
@@ -10275,6 +10285,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           const opt = document.createElement("option");
           opt.value = name;
           opt.textContent = name === "__auto_int8__" ? tt("settings.h3AutoInt8") : name === def ? `${name} ★` : name;
+          if (key === "unet" && /w6a8/i.test(name)) opt.textContent += ` · ${tt("settings.h3W6a8")}`;
           sel.appendChild(opt);
         });
         if (cur && [...sel.options].some((o) => o.value === cur)) sel.value = cur;
@@ -11603,6 +11614,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (e.target.closest("[data-scene-field]")) refreshCinemaScenePreview();
   });
   $("cinema-scene-modal")?.addEventListener("change", (e) => {
+    if (e.target.id === "cinema-scene-backdrop") syncSceneBackdropFields();
     if (e.target.closest("[data-scene-field]")) refreshCinemaScenePreview();
   });
   const cinemaDelegate = (rootId, kind) => {
@@ -11837,6 +11849,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         silent_audio: state.projectSilent || state.projectPurpose === "music_video",
         music_id: state.projectPurpose === "music_video" ? state.musicId : null,
         ...collectGenerateKnobs(),
+        backdrop: $("scene-backdrop")?.value || null,
       };
       if (faceLockOn) {
         payload.ref_images = state.faceImages.map((x) => x.name);

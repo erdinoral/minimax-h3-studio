@@ -243,6 +243,13 @@
     });
   }
 
+  function setBackdrop(v) {
+    state.backdrop = v === "green" || v === "blue" ? v : "";
+    document.querySelectorAll(".backdrop-chips .chip").forEach((b) => {
+      b.classList.toggle("on", (b.dataset.backdrop || "") === state.backdrop);
+    });
+  }
+
   function syncVfiChips() {
     const on = !!state.vfiModel;
     document.querySelectorAll(".post-pass-vfi").forEach((el) => {
@@ -9670,7 +9677,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         quality: state.quality,
         seed: numOr("seed", -1),
         ...collectGenerateKnobs(),
-        backdrop: $("scene-backdrop")?.value || null,
+        // The switch lives only on the New video and Continue panels.
+        backdrop: mode === "t2v" || isContinue ? state.backdrop || null : null,
         mode: isContinue
           ? "continue"
           : isFace
@@ -9797,9 +9805,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   $("btn-generate").onclick = () => submitGenerate();
-  $("scene-backdrop")?.addEventListener("change", (e) => {
-    e.target.dataset.backdrop = e.target.value;
-  });
   $("btn-fast-preset")?.addEventListener("click", () => applySpeedProfile("draft"));
   $("btn-speed-quick")?.addEventListener("click", () => applySpeedProfile("quick"));
   $("btn-speed-quality")?.addEventListener("click", () => applySpeedProfile("quality"));
@@ -10778,6 +10783,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     .forEach((btn) => {
       btn.addEventListener("click", () => setPostPass(btn.dataset.post || ""));
     });
+  document.querySelectorAll(".backdrop-chips .chip").forEach((btn) => {
+    btn.addEventListener("click", () => setBackdrop(btn.dataset.backdrop || ""));
+  });
   $("cinema-post-upscale")?.addEventListener("change", () => {
     setPostPass($("cinema-post-upscale").checked ? "upscale" : "");
   });
@@ -11849,7 +11857,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         silent_audio: state.projectSilent || state.projectPurpose === "music_video",
         music_id: state.projectPurpose === "music_video" ? state.musicId : null,
         ...collectGenerateKnobs(),
-        backdrop: $("scene-backdrop")?.value || null,
+        backdrop: state.backdrop || null,
       };
       if (faceLockOn) {
         payload.ref_images = state.faceImages.map((x) => x.name);

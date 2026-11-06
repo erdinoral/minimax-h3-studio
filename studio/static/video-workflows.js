@@ -4,10 +4,12 @@
   let sourceId = null, sourceMeta = null;
   try { localStorage.removeItem('h3.prepareRefine'); } catch {}
   const text = (tr, en) => window.h3Lang?.() === 'en' ? en : tr;
-  window.getVideoWorkflowPayload = () => ({continuation_method:method,
+  // Motion Transfer cannot run as Continuum, so the Motion tab always uses the standard method.
+  const activeMethod = () => document.body?.classList.contains('ws-motion') ? 'standard' : method;
+  window.getVideoWorkflowPayload = () => ({continuation_method:activeMethod(),
     continuum_context:context, continuum_continuity:continuity, continuum_chunks:layout==='segments'?segments.length:chunks,
-    ...(method==='continuum' && layout==='segments'?{continuum_segment_prompts:segments.map(p=>p.trim())}:{}), prepare_refine:false});
-  window.getContinuumMainPrompt = () => method==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
+    ...(activeMethod()==='continuum' && layout==='segments'?{continuum_segment_prompts:segments.map(p=>p.trim())}:{}), prepare_refine:false});
+  window.getContinuumMainPrompt = () => activeMethod()==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
   window.getDirectorContinuumBackend = () => "continuum";
   window.isDirectorContinuumReady = () => caps.continuum_ready === true;
   window.canSetContinueReferences = () => !(method==='continuum' && sourceMeta?.continuum_run);
@@ -39,7 +41,7 @@
     if(legacyAudio)legacyAudio.hidden=method==='continuum';
     const host = $('video-workflow-controls');
     if (!host) return;
-    const sectionMode = method==='continuum' && layout==='segments';
+    const sectionMode = activeMethod()==='continuum' && layout==='segments';
     if ($('prompt')) $('prompt').hidden=sectionMode;
     if ($('btn-prompt-rewrite')) $('btn-prompt-rewrite').hidden=sectionMode;
     host.closest('.zone-prompt')?.classList.toggle('has-continuum-sections',sectionMode);
@@ -116,5 +118,6 @@
   document.addEventListener('change',e=>{if(e.target.id==='continue-source')syncSource();});
   document.addEventListener('click',()=>requestAnimationFrame(()=>{syncSource();updateTotal();}));
   document.addEventListener('h3-lang',render);
+  document.addEventListener('h3-workspace',render);
   render();fetch('/api/video-workflows').then(r=>r.ok?r.json():{}).then(data=>{caps=data;render();document.dispatchEvent(new Event("h3-video-workflows"));}).catch(()=>{});
 })();

@@ -184,7 +184,7 @@ class SharedQueueTests(unittest.IsolatedAsyncioTestCase):
         exec(compile(ast.Module(body=classes,type_ignores=[]),'request-models','exec'),env)
         generate=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='generate')
         generate.decorator_list=[]
-        env.update(ASPECT_PRESETS={'16:9':(16,9)}, REF2VA_MODELS={}, REFS=Path('/not-used'),COMFY_INPUT=Path('/not-used'))
+        env.update(ASPECT_PRESETS={'16:9':(16,9)}, REF2VA_MODELS={}, REFS=Path('/not-used'),COMFY_INPUT=Path('/not-used'), MOTION_MODES=('v2v','motion_long'))
         env['slog'].info_job=lambda *a,**kw:None
         exec(compile(ast.Module(body=[generate],type_ignores=[]),'generate-handler','exec'),env)
         return env

@@ -62,7 +62,23 @@ class SpectrumTests(unittest.TestCase):
             graph = build_t2v_prompt(text='test', lora_name='a.safetensors|b.safetensors|c.safetensors')
         apply_spectrum(graph)
         node = next(n for n in graph.values() if n['class_type'] == 'SpectrumApplyMiniMaxH3')
-        self.assertEqual(node['inputs']['model'], ['lora_stack_3', 0])
+        source = node['inputs']['model'][0]
+        if graph[source]['class_type'] == 'PathchSageAttentionKJ':
+            source = graph[source]['inputs']['model'][0]
+        self.assertEqual(source, 'lora_stack_3')
+
+    def test_sage_runs_first_when_installed(self):
+        with patch('lib.comfy.detect_sage_mode', return_value='auto'), \
+                patch.object(Path, 'read_text', return_value='{"spectrum_enabled": true, "sparse_enabled": true}'):
+            graph = build_t2v_prompt(text='test')
+        sage_key, sage = next((k, n) for k, n in graph.items() if n['class_type'] == 'PathchSageAttentionKJ')
+        sparse = next(n for n in graph.values() if n['class_type'] == 'BlockSparseAttention')
+        self.assertEqual(sage['inputs']['sage_attention'], 'auto')
+        self.assertEqual(sparse['inputs']['model'], [sage_key, 0])
+        with patch('lib.comfy.detect_sage_mode', return_value=None), \
+                patch.object(Path, 'read_text', return_value='{}'):
+            graph = build_t2v_prompt(text='test')
+        self.assertFalse(any(n['class_type'] == 'PathchSageAttentionKJ' for n in graph.values()))
 
     def test_sparse_attention_runs_before_spectrum(self):
         with patch.object(Path, 'read_text', return_value='{"spectrum_enabled": true, "sparse_enabled": true}'):

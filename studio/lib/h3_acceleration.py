@@ -57,6 +57,9 @@ def load_settings(path=None):
         return dict(_render_settings.get())
     try:
         return clean_settings(json.loads((path or SETTINGS_PATH).read_text(encoding="utf-8")))
+    except FileNotFoundError:
+        # Nothing saved yet: run with every accelerator; Sol-Attn falls back to dense on unsupported GPUs.
+        return clean_settings({"spectrum_enabled": True, "sparse_enabled": True})
     except (OSError, ValueError, TypeError):
         return clean_settings({})
 

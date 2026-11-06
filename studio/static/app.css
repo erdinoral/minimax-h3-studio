@@ -1069,6 +1069,10 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
   gap: 8px;
 }
 .gen-actions .cta { margin-top: 0; }
+label.fps-switch.cinema-seamless-switch { display: inline-flex !important; align-items: center; gap: 8px; margin: 2px 0 6px; }
+.fps-switch:has(input:not(:checked)) .fps-24,
+.fps-switch:has(input:checked) .fps-48 { color: var(--text); font-weight: 600; }
+.fps-switch:has(input:disabled) { cursor: not-allowed; opacity: 0.55; }
 .backdrop-chips .chip.on[data-backdrop="green"] { background: #1f8a35 !important; border-color: #2fbf4a !important; color: #fff !important; }
 .backdrop-chips .chip.on[data-backdrop="blue"] { background: #2257c9 !important; border-color: #3a7bff !important; color: #fff !important; }
 .cinema-scene-fields label.backdrop-muted { opacity: 0.45; }
@@ -1556,6 +1560,205 @@ select, input[type="number"], input[type="text"], input[type="password"], textar
 .file-pick-inline {
   margin: 0;
   gap: 6px;
+}
+
+/* Motion Transfer / Objects swap drop zones */
+.v2v-kind-switch {
+  display: grid;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+}
+.v2v-kind-switch button { padding: 8px 11px; font-size: 0.8rem; }
+#motion-source.motion-source-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#motion-source.motion-source-switch button { min-width: 0; padding: 8px 4px; font-size: 0.76rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-pick.v2v-drop {
+  width: 100%;
+  box-sizing: border-box;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-height: 150px;
+  padding: 18px 14px;
+  margin: 6px 0 10px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+.file-pick.v2v-drop:hover,
+.file-pick.v2v-drop:focus-within,
+.file-pick.v2v-drop.is-dragover {
+  border-color: var(--accent-amber);
+}
+.file-pick.v2v-drop.is-dragover { background: color-mix(in srgb, var(--accent-amber) 8%, var(--bg-elevated)); }
+.v2v-drop-icons { display: flex; justify-content: center; margin-bottom: 4px; pointer-events: none; }
+.v2v-drop-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.v2v-drop-icon + .v2v-drop-icon { margin-left: -8px; }
+.v2v-drop-title { font-size: 0.9rem; line-height: 1.3; color: var(--text); pointer-events: none; }
+.v2v-drop-sub { font-size: 0.75rem; color: var(--text-muted); pointer-events: none; }
+.v2v-drop .file-pick-name { max-width: 100%; }
+.file-pick.v2v-drop { position: relative; }
+.file-pick.is-uploading { pointer-events: none; }
+.file-pick.is-uploading > :not(.file-pick-busy) { visibility: hidden; }
+.file-pick-busy {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.file-pick-busy::before {
+  content: "";
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent-amber);
+  animation: file-pick-spin 0.8s linear infinite;
+}
+@keyframes file-pick-spin { to { transform: rotate(360deg); } }
+/* Motion Transfer lives in its own workspace tab. */
+body:not(.ws-motion) #mode-v2v,
+body.ws-motion #scene-mode-label,
+body.ws-motion #mode-chips,
+body.ws-motion #new-video-input-label,
+body.ws-motion #new-video-input-chips,
+body.ws-motion #scene-project .scene-select-field:has(#scene-purpose-chips),
+body.ws-motion #video-workflow-controls,
+body.ws-motion.motion-src-robot .player-actions,
+body.ws-motion.motion-src-sketch .player-actions,
+body.ws-motion.motion-src-sketch #v2v-kind,
+body.ws-motion.motion-src-sketch #v2v-hint-motion,
+body.ws-motion.motion-src-sketch #v2v-hint-swap,
+body.ws-motion.motion-src-sketch #v2v-video-thumbs,
+body.ws-motion.motion-src-sketch #panel-mode-v2v > label.v2v-drop,
+body.ws-motion.motion-src-sketch #v2v-image-thumbs,
+body.ws-motion.motion-src-sketch #panel-mode-v2v > label.check {
+  display: none !important;
+}
+
+.motion-robot-panel { margin-bottom: 10px; }
+.motion-robot-hint { margin: 0 0 8px; font-size: 0.78rem; line-height: 1.4; }
+.motion-robot-credit { font-size: 0.72rem; line-height: 1.35; margin: 8px 0 0; }
+
+/* MotionBricks robot stage inside the player. */
+.mb-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0a0a0a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mb-stage.hidden { display: none; }
+.mb-stage:fullscreen { border-radius: 0; }
+.mb-frame { position: relative; }
+.mb-frame iframe { display: block; width: 100%; height: 100%; border: 0; background: #0a0a0a; }
+.mb-status {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(440px, 86%);
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(10, 10, 10, 0.82);
+  color: var(--text);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+.mb-status.hidden { display: none; }
+.mb-hud {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px;
+  pointer-events: none;
+}
+.mb-hud-top, .mb-hud-bottom, .mb-gaits, .mb-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mb-hud-bottom { justify-content: space-between; align-items: flex-end; }
+.mb-hud-spacer { flex: 1; }
+.mb-btn {
+  pointer-events: auto;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(12, 12, 12, 0.72);
+  color: var(--text);
+  font-size: 0.74rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.mb-btn:hover:not(:disabled) { border-color: var(--accent); }
+.mb-btn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.mb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.mb-record { font-weight: 600; padding: 6px 14px; }
+.mb-record.on { background: var(--accent-hot); border-color: var(--accent-hot); color: #fff; }
+.mb-rec {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(179, 58, 43, 0.9);
+  color: #fff;
+  font: 600 0.74rem/1 ui-monospace, monospace;
+}
+.mb-rec.hidden { display: none; }
+.mb-rec i { width: 8px; height: 8px; border-radius: 50%; background: #fff; animation: mb-rec-blink 1s steps(2) infinite; }
+@keyframes mb-rec-blink { 50% { opacity: 0.2; } }
+.mb-stage:fullscreen .mb-btn { font-size: 0.9rem; padding: 7px 14px; }
+
+.job-still { width: 44px; height: 26px; object-fit: cover; border-radius: 3px; margin-right: 6px; vertical-align: middle; cursor: zoom-in; }
+
+/* Drawing board for the Motion tab's sketch source. */
+.sk-board { position: relative; background: #fff; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.sk-board canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.sk-swatch {
+  pointer-events: auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+.sk-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(10, 10, 10, 0.8); transform: scale(1.12); }
+.mb-stage:fullscreen .sk-swatch { width: 30px; height: 30px; }
+
+.v2v-duration-note {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 
 /* Custom checkboxes (settings + mode options) */

@@ -48,6 +48,13 @@ class AccelerationSettingsTests(unittest.TestCase):
             path.write_text('null', encoding='utf8')
             self.assertFalse(h3_acceleration.load_settings(path)['spectrum_enabled'])
 
+    def test_fresh_install_without_saved_settings_enables_every_accelerator(self):
+        with tempfile.TemporaryDirectory() as temp:
+            settings = h3_acceleration.load_settings(Path(temp) / 'missing.json')
+        self.assertTrue(settings['spectrum_enabled'])
+        self.assertTrue(settings['sparse_enabled'])
+        self.assertEqual(settings['spectrum_blend_weight'], 0.5)
+
     def test_custom_weight_reaches_the_native_graph_without_changing_audio_or_schedule(self):
         for weight in (0, 0.37, 1):
             with patch.object(Path, 'read_text', return_value='{"spectrum_enabled":true,"spectrum_blend_weight":%s}' % weight):
@@ -82,6 +89,7 @@ class AccelerationApiTests(unittest.TestCase):
             self.ns['H3AccelerationBody'](spectrum_preset='fastest')
 
     def test_partial_api_updates_keep_enabled_state_and_custom_value(self):
+        (self.data / 'h3_acceleration.json').write_text('{}', encoding='utf8')
         async def run():
             Model = self.ns['H3AccelerationBody']
             first = await self.ns['set_h3_acceleration'](Model(spectrum_blend_weight=0.41))

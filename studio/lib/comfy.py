@@ -116,7 +116,7 @@ def enhance_ref_prompt(
     return prompt
 
 
-def enhance_video_ref_prompt(text: str, *, n_videos: int) -> str:
+def enhance_video_ref_prompt(text: str, *, n_videos: int, role: str = "motion", n_images: int = 0) -> str:
     """Give Ref2VA video inputs their required tags and a transform-first role.
 
     Ref2VA only associates a connected video with the requested role when the
@@ -134,6 +134,25 @@ def enhance_video_ref_prompt(text: str, *, n_videos: int) -> str:
     )
     if has_tags:
         return prompt
+    pics = ", ".join(f"<Picture {i}>" for i in range(1, n_images + 1)) or "the reference picture"
+    if role == "face_swap":
+        return (
+            f"{tags} {'is the source video' if n_videos == 1 else 'are the source videos'} to edit. "
+            "Keep everything unchanged: scene, background, camera movement, framing, timing, "
+            "lighting, body, clothing, hair and motion. Change only the face of the main person "
+            f"to the identity in {pics}, matching its facial features exactly while preserving "
+            "the original head pose, expressions and lip movement.\n\n"
+            f"{prompt}"
+        ).strip()
+    if role == "swap":
+        return (
+            f"{tags} {'is the source video' if n_videos == 1 else 'are the source videos'} to edit. "
+            "Keep its scene, background, camera movement, framing, timing, lighting and every "
+            "other person and object unchanged. Replace only the subject named below with the "
+            f"subject shown in {pics}, matching its appearance exactly while keeping the original "
+            "motion, pose, scale and contact with the scene.\n\n"
+            f"{prompt}"
+        ).strip()
     return (
         f"{tags} {'is' if n_videos == 1 else 'are'} motion, timing, choreography, "
         "and camera reference only. Keep their action and framing, but transform "
@@ -998,7 +1017,7 @@ def apply_image_post(
             inputs["fps"] = float(fps) * 2
             nid += 2
         else:
-            kind = "upscale"
+            kind = ""
     if kind == "upscale":
         g[str(nid)] = {
             "class_type": "ImageScaleBy",
@@ -1074,13 +1093,28 @@ def detect_sage_mode(comfy_root: Optional[Path] = None) -> Optional[str]:
     return None
 
 
+_SAGE_MODES = (
+    "auto", "sageattn_qk_int8_pv_fp16_cuda", "sageattn_qk_int8_pv_fp16_triton",
+    "sageattn_qk_int8_pv_fp8_cuda", "sageattn_qk_int8_pv_fp8_cuda++",
+    "sageattn3", "sageattn3_per_block_mean",
+)
+
+
 def apply_sage_attention(
     g: dict[str, Any],
     mode: Optional[str] = "auto",
     *,
     comfy_root: Optional[Path] = None,
 ) -> dict[str, Any]:
-    """Sage remains disabled; independently apply opt-in Sol sparse attention, then Spectrum."""
+    """SageAttention first, then opt-in Sol sparse attention, then Spectrum.
+
+    Sparse chains its override on top of Sage, so its dense fallback runs Sage.
+    """
+    sage = str(mode or "").strip()
+    if sage == "auto":
+        sage = detect_sage_mode(comfy_root) or ""
+    if sage in _SAGE_MODES:
+        g = _insert_h3_model_patch(g, "PathchSageAttentionKJ", {"sage_attention": sage})
     settings = h3_acceleration.load_settings()
     if settings["sparse_enabled"]:
         g = apply_sparse_attention(g)

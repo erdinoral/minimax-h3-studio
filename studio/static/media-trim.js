@@ -1,5 +1,6 @@
 /* Select an excerpt before upload; FFmpeg performs the actual trim on the server. */
-window.selectReferenceRange = function (file, kind) {
+window.selectReferenceRange = function (file, kind, limits = {}) {
+  const minSec = limits.minSec ?? 0.1, maxSec = limits.maxSec ?? 15;
   return new Promise(resolve => {
     const t = k => window.t(`trim.${k}`);
     const dialog = document.createElement('dialog');
@@ -30,11 +31,16 @@ window.selectReferenceRange = function (file, kind) {
     const quick=document.createElement('div');quick.className='row-btns';
     let duration=0, start=0, end=0, done=false;
     function sync() {
-      const valid=Number.isFinite(start)&&Number.isFinite(end)&&start>=0&&end<=duration&&end-start>=0.1&&end-start<=15;
+      const length=end-start;
+      const inside=Number.isFinite(start)&&Number.isFinite(end)&&start>=0&&end<=duration;
+      const valid=inside&&length>=minSec&&length<=maxSec;
       use.disabled=!valid;
+      if(duration)status.textContent=valid||!inside
+        ?`${duration.toFixed(2)}s · ${file.name}`
+        :t('range').replace('{min}',String(minSec)).replace('{max}',String(maxSec)).replace('{sec}',length.toFixed(1));
       for(const key of ['start','end']) {const value=key==='start'?start:end;inputs[key].number.value=String(Math.round(value*100)/100);inputs[key].slider.value=String(value);}
     }
-    for(const seconds of [3,5,10]) {
+    for(const seconds of [3,5,10].filter(s=>s>=minSec&&s<=maxSec)) {
       const b=document.createElement('button');b.type='button';b.textContent=`${seconds}s`;
       b.className='btn-secondary';
       b.onclick=()=>{if(!duration)return;start=Math.min(start,Math.max(0,duration-seconds));end=Math.min(duration,start+seconds);media.pause();media.currentTime=start;sync();};quick.append(b);
@@ -54,7 +60,7 @@ window.selectReferenceRange = function (file, kind) {
     media.addEventListener('error',()=>{status.textContent=t('failed');});
     media.addEventListener('loadedmetadata',()=>{
       if(done||!Number.isFinite(media.duration)||media.duration<=0)return;
-      clearTimeout(timer);duration=media.duration;end=Math.min(duration,15);status.textContent=`${duration.toFixed(2)}s · ${file.name}`;
+      clearTimeout(timer);duration=media.duration;end=Math.min(duration,maxSec);
       for(const pair of Object.values(inputs))for(const input of Object.values(pair)){input.disabled=false;input.max=String(duration);}
       sync();
     },{once:true});

@@ -30,6 +30,7 @@
     faceImages: [],
     v2vVideos: [], // { name, url }
     v2vImages: [],
+    v2vKind: "motion", // "motion" | "swap"
     storyboardImages: [],
     cinema: { title: "", script: "", characters: [], locations: [], creatures: [], vehicles: [] },
     cinemaLibrary: { characters: [], locations: [], creatures: [], vehicles: [] },
@@ -78,7 +79,7 @@
     loraDownload: {},
     multishot: false,
     postPass: "",
-    vfiModel: "",
+    vfiModel: null, // null until /api/system reports; "" = no RIFE/FILM model installed
     // Director tabs: per-session chat state
     directorSessions: [], // { id, title, messages: [ {role, content} ] }
     directorSessionCounter: 0,
@@ -96,23 +97,27 @@
   let pendingSpeedSpectrumApply = Promise.resolve(true);
   let pendingDraftLoraApply = Promise.resolve(true);
   let draftLoraRequest = 0;
-  // FL2VA pick; Ref2VA shots swap to lightx2v-ref2v-4step on the server.
-  const DRAFT_LORA_ID = "lightx2v-fl2v-4step-v12";
-  const DRAFT_LORA_FILE = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors";
-  const OLD_DRAFT_LORA_IDS = ["erosmax-beta1-fl2v-4step"];
+  // Hybrid r48 runs on both FL2VA and Ref2VA graphs, so no server-side swap is needed.
+  const DRAFT_LORA_ID = "lightx2v-hybrid-r48";
+  const DRAFT_LORA_FILE = "lightx2v_hybrid-4to8step-Turbo_r48.safetensors";
+  const DRAFT_LORA_STEPS = 8;
+  const OLD_DRAFT_LORA_IDS = ["erosmax-beta1-fl2v-4step", "lightx2v-fl2v-4step-v12"];
+  const SPEED_LORA_PROFILES = ["draft", "quick"];
 
   function prepareDraftLora(kind) {
     const request = ++draftLoraRequest;
-    if (kind !== "draft") {
+    if (!SPEED_LORA_PROFILES.includes(kind)) {
       pendingDraftLoraApply = Promise.resolve(true);
       // A speed adapter belongs to its preset, not the next quality profile.
-      syncLoraSelection(selectedLoraIds().filter(id => id !== DRAFT_LORA_ID &&
-        !OLD_DRAFT_LORA_IDS.includes(id) &&
-        state.loraCatalog.find(row => row.id === id)?.file !== DRAFT_LORA_FILE), false);
+      syncLoraSelection(selectedLoraIds().filter(id => {
+        const item = state.loraCatalog.find(row => row.id === id);
+        return id !== DRAFT_LORA_ID && !OLD_DRAFT_LORA_IDS.includes(id) &&
+          item?.file !== DRAFT_LORA_FILE && !item?.preset && item?.category !== "speed";
+      }), false);
       return;
     }
-    for (const id of ["steps", "cinema-steps"]) if ($(id)) $(id).value = "4";
-    ensureCinema().steps = 4;
+    for (const id of ["steps", "cinema-steps"]) if ($(id)) $(id).value = String(DRAFT_LORA_STEPS);
+    ensureCinema().steps = DRAFT_LORA_STEPS;
     pendingDraftLoraApply = (async () => {
       if (!state.loraCatalog.length) await loadLoras();
       const spec = state.loraCatalog.find(item => item.id === DRAFT_LORA_ID || item.file === DRAFT_LORA_FILE);
@@ -232,15 +237,9 @@
 
   function setPostPass(v) {
     const raw = String(v || "").trim().toLowerCase();
-    const next = raw === "upscale" || (raw === "vfi" && state.vfiModel) ? raw : "";
+    const next = raw === "vfi" && state.vfiModel !== "" ? raw : "";
     state.postPass = next;
-    const cinemaUpscale = $("cinema-post-upscale");
-    if (cinemaUpscale) cinemaUpscale.checked = next === "upscale";
-    document.querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip, #director-post-pass-chips .chip").forEach((b) => {
-      const p = b.dataset.post || "";
-      b.classList.toggle("on", p === next);
-      b.textContent = p === "upscale" ? tt("ayar.postUpscale") : p === "vfi" ? tt("ayar.postVfi") : tt("ayar.postOff");
-    });
+    document.querySelectorAll(".fps-toggle").forEach((input) => { input.checked = next === "vfi"; });
   }
 
   function setBackdrop(v) {
@@ -252,8 +251,9 @@
 
   function syncVfiChips() {
     const on = !!state.vfiModel;
-    document.querySelectorAll(".post-pass-vfi").forEach((el) => {
-      el.classList.toggle("hidden", !on);
+    document.querySelectorAll(".fps-toggle").forEach((input) => {
+      input.disabled = !on;
+      input.closest(".fps-switch")?.setAttribute("title", tt(on ? "fps.title" : "fps.noModel"));
     });
     if (!on && state.postPass === "vfi") setPostPass("");
   }
@@ -1304,7 +1304,31 @@
     if (typeof keepLoraApplied === "function") keepLoraApplied();
   }
 
+  // Motion Transfer has no duration choice: the output is as long as the reference video.
+  // A drawing has no reference video, so the sketch source keeps the normal duration chips.
+  function syncV2vDuration() {
+    const v2v = state.produceMode === "v2v" && window.h3MotionSource?.() !== "sketch";
+    const chips = $("dur-chips");
+    (chips?.closest(".scene-select-field") || chips)?.classList.toggle("hidden", v2v);
+    const note = $("v2v-duration-note");
+    if (!note) return;
+    note.classList.toggle("hidden", !v2v);
+    if (!v2v) return;
+    const sec = Number(state.v2vVideos[0]?.seconds) || 0;
+    if (!sec) {
+      note.textContent = tt("v2v.durationAuto");
+      return;
+    }
+    // Mirrors the server plan: 5 s parts, a tail under 1 s joins the previous part.
+    const frames = Math.round(Math.min(sec, 30) * 24);
+    let parts = Math.ceil(frames / 120);
+    if (parts > 1 && frames - (parts - 1) * 120 < 24) parts -= 1;
+    note.textContent = tf("v2v.durationFromVideo", { sec: Math.min(sec, 30).toFixed(1), n: String(parts) });
+  }
+  document.addEventListener("h3-motion-source", () => syncV2vDuration());
+
   function refreshModeHints() {
+    syncV2vDuration();
     const m = state.produceMode || "t2v";
     const hintNew = $("mode-hint-new");
     if (hintNew) {
@@ -1534,19 +1558,77 @@
     });
   }
 
-  async function uploadVideoFiles(fileList, targetList, gridId) {
+  function videoFileDuration(file) {
+    return new Promise((resolve) => {
+      const probe = document.createElement("video");
+      const url = URL.createObjectURL(file);
+      const done = (value) => {
+        URL.revokeObjectURL(url);
+        probe.removeAttribute("src");
+        resolve(value);
+      };
+      probe.preload = "metadata";
+      probe.onloadedmetadata = () => done(Number.isFinite(probe.duration) ? probe.duration : null);
+      probe.onerror = () => done(null);
+      probe.src = url;
+    });
+  }
+
+  /** Spinner over a file picker while a slow upload/trim runs; returns the cleanup. */
+  function showPickBusy(pick, text) {
+    if (!pick) return () => {};
+    const overlay = document.createElement("span");
+    overlay.className = "file-pick-busy";
+    overlay.setAttribute("role", "status");
+    const label = document.createElement("span");
+    overlay.append(label);
+    const t0 = Date.now();
+    const tick = () => {
+      label.textContent = `${text} · ${Math.round((Date.now() - t0) / 1000)} ${tt("sec")}`;
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    pick.classList.add("is-uploading");
+    pick.setAttribute("aria-busy", "true");
+    pick.append(overlay);
+    return () => {
+      clearInterval(timer);
+      overlay.remove();
+      pick.classList.remove("is-uploading");
+      pick.removeAttribute("aria-busy");
+    };
+  }
+
+  async function uploadVideoFiles(fileList, targetList, gridId, limits = null) {
     const files = Array.from(fileList || []);
     for (const file of files) {
-      if (targetList.length >= 3) {
-        tToast("toast.videoMax3");
+      if (targetList.length >= (limits?.maxCount || 3)) {
+        tToast(limits?.maxCount === 1 ? "toast.v2vOneVideo" : "toast.videoMax3");
         break;
       }
-      const range = await window.selectReferenceRange(file, "video");
+      const rejectDuration = (sec) => {
+        tToast("toast.v2vVideoDuration", { name: file.name, sec: sec.toFixed(1) });
+      };
+      // Longer sources stay allowed: the trim dialog can pick a shorter excerpt.
+      const sourceSec = limits ? await videoFileDuration(file) : null;
+      if (sourceSec != null && sourceSec < limits.minSec) {
+        rejectDuration(sourceSec);
+        continue;
+      }
+      const range = await window.selectReferenceRange(file, "video", limits || {});
       if (range === null) continue;
+      const usedSec = range.start != null ? range.end - range.start : sourceSec;
+      if (limits && usedSec != null && (usedSec < limits.minSec || usedSec > limits.maxSec)) {
+        rejectDuration(usedSec);
+        continue;
+      }
       const fd = new FormData();
       fd.append("file", file);
       if (range.start != null) { fd.append("start", String(range.start)); fd.append("end", String(range.end)); }
       tToast("toast.videoUploading", { name: file.name });
+      const grid = $(gridId);
+      const pick = grid?.previousElementSibling?.classList.contains("file-pick") ? grid.previousElementSibling : null;
+      const done = showPickBusy(pick, tt(range.start != null ? "v2v.trimUploading" : "v2v.uploading"));
       try {
         const r = await fetch("/api/refs/upload-video", { method: "POST", body: fd });
         const data = await r.json().catch(() => ({}));
@@ -1556,15 +1638,40 @@
           filename: data.filename,
           url: data.url || "#",
           kind: "video",
+          seconds: usedSec,
         });
-        renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`, (list) => onFilePickListEmpty(gridId, list));
       } catch (e) {
         toast(String(e.message || e));
+      } finally {
+        done();
       }
     }
-    renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`, (list) => onFilePickListEmpty(gridId, list));
+    const onListChange = (list) => {
+      onFilePickListEmpty(gridId, list);
+      syncV2vDuration();
+    };
+    renderNamedThumbs(targetList, gridId, (i) => `Video ${i + 1}`, onListChange);
+    syncV2vDuration();
     tToast("toast.videosReady", { n: String(targetList.length) });
   }
+
+  /** A recorded MotionBricks take replaces the single Motion Transfer reference video. */
+  window.h3SetMotionReference = (data) => {
+    state.v2vVideos.splice(0, state.v2vVideos.length, {
+      name: data.name,
+      filename: data.filename,
+      url: data.url || "#",
+      kind: "video",
+      seconds: Number(data.seconds) || null,
+    });
+    const onListChange = (list) => {
+      onFilePickListEmpty("v2v-video-thumbs", list);
+      syncV2vDuration();
+    };
+    renderNamedThumbs(state.v2vVideos, "v2v-video-thumbs", () => "Robot", onListChange);
+    syncV2vDuration();
+    toast(tf("motion.takeReady", { sec: (Number(data.seconds) || 0).toFixed(1) }));
+  };
 
   async function uploadImageToList(fileList, targetList, gridId, max, labelFn) {
     const files = Array.from(fileList || []);
@@ -3786,7 +3893,7 @@
     const c = ensureCinema();
     if (kind === "draft") {
       c.quality = "480";
-      c.steps = 4;
+      c.steps = DRAFT_LORA_STEPS;
       c.duration = Number($("cinema-duration")?.value) || c.duration || 5;
     } else {
       c.quality = "736";
@@ -4668,7 +4775,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (state.studioWorkspace !== "director") {
       state.studioWorkspace = "director";
       document.body.classList.add("ws-director");
-      document.body.classList.remove("ws-scene");
+      document.body.classList.remove("ws-scene", "ws-motion");
       document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
         const on = btn.dataset.ws === "director";
         btn.classList.toggle("on", on);
@@ -8497,7 +8604,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const newly = [];
     for (const j of state.jobs || []) {
       const was = prevStatus[j.id];
-      if (!(j.status === "done" && j.output?.url && was && was !== "done")) continue;
+      // A joined Motion Transfer appears already done, so it never "flips".
+      const joined = !was && j.mode === "motion_long" && j.motion_long_id === state.pendingMotionLongId;
+      if (!(j.status === "done" && j.output?.url && ((was && was !== "done") || joined))) continue;
+      if (joined) state.pendingMotionLongId = null;
       if (jobLane(j) === "director" && filmId && String(j.film_id || "") !== filmId) continue;
       newly.push(j);
     }
@@ -8511,15 +8621,29 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     selectJob(newly[0], { play: true, quiet: true });
   }
 
+  const PROD_LANES = ["scene", "director", "motion"];
+  const MOTION_MODES = ["v2v", "motion_long"];
+
+  function normLane(lane) {
+    return PROD_LANES.includes(lane) ? lane : "scene";
+  }
+
+  function laneLabel(lane) {
+    return lane === "director" ? tt("prod.laneDirector") : lane === "motion" ? tt("prod.laneMotion") : tt("prod.laneScene");
+  }
+
   function jobLane(j) {
     const lane = String(j?.lane || "").trim().toLowerCase();
-    if (lane === "director" || lane === "scene") return lane;
+    if (lane === "director") return lane;
+    // Older Motion Transfer records were saved with lane "scene".
+    if (lane === "motion" || MOTION_MODES.includes(j?.mode)) return "motion";
+    if (lane === "scene") return lane;
     if (j?.cinema_batch || j?.batch_id) return "director";
     return "scene";
   }
 
   function setProdLane(lane) {
-    const next = lane === "director" ? "director" : "scene";
+    const next = normLane(lane);
     state.prodLane = next;
     document.querySelectorAll("#prod-lane-tabs .chip").forEach((btn) => {
       btn.classList.toggle("on", btn.dataset.lane === next);
@@ -8528,23 +8652,22 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function refreshStudioWorkspaceChrome() {
-    const ws = state.studioWorkspace === "director" ? "director" : "scene";
+    const ws = normLane(state.studioWorkspace);
+    const key = ws === "director" ? "director" : ws === "motion" ? "motion" : "scene";
     const titleEl = $("scene-zone-title");
     const subEl = $("scene-zone-sub");
-    if (titleEl) {
-      titleEl.textContent = ws === "director" ? tt("ws.directorTitle") : tt("ws.sceneTitle");
-    }
-    if (subEl) {
-      subEl.innerHTML = ws === "director" ? tt("ws.directorSub") : tt("ws.sceneSub");
-    }
+    if (titleEl) titleEl.textContent = tt(`ws.${key}Title`);
+    if (subEl) subEl.innerHTML = tt(`ws.${key}Sub`);
   }
 
   function setStudioWorkspace(ws) {
-    const next = ws === "director" ? "director" : "scene";
+    const next = normLane(ws);
     const changed = state.studioWorkspace !== next;
     state.studioWorkspace = next;
     document.body.classList.toggle("ws-director", next === "director");
     document.body.classList.toggle("ws-scene", next === "scene");
+    document.body.classList.toggle("ws-motion", next === "motion");
+    document.dispatchEvent(new CustomEvent("h3-workspace", { detail: { workspace: next } }));
     document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
       const on = btn.dataset.ws === next;
       btn.classList.toggle("on", on);
@@ -8552,15 +8675,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
     // Landing unused — Direktör opens cinema dock directly
     $("panel-workspace-director")?.classList.add("hidden");
-    $("panel-workspace-scene")?.classList.toggle("hidden", next !== "scene");
+    $("panel-workspace-scene")?.classList.toggle("hidden", next === "director");
     refreshStudioWorkspaceChrome();
+    if (next === "motion" && state.produceMode !== "v2v") setProduceMode("v2v");
+    if (next === "scene" && (state.produceMode === "v2v" || state.produceMode === "cinema")) setProduceMode("t2v");
     if (changed) {
       setProdLane(next);
       if (next === "director") {
         void openCinemaStudio();
-      } else {
-        if (state.produceMode === "cinema") setProduceMode("t2v");
-        if (!$("view-cinema")?.classList.contains("hidden")) closeCinemaStudio();
+      } else if (!$("view-cinema")?.classList.contains("hidden")) {
+        closeCinemaStudio();
       }
     }
   }
@@ -8695,12 +8819,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (head) {
       const qn = active.filter((j) => j.status === "queued").length;
       const rn = active.some((j) => j.status === "running");
-      const laneLabel = state.prodLane === "director" ? tt("prod.laneDirector") : tt("prod.laneScene");
+      const label = laneLabel(state.prodLane);
       head.textContent = rn
-        ? `${laneLabel} · ${tf("prod.queueRun", { n: qn })}`
+        ? `${label} · ${tf("prod.queueRun", { n: qn })}`
         : qn
-          ? `${laneLabel} · ${tf("prod.queueN", { n: qn })}`
-          : `${laneLabel} · ${tt("prod.queue")}`;
+          ? `${label} · ${tf("prod.queueN", { n: qn })}`
+          : `${label} · ${tt("prod.queue")}`;
     }
     const activeOrder = new Map(active.map((j, i) => [j.id, i + 1]));
     for (const j of jobs) {
@@ -8732,7 +8856,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         badge.textContent = j.director_parent_id ? '↳ Continuum' : tt('mode.t2v');
         left.prepend(badge);
       }
-      if (j.status === "queued" && state.prodLane === "scene") {
+      if (j.status === "queued" && state.prodLane !== "director") {
         li.draggable = true;
         li.dataset.jobId = j.id;
         li.classList.add("job-draggable");
@@ -8748,7 +8872,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         grip.setAttribute("aria-hidden", "true");
         left.prepend(grip);
       }
-      if ((j.mode === "qwen_sheet" || j.mode === "qwen_frame") && j.status === "running") {
+      const stillJob = j.mode === "qwen_sheet" || j.mode === "qwen_frame" || j.mode === "sketch_frame";
+      if (j.mode === "sketch_frame" && j.frame_url) {
+        const still = document.createElement("img");
+        still.className = "job-still";
+        still.src = j.frame_url;
+        still.alt = "";
+        still.onclick = (e) => {
+          e.stopPropagation();
+          openCinemaStill(j.frame_url, j.scene_title || "");
+        };
+        left.prepend(still);
+      }
+      if (stillJob && j.status === "running") {
         const track = document.createElement("div");
         track.className = "job-inline-progress";
         track.setAttribute("role", "progressbar");
@@ -8794,7 +8930,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         right.appendChild(cp);
       }
       if (j.status === "done") {
-        if (j.mode !== "qwen_sheet" && j.mode !== "qwen_frame") {
+        if (!stillJob) {
           const b = document.createElement("button");
           b.textContent = tt("job.play");
           b.className = "btn-secondary job-action-main";
@@ -9603,11 +9739,66 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (hint && msg) hint.textContent = msg;
   }
 
+  const SKETCH_DEFAULT_PROMPT = "The drawn scene comes to life with natural, gentle motion.";
+
+  async function submitSketch(prompt) {
+    const blob = await window.h3SketchBlob?.();
+    if (!blob) {
+      noteGenerate(tt("sketch.needDrawing"));
+      return false;
+    }
+    const btn = $("btn-generate");
+    if (btn) btn.disabled = true;
+    try {
+      const speedSettingsApplied = await pendingSpeedSpectrumApply;
+      await waitForDraftLora();
+      if (!speedSettingsApplied) throw Error(window.h3Lang?.() === "en"
+        ? "Acceleration settings could not be saved; retry before generating."
+        : "Hızlandırma ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
+      await h3AccelerationLatestSave;
+      noteGenerate(tt("sketch.uploading"));
+      const form = new FormData();
+      form.append("file", blob, "sketch.png");
+      const upload = await fetch("/api/refs/upload", { method: "POST", body: form });
+      const ref = await upload.json().catch(() => ({}));
+      if (!upload.ok) throw new Error(errDetail(ref));
+      const body = {
+        prompt: withStyleLock(prompt || SKETCH_DEFAULT_PROMPT),
+        duration: state.duration,
+        aspect: state.aspect || "16:9",
+        quality: state.quality,
+        seed: numOr("seed", -1),
+        ...collectGenerateKnobs(),
+        sketch_name: ref.name,
+        sketch_text: prompt,
+        sketch_style: state.projectStyle || null,
+        sketch_fidelity: window.h3SketchFidelity?.() || "balanced",
+      };
+      const r = await fetch("/api/sketch/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      setProdLane("motion");
+      noteGenerate(tt("sketch.queued"));
+      await refreshJobs();
+      return true;
+    } catch (e) {
+      noteGenerate(String(e.message || e));
+      return false;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function submitGenerate() {
     const typed = $("prompt")?.value.trim() || "";
     const sectionPrompt = String(window.getContinuumMainPrompt?.() || "").trim();
     const prompt = sectionPrompt || typed;
-    if (!prompt) {
+    // Motion Transfer runs without a prompt as a main-face swap.
+    if (!prompt && state.produceMode !== "v2v") {
       noteGenerate(tf("toast.writePrompt"));
       return false;
     }
@@ -9626,7 +9817,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const isFace = mode === "face";
     const isV2v = mode === "v2v";
     const isI2v = mode === "t2v" && state.newVideoInput === "i2v";
-    const motionChain = isV2v && !!$("motion-chain-15")?.checked;
     if (isContinue) {
       await fillContinueSource();
       const pick = $("continue-source")?.value || "";
@@ -9645,13 +9835,28 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       noteGenerate(tf("toast.faceNeedPortrait"));
       return false;
     }
+    if (isV2v && window.h3MotionSource?.() === "sketch") return submitSketch(prompt);
     if (isV2v && !state.v2vVideos.length) {
       noteGenerate(tf("toast.v2vNeedMedia"));
       return false;
     }
-    if (motionChain && state.duration !== 5) {
-      noteGenerate(tf("toast.motionChainFiveSec"));
+    const autoFaceSwap = isV2v && !prompt;
+    if (autoFaceSwap && !state.v2vImages.length) {
+      noteGenerate(tf("toast.v2vFaceNeedImage"));
       return false;
+    }
+    const isSwap = isV2v && !autoFaceSwap && state.v2vKind === "swap";
+    let swapLora = null;
+    if (isSwap) {
+      if (!state.v2vImages.length) {
+        noteGenerate(tf("toast.v2vSwapNeedImage"));
+        return false;
+      }
+      swapLora = readyLora("character-swap");
+      if (!swapLora) {
+        noteGenerate(tf("toast.v2vSwapLora"));
+        return false;
+      }
     }
     if (isI2v && !state.firstFrameName) {
       noteGenerate(tt("scene.firstFrame"));
@@ -9664,12 +9869,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const speedSettingsApplied = await pendingSpeedSpectrumApply;
       await waitForDraftLora();
       if (!speedSettingsApplied) throw Error(window.h3Lang?.() === "en"
-        ? "Spectrum settings could not be saved; retry before generating."
-        : "Spectrum ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
+        ? "Acceleration settings could not be saved; retry before generating."
+        : "Hızlandırma ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
       await h3AccelerationLatestSave;
       const faceLockOn = !!$("face-lock-chain")?.checked && state.faceImages.length > 0;
       const body = {
-        prompt: withStyleLock(prompt),
+        prompt: autoFaceSwap ? V2V_FACE_SWAP_PROMPT : withStyleLock(prompt),
         ...window.getSceneAudioPayload?.(),
         ...sceneAssetReferences?.payload(),
         duration: state.duration,
@@ -9709,8 +9914,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_images = state.v2vImages.map((x) => x.name);
         body.ref_image_size = state.refImageSize || "match";
         body.include_video_audio = !!$("v2v-include-audio")?.checked;
+        // The Motion tab hides the project type picker.
+        body.purpose = null;
+        body.silent_audio = false;
       }
-      if (motionChain) body.segments = 3;
+      if (autoFaceSwap) {
+        body.v2v_role = "face_swap";
+        const faceLora = readyLora("face-swap");
+        if (faceLora) addLoraToBody(body, faceLora);
+      }
+      if (isSwap) {
+        body.v2v_role = "swap";
+        addLoraToBody(body, swapLora);
+      }
       if (isI2v) {
         if (state.firstFrameName) body.first_frame_name = state.firstFrameName;
       }
@@ -9725,25 +9941,25 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_image_size = "max";
         body.ref_role = "face";
       }
-      const r = await fetch(motionChain ? "/api/motion-transfer/chain" : "/api/generate", {
+      // Motion Transfer always renders the whole reference video, part by part.
+      const r = await fetch(isV2v ? "/api/motion-transfer/long" : "/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
-      if (data.prompt && data.prompt_rewritten) {
-        $("prompt").value = data.prompt;
-      } else if (data.prompt && !!$("prompt-rewriter-enabled")?.checked) {
+      state.pendingMotionLongId = data.motion_long_id || null;
+      // An automatic face swap keeps the box empty so the next run stays automatic.
+      if (!autoFaceSwap && data.prompt && (data.prompt_rewritten || !!$("prompt-rewriter-enabled")?.checked)) {
         $("prompt").value = data.prompt;
       }
       state.selectedJobId = data.id;
       state.playerCleared = false;
       state.pendingContinueChild = isContinue ? data.id : null;
-      state.prodLane = "scene";
-      setProdLane("scene");
-      const queuedLabel = motionChain
-        ? tt("toast.motionChainQueued")
+      setProdLane(isV2v ? "motion" : "scene");
+      const queuedLabel = data.motion_long_id
+        ? tf("toast.v2vLongQueued", { sec: Number(data.seconds || 0).toFixed(1), n: String(data.count || 1) })
         : isContinue
         ? faceLockOn
           ? tt("toast.continueFaceQueued")
@@ -9774,34 +9990,27 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       button.classList.toggle("on", selected);
       button.setAttribute("aria-pressed", String(selected));
     });
-    if (kind === "draft") {
-      setDuration(5);
-      setQuality("480");
-      const steps = $("steps");
-      if (steps) steps.value = "4";
-      pendingSpeedSpectrumApply = fetch("/api/h3-acceleration")
-        .then(async response => {
-          const current = await response.json();
-          if (!response.ok) throw Error(errDetail(current));
-          if (!current.spectrum_enabled) await saveH3AccelerationSettings({spectrum_enabled:true});
-          return true;
-        })
-        .catch(error => { toast(String(error.message || error)); return false; });
-      return;
-    }
-    if (kind === "quality") {
-      setQuality("1088");
-      const steps = $("steps");
-      if (steps) steps.value = "20";
-      return;
-    }
-    if (kind === "quick") {
-      setDuration(5);
-      setQuality("736");
-      const steps = $("steps");
-      if (steps) steps.value = "15";
-      tToast("toast.quickPreset");
-    }
+    const profile = {draft: {duration: 5, quality: "480", steps: 8},
+      quick: {duration: 5, quality: "736", steps: 8},
+      quality: {quality: "1088", steps: 18}}[kind];
+    if (!profile) return;
+    if (profile.duration) setDuration(profile.duration);
+    setQuality(profile.quality);
+    const steps = $("steps");
+    if (steps) steps.value = String(profile.steps);
+    // Every preset runs with all accelerators; only the missing ones are switched on.
+    pendingSpeedSpectrumApply = fetch("/api/h3-acceleration")
+      .then(async response => {
+        const current = await response.json();
+        if (!response.ok) throw Error(errDetail(current));
+        const changes = {};
+        if (!current.spectrum_enabled) changes.spectrum_enabled = true;
+        if (!current.sparse_enabled) changes.sparse_enabled = true;
+        if (Object.keys(changes).length) await saveH3AccelerationSettings(changes);
+        return true;
+      })
+      .catch(error => { toast(String(error.message || error)); return false; });
+    if (kind === "quick") tToast("toast.quickPreset");
   }
 
   $("btn-generate").onclick = () => submitGenerate();
@@ -9877,6 +10086,24 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     state.loraApplied = selected.size > 0;
     if (state.cinemaLoaded && state.cinema) state.cinema.lora_selection = [...selected];
     updateLoraHint();
+  }
+
+  const V2V_FACE_SWAP_PROMPT = "Replace the face of the main person with the face from <Picture 1>.";
+
+  function readyLora(id) {
+    return (state.loraCatalog || []).find((spec) => spec.id === id && spec.file && spec.ready) || null;
+  }
+
+  function addLoraToBody(body, spec) {
+    const names = String(body.lora_name || "").split("|").filter(Boolean);
+    if (names.includes(spec.file)) return;
+    const weight = loraWeight(spec);
+    body.lora_name = [...names, spec.file].join("|");
+    body.lora_strengths = { ...(body.lora_strengths || {}), [spec.file]: weight };
+    if (!body.lora_id) {
+      body.lora_id = spec.id;
+      body.lora_strength = weight;
+    }
   }
 
   function collectLoraPayload() {
@@ -10778,16 +11005,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   document.querySelectorAll("#quality-chips .chip, #quality-chips-cont .chip").forEach((btn) => {
     btn.addEventListener("click", () => setQuality(btn.dataset.q));
   });
-  document
-    .querySelectorAll("#post-pass-chips .chip, #post-pass-chips-cont .chip, #cinema-post-pass-chips .chip, #director-post-pass-chips .chip")
-    .forEach((btn) => {
-      btn.addEventListener("click", () => setPostPass(btn.dataset.post || ""));
-    });
+  document.querySelectorAll(".fps-toggle").forEach((input) => {
+    input.addEventListener("change", () => setPostPass(input.checked ? "vfi" : ""));
+  });
   document.querySelectorAll(".backdrop-chips .chip").forEach((btn) => {
     btn.addEventListener("click", () => setBackdrop(btn.dataset.backdrop || ""));
-  });
-  $("cinema-post-upscale")?.addEventListener("change", () => {
-    setPostPass($("cinema-post-upscale").checked ? "upscale" : "");
   });
   $("cinema-character-voice-file")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
@@ -10828,8 +11050,32 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   });
   $("v2v-video-files")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
-    void uploadVideoFiles(e.target.files, state.v2vVideos, "v2v-video-thumbs");
+    void uploadVideoFiles(e.target.files, state.v2vVideos, "v2v-video-thumbs", { minSec: 4, maxSec: 30, maxCount: 1 });
     e.target.value = "";
+  });
+  function setV2vKind(kind) {
+    state.v2vKind = kind === "swap" ? "swap" : "motion";
+    const swap = state.v2vKind === "swap";
+    document.querySelectorAll("#v2v-kind [data-v2v-kind]").forEach((button) => {
+      const selected = button.dataset.v2vKind === state.v2vKind;
+      button.classList.toggle("on", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+    $("v2v-hint-motion")?.classList.toggle("hidden", swap);
+    $("v2v-hint-swap")?.classList.toggle("hidden", !swap);
+    for (const [id, key] of [["v2v-motion-label", swap ? "v2v.swapVideo" : "v2v.motion"], ["v2v-look-label", swap ? "v2v.swapLook" : "v2v.look"]]) {
+      const label = $(id);
+      if (!label) continue;
+      label.setAttribute("data-i18n", key);
+      label.textContent = tt(key);
+    }
+  }
+  document.querySelectorAll("#v2v-kind [data-v2v-kind]").forEach((button) => {
+    button.addEventListener("click", () => setV2vKind(button.dataset.v2vKind));
+  });
+  document.querySelectorAll(".file-pick.v2v-drop").forEach((zone) => {
+    for (const name of ["dragenter", "dragover"]) zone.addEventListener(name, () => zone.classList.add("is-dragover"));
+    for (const name of ["dragleave", "drop"]) zone.addEventListener(name, () => zone.classList.remove("is-dragover"));
   });
   $("v2v-image-files")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
@@ -11991,7 +12237,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   $("btn-queue-save")?.addEventListener("click", async (e) => {
-    const lane = state.prodLane === "director" ? "director" : "scene";
+    const lane = normLane(state.prodLane);
     const active = state.jobs.filter((j) => jobLane(j) === lane && (j.status === "queued" || j.status === "running"));
     if (!active.length) return tToast("queue.saveNothing");
     const when = new Date().toLocaleString(uiLang() === "en" ? "en-GB" : "tr-TR",
@@ -12039,14 +12285,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function clearJobs(scope) {
-    const lane = state.prodLane === "director" ? "director" : "scene";
-    const laneLabel = lane === "director" ? tt("prod.laneDirector") : tt("prod.laneScene");
+    const lane = normLane(state.prodLane);
     const labels = {
       errors: tt("clearScope.errors"),
       finished: tt("clearScope.finished"),
       done: tt("clearScope.done"),
     };
-    if (!tConfirm("confirm.clearScope", { lane: laneLabel, scope: labels[scope] || scope })) return;
+    if (!tConfirm("confirm.clearScope", { lane: laneLabel(lane), scope: labels[scope] || scope })) return;
     try {
       const r = await fetch("/api/jobs/clear", {
         method: "POST",

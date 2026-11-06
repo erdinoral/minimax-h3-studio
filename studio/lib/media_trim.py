@@ -16,15 +16,15 @@ def validate_range(start, end, duration: float, maximum: float = 15.0) -> tuple[
     if start < 0 or end <= start or end > duration + 0.05:
         raise ValueError("Selection must be inside the source media")
     if end - start < 0.1 or end - start > maximum + 0.001:
-        raise ValueError("Reference selection must be between 0.1 and 15 seconds")
+        raise ValueError(f"Reference selection must be between 0.1 and {maximum:g} seconds")
     return start, min(end, duration)
 
 
-def trim_reference(source: Path, output: Path, kind: str, start, end) -> Path:
+def trim_reference(source: Path, output: Path, kind: str, start, end, maximum: float = 15.0) -> Path:
     if kind not in {"audio", "video"} or source.resolve() == output.resolve():
         raise ValueError("Invalid trim destination")
     ffmpeg = _ffmpeg()
-    start, end = validate_range(start, end, _probe_duration(ffmpeg, source))
+    start, end = validate_range(start, end, _probe_duration(ffmpeg, source), maximum)
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
            "-ss", f"{start:.6f}", "-i", str(source), "-t", f"{end-start:.6f}"]
     if kind == "video":

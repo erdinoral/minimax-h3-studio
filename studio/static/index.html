@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=backdrop-chips1" />
+  <link rel="stylesheet" href="/static/app.css?v=sketch3" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -28,6 +28,7 @@
     <nav class="workspace-switch" id="workspace-switch" role="tablist" aria-label="Çalışma alanı" data-i18n-aria-label="ui.workspace-switch.aria-label">
       <button type="button" class="chip on" data-ws="scene" id="ws-scene" role="tab" aria-selected="true">Sahne</button>
       <button type="button" class="chip chip-director" data-ws="director" id="ws-director" role="tab" aria-selected="false">Direktör</button>
+      <button type="button" class="chip" data-ws="motion" id="ws-motion" role="tab" aria-selected="false">Motion</button>
     </nav>
     <div class="sysbar" id="sysbar" title="Sistem performansı">
       <div class="sys-item"><span>CPU</span><b id="sys-cpu">—</b></div>
@@ -125,6 +126,7 @@
             <button type="button" data-dur="15" class="chip warn">15 sn</button>
             <button type="button" data-dur="30" id="hybrid-long-duration" class="chip warn hidden" hidden>30 sn</button>
           </div>
+          <p class="v2v-duration-note hidden" id="v2v-duration-note">Referans videonun süresi kadar</p>
           <div id="fl2va-frames">
             <label id="first-frame-label">Başlangıç görseli</label>
             <div class="frame-source-card" id="first-frame-source-card">
@@ -166,12 +168,13 @@
             <button type="button" data-q="1088" class="chip warn">1088p</button>
           </div>
           <div class="muted" id="quality-hint">1280×736 · H3 (×32)</div>
-          <label id="scene-post-label">Son geçiş</label>
-          <div class="chips" id="post-pass-chips">
-            <button type="button" class="chip on" data-post="" data-i18n="ayar.postOff">Kapalı</button>
-            <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
-            <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
-          </div>
+          <label id="scene-post-label">Kare hızı</label>
+          <label class="cinema-seamless-switch fps-switch" title="48 fps: RIFE ile ara kareler eklenir, süre değişmez" data-i18n-title="fps.title">
+            <span class="fps-24">24 fps</span>
+            <input type="checkbox" class="fps-toggle" />
+            <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+            <span class="fps-48">48 fps</span>
+          </label>
           <label title="Yeşil veya mavi perde: mekân yerine düz, ayrılabilir arka plan" data-i18n="backdrop.label" data-i18n-title="backdrop.title">Arka plan</label>
           <div class="chips backdrop-chips" role="group" aria-label="Arka plan" data-i18n-aria-label="backdrop.label">
             <button type="button" class="chip on" data-backdrop="" data-i18n="backdrop.off">Kapalı</button>
@@ -202,23 +205,65 @@
         </div>
 
         <div id="panel-mode-v2v" class="hidden">
-          <p class="muted mode-hint">Motion Transfer: referans video hareket/kamera içindir; hedef karakter için foto ekle. Studio otomatik olarak <code>&lt;Video 1&gt;</code> = hareket, <code>&lt;Picture 1&gt;</code> = görünüm şeklinde bağlar.</p>
-          <label id="v2v-motion-label">Hareket referans videosu (1–3)</label>
-          <label class="file-pick">
-            <input type="file" id="v2v-video-files" class="file-pick-input" accept="video/*" multiple />
-            <span class="file-pick-btn" data-i18n="pick.video">Video seç</span>
+          <div class="ios-segment v2v-kind-switch motion-source-switch" id="motion-source" role="group">
+            <button type="button" class="on" data-motion-source="video" aria-pressed="true" data-i18n="motion.sourceVideo" data-i18n-title="hint.v2v">H3 Video</button>
+            <button type="button" data-motion-source="robot" aria-pressed="false" data-i18n="motion.sourceRobot" data-i18n-title="motion.robotHint">MotionBricks</button>
+            <button type="button" data-motion-source="sketch" aria-pressed="false" data-i18n="motion.sourceSketch" data-i18n-title="sketch.hint">Qwen Çizim</button>
+          </div>
+          <div id="motion-sketch-panel" class="motion-robot-panel hidden">
+            <label class="file-pick">
+              <input type="file" id="sk-file" class="file-pick-input" accept="image/*" />
+              <span class="file-pick-btn" data-i18n="sketch.upload">Çizim yükle</span>
+              <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
+            </label>
+            <label data-i18n="sketch.fidelity">Çizime bağlılık</label>
+            <div class="chips" id="sk-fidelity-chips" role="group" aria-label="Çizime bağlılık" data-i18n-aria-label="sketch.fidelity" data-i18n-title="sketch.fidelityHint">
+              <button type="button" class="chip" data-sk-fidelity="faithful" data-i18n="sketch.faithful">Sadık</button>
+              <button type="button" class="chip on" data-sk-fidelity="balanced" data-i18n="sketch.balanced">Dengeli</button>
+              <button type="button" class="chip" data-sk-fidelity="free" data-i18n="sketch.free">Serbest</button>
+            </div>
+          </div>
+          <div id="motion-robot-panel" class="motion-robot-panel hidden">
+            <label data-i18n="motion.takeLength">Kayıt süresi</label>
+            <div class="chips" id="mb-seconds-chips" role="group" aria-label="Kayıt süresi" data-i18n-aria-label="motion.takeLength">
+              <button type="button" class="chip" data-mb-seconds="5">5 sn</button>
+              <button type="button" class="chip" data-mb-seconds="8">8 sn</button>
+              <button type="button" class="chip on" data-mb-seconds="10">10 sn</button>
+              <button type="button" class="chip" data-mb-seconds="15">15 sn</button>
+              <button type="button" class="chip" data-mb-seconds="20">20 sn</button>
+              <button type="button" class="chip warn" data-mb-seconds="30">30 sn</button>
+            </div>
+            <p class="muted motion-robot-credit" data-i18n="motion.robotCredit">MotionBricks: NVIDIA (Open Model Agreement) · tarayıcı portu: townbox (Apache-2.0) · robot: Unitree (BSD-3). Model ilk açılışta ~369 MB iner ve tarayıcıda saklanır.</p>
+          </div>
+          <div class="ios-segment v2v-kind-switch" id="v2v-kind" role="group">
+            <button type="button" class="on" data-v2v-kind="motion" aria-pressed="true" data-i18n="v2v.tabMotion">Motion transfer</button>
+            <button type="button" data-v2v-kind="swap" aria-pressed="false" data-i18n="v2v.tabSwap">Objects swap</button>
+          </div>
+          <p class="muted mode-hint" id="v2v-hint-motion" data-i18n="hint.v2v">Motion Transfer: referans video sadece hareket, koreografi, zamanlama ve kamera içindir. Hedef karakter/ürün/görünüm için foto ekle; Studio &lt;Video 1&gt; = hareket, &lt;Picture 1&gt; = görünüm olarak bağlar. Prompt boş bırakılırsa videodaki ana yüz, görseldeki yüzle değiştirilir. Çıktı videonun tam süresi kadardır: 5 sn'lik parçalar sırayla üretilip tek videoda birleştirilir.</p>
+          <p class="muted mode-hint hidden" id="v2v-hint-swap" data-i18n="hint.v2vSwap">Objects swap: kaynak videodaki sahne, kamera ve hareket korunur; prompt’ta adını verdiğin kişi veya nesne eklediğin görseldekiyle değiştirilir. Character Swap LoRA otomatik açılır.</p>
+          <label class="file-pick v2v-drop" id="v2v-video-pick">
+            <input type="file" id="v2v-video-files" class="file-pick-input" accept="video/*" />
+            <span class="v2v-drop-icons" aria-hidden="true">
+              <span class="v2v-drop-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M4 6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2.5l4-2.5v12l-4-2.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></span>
+            </span>
+            <strong class="v2v-drop-title" id="v2v-motion-label" data-i18n="v2v.motion">Hareketi çıkarmak için referans video ekle</strong>
+            <span class="v2v-drop-sub" data-i18n="v2v.videoLimit">Video süresi: 4–30 sn · çıktı aynı uzunlukta</span>
             <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="v2v-video-thumbs"></div>
-          <label id="v2v-look-label">Hedef görünüm / karakter foto (0–9)</label>
-          <label class="file-pick">
+          <label class="file-pick v2v-drop">
             <input type="file" id="v2v-image-files" class="file-pick-input" accept="image/*" multiple />
-            <span class="file-pick-btn" data-i18n="pick.images">Görseller seç</span>
+            <span class="v2v-drop-icons" aria-hidden="true">
+              <span class="v2v-drop-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0z"/></svg></span>
+              <span class="v2v-drop-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 3 4 6l2 5 2-1v11h8V10l2 1 2-5-5-3a3 3 0 0 1-6 0z"/></svg></span>
+              <span class="v2v-drop-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="m12 2 9 5v10l-9 5-9-5V7zm0 2.3L5.6 7.8 12 11.3l6.4-3.5z"/></svg></span>
+            </span>
+            <strong class="v2v-drop-title" id="v2v-look-label" data-i18n="v2v.look">Karakter, ürün veya kıyafet ekle</strong>
+            <span class="v2v-drop-sub" data-i18n="v2v.imageLimit">En fazla 9 görsel</span>
             <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="v2v-image-thumbs"></div>
           <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span id="v2v-audio-label">Video’daki sesi de referans al</span></label>
-          <label class="check motion-chain-option"><input type="checkbox" id="motion-chain-15" /> <span id="motion-chain-label">15 sn üret · 3 × 5 sn zincir (güvenli)</span></label>
         </div>
 
         <div id="panel-mode-cinema" class="hidden">
@@ -261,12 +306,13 @@
             <button type="button" data-q="1088" class="chip warn">1088p</button>
           </div>
           <div class="muted" id="quality-hint-cont">1280×736</div>
-          <label id="cont-post-label">Son geçiş</label>
-          <div class="chips" id="post-pass-chips-cont">
-            <button type="button" class="chip on" data-post="" data-i18n="ayar.postOff">Kapalı</button>
-            <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
-            <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
-          </div>
+          <label id="cont-post-label">Kare hızı</label>
+          <label class="cinema-seamless-switch fps-switch" title="48 fps: RIFE ile ara kareler eklenir, süre değişmez" data-i18n-title="fps.title">
+            <span class="fps-24">24 fps</span>
+            <input type="checkbox" class="fps-toggle" />
+            <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+            <span class="fps-48">48 fps</span>
+          </label>
           <label title="Yeşil veya mavi perde: mekân yerine düz, ayrılabilir arka plan" data-i18n="backdrop.label" data-i18n-title="backdrop.title">Arka plan</label>
           <div class="chips backdrop-chips" role="group" aria-label="Arka plan" data-i18n-aria-label="backdrop.label">
             <button type="button" class="chip on" data-backdrop="" data-i18n="backdrop.off">Kapalı</button>
@@ -295,9 +341,9 @@
         <label><span id="ayar-steps-label">Adım</span> <input type="number" id="steps" value="20" min="1" max="50" /></label>
         <label id="ayar-speed-label">Hız</label>
         <div class="chips wrap" id="speed-chips" role="group" aria-label="Hız" data-i18n-aria-label="ui.speed-chips.aria-label">
-          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 4 step · Turbo LoRA" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
-          <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 720p · 15 step" data-i18n-title="ui.btn-speed-quick.title">Orta</button>
-          <button type="button" class="chip" id="btn-speed-quality" data-speed="quality" data-i18n="ayar.qualityPreset" title="1088p · 20 steps">Kalite</button>
+          <button type="button" class="chip" id="btn-fast-preset" data-speed="draft" title="5sn · 480p · 8 adım · Hybrid LoRA · tüm hızlandırmalar" data-i18n-title="ui.btn-fast-preset.title">Taslak</button>
+          <button type="button" class="chip" id="btn-speed-quick" data-speed="quick" title="5sn · 736p · 8 adım · Hybrid LoRA · tüm hızlandırmalar" data-i18n-title="ui.btn-speed-quick.title">Orta</button>
+          <button type="button" class="chip" id="btn-speed-quality" data-speed="quality" data-i18n="ayar.qualityPreset" title="1088p · 18 adım · LoRA yok · tüm hızlandırmalar" data-i18n-title="ui.btn-speed-quality.title">Kalite</button>
         </div>
         </div>
         <details class="scene-audio-card" id="scene-audio-card">
@@ -327,6 +373,50 @@
         <video id="player" controls playsinline></video>
         <button type="button" class="player-nav player-nav-prev hidden" id="btn-player-prev" title="Önceki video" aria-label="Önceki video" data-i18n-title="ui.btn-player-prev.title" data-i18n-aria-label="ui.btn-player-prev.aria-label">›</button>
         <div class="player-empty muted" id="player-empty">Henüz video yok</div>
+        <div class="mb-stage hidden" id="mb-stage">
+          <div class="mb-frame" id="mb-frame"></div>
+          <div class="mb-status" id="mb-status" role="status" aria-live="polite"></div>
+          <div class="mb-hud">
+            <div class="mb-hud-top">
+              <span class="mb-rec hidden" id="mb-rec"><i></i><span id="mb-rec-time">0.0</span></span>
+              <span class="mb-hud-spacer"></span>
+              <button type="button" class="mb-btn" id="mb-camera" data-i18n="motion.robotCamera" title="Kamerayı robotun arkasına al" data-i18n-title="motion.robotCameraTitle">Kamera</button>
+              <button type="button" class="mb-btn" id="mb-restart" data-i18n="motion.robotRestart" title="Robotu başlangıç noktasına döndür" data-i18n-title="motion.robotRestartTitle">Baştan</button>
+              <button type="button" class="mb-btn" id="mb-fullscreen" data-i18n="motion.fullscreen">Tam ekran</button>
+            </div>
+            <div class="mb-hud-bottom">
+              <div class="mb-gaits" id="mb-gaits" role="group" aria-label="Yürüyüş stili" data-i18n-aria-label="motion.gaits"></div>
+              <div class="mb-actions">
+                <button type="button" class="mb-btn" id="mb-run" aria-pressed="false" data-i18n="motion.robotRun">Koş</button>
+                <button type="button" class="mb-btn" id="mb-interact" data-i18n="motion.robotInteract" title="Yakındaki nesneyle etkileş: otur / kalk" data-i18n-title="motion.robotInteractTitle">Etkileşim</button>
+                <button type="button" class="mb-btn mb-record" id="mb-record" disabled>● Kaydı başlat</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="mb-stage sk-stage hidden" id="sk-stage">
+          <div class="sk-board" id="sk-board"><canvas id="sk-canvas"></canvas></div>
+          <div class="mb-hud">
+            <div class="mb-hud-top">
+              <div class="mb-gaits" role="group" aria-label="Araç" data-i18n-aria-label="sketch.tools">
+                <button type="button" class="mb-btn on" data-sk-tool="pen" data-i18n="sketch.pen">Kalem</button>
+                <button type="button" class="mb-btn" data-sk-tool="eraser" data-i18n="sketch.eraser">Silgi</button>
+              </div>
+              <div class="mb-gaits" role="group" aria-label="Kalınlık" data-i18n-aria-label="sketch.size">
+                <button type="button" class="mb-btn" data-sk-size="4" data-i18n="sketch.thin">İnce</button>
+                <button type="button" class="mb-btn on" data-sk-size="10" data-i18n="sketch.medium">Orta</button>
+                <button type="button" class="mb-btn" data-sk-size="24" data-i18n="sketch.thick">Kalın</button>
+              </div>
+              <span class="mb-hud-spacer"></span>
+              <button type="button" class="mb-btn" id="sk-undo" data-i18n="sketch.undo">Geri al</button>
+              <button type="button" class="mb-btn" id="sk-clear" data-i18n="sketch.clear">Temizle</button>
+              <button type="button" class="mb-btn" id="sk-fullscreen" data-i18n="motion.fullscreen">Tam ekran</button>
+            </div>
+            <div class="mb-hud-bottom">
+              <div class="mb-gaits sk-colors" id="sk-colors" role="group" aria-label="Renk" data-i18n-aria-label="sketch.color"></div>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="player-actions">
         <button type="button" class="btn-secondary" id="btn-use-in-continue">Bu videodan devam</button>
@@ -416,6 +506,7 @@
         <div class="chips prod-lane-tabs" id="prod-lane-tabs" role="tablist" aria-label="Üretim sekmesi" data-i18n-aria-label="ui.prod-lane-tabs.aria-label">
           <button type="button" class="chip on" data-lane="scene" id="prod-lane-scene">Sahne</button>
           <button type="button" class="chip" data-lane="director" id="prod-lane-director">Direktör</button>
+          <button type="button" class="chip" data-lane="motion" id="prod-lane-motion">Motion</button>
         </div>
         <div class="job-queue">
           <div class="job-queue-head">Kuyruk</div>
@@ -492,12 +583,13 @@
         <button type="button" class="chip" data-group="clip" data-clip="10" data-chip="10 sn klipler" aria-pressed="false">10 sn</button>
       </div>
       <div class="director-post-pass">
-        <span class="muted" id="director-post-label">Son geçiş</span>
-        <div class="chips" id="director-post-pass-chips" role="group" aria-label="Son geçiş" data-i18n-aria-label="ui.director-post-pass-chips.aria-label">
-          <button type="button" class="chip on" data-post="" data-i18n="ayar.postOff">Kapalı</button>
-          <button type="button" class="chip" data-post="upscale">1.5× upscale</button>
-          <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
-        </div>
+        <span class="muted" id="director-post-label">Kare hızı</span>
+        <label class="cinema-seamless-switch fps-switch" title="48 fps: RIFE ile ara kareler eklenir, süre değişmez" data-i18n-title="fps.title">
+          <span class="fps-24">24 fps</span>
+          <input type="checkbox" class="fps-toggle" />
+          <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+          <span class="fps-48">48 fps</span>
+        </label>
       </div>
       <div class="chips director-mode-tabs" id="director-mode-tabs">
         <button type="button" class="chip on" data-dirmode="chat" id="dir-tab-chat">Sohbet</button>
@@ -692,13 +784,13 @@
               <input type="checkbox" id="cinema-seamless-toggle" checked />
               <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
             </label>
-            <label class="cinema-seamless-switch">
-              <span id="cinema-post-upscale-label">1.5× upscale</span>
-              <input type="checkbox" id="cinema-post-upscale" />
+            <label class="cinema-seamless-switch fps-switch" title="48 fps: RIFE ile ara kareler eklenir, süre değişmez" data-i18n-title="fps.title">
+              <span class="fps-24">24 fps</span>
+              <input type="checkbox" class="fps-toggle" />
               <span class="cinema-ios-track" aria-hidden="true"><span></span></span>
+              <span class="fps-48">48 fps</span>
             </label>
             <span id="cinema-refmod-slot"></span>
-            <button type="button" class="chip post-pass-vfi hidden" data-post="vfi">24→48 VFI</button>
           </div>
           <label><span id="cinema-steps-label">Adım</span>
             <input type="number" id="cinema-steps" min="1" max="50" value="20" />
@@ -1368,20 +1460,22 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=backdrop-chips1" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=sketch4" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
-  <script src="/static/app.js?v=backdrop-chips1" charset="utf-8"></script>
+  <script src="/static/app.js?v=sketch1" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>
   <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
 <script src="/static/h3-enhancements.js?v=3"></script>
-  <script src="/static/video-workflows.js?v=12"></script>
+  <script src="/static/video-workflows.js?v=13"></script>
+  <script src="/static/motion-sketch.js?v=2"></script>
+  <script src="/static/motion-robot.js?v=4"></script>
   <script src="/static/scene-selectors.js?v=3"></script>
   <script src="/static/scene-settings.js?v=3"></script>
   <script src="/static/sponsor-banner.js?v=3"></script>

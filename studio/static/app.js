@@ -894,6 +894,17 @@
   function toast(msg) {
     $("prod-text").textContent = msg;
   }
+  window.h3Toast = toast;
+  window.h3ErrDetail = (data) => errDetail(data);
+  window.h3RefreshJobs = () => refreshJobs();
+  /** Open a finished job in the player and show Result (Game tab: the H3 source clip). */
+  window.h3PlayJob = (id) => {
+    const job = (state.jobs || []).find((j) => j.id === id);
+    if (!job) return false;
+    selectJob(job);
+    showMotionResult();
+    return true;
+  };
 
   /** Feedback visible in director dock (prod bar is often off-screen when modal is open). */
   function directorLlmFeedback(msg, kind) {
@@ -1160,7 +1171,7 @@
 
   function setDuration(sec) {
     const n = Number(sec);
-    if (![2, 3, 4, 5, 6, 8, 10, 15].includes(n) && !(n === 30 && state.videoEngine === "hybrid" && state.produceMode === "ref")) return;
+    if (![2, 3, 4, 5, 6, 8, 10, 15].includes(n)) return;
     state.duration = n;
     document
       .querySelectorAll("#dur-chips .chip, #dur-chips-cont .chip, #dur-chips-story .chip")
@@ -1172,17 +1183,6 @@
   }
 
   // Official H3 sizes (ResolutionSelector, multiple of 32). Six practical MP tiers.
-  function syncHybridDuration() {
-    const button = $("hybrid-long-duration");
-    const enabled = state.videoEngine === "hybrid" && state.produceMode === "ref";
-    if (button) {
-      button.hidden = !enabled;
-      button.classList.toggle("hidden", !enabled);
-      button.title = window.h3Lang?.() === "en" ? "Experimental single 30-second reference generation" : "Deneysel: tek üretimde 30 saniye, referans modu";
-    }
-    if (!enabled && state.duration === 30) setDuration(15);
-  }
-
   // Legacy UI keys 720/1080 alias to 736/1088.
   const H3_QUALITY_ALIASES = { 720: "736", 1080: "1088", "720": "736", "1080": "1088" };
   const H3_QUALITY_KEYS = ["352", "480", "608", "736", "768", "1088"];
@@ -1307,6 +1307,7 @@
   // Motion Transfer has no duration choice: the output is as long as the reference video.
   // A drawing has no reference video, so the sketch source keeps the normal duration chips.
   function syncV2vDuration() {
+    syncMotionRefPreview();
     const v2v = state.produceMode === "v2v" && window.h3MotionSource?.() !== "sketch";
     const chips = $("dur-chips");
     (chips?.closest(".scene-select-field") || chips)?.classList.toggle("hidden", v2v);
@@ -1358,7 +1359,6 @@
     const allowed = ["t2v", "continue", "ref", "face", "v2v", "cinema", "storyboard"];
     const m = allowed.includes(mode) ? (mode === "storyboard" ? "cinema" : mode) : "t2v";
     state.produceMode = m;
-    syncHybridDuration();
     document.querySelectorAll("#mode-chips .chip").forEach((b) => {
       b.classList.toggle("on", b.dataset.mode === m);
     });
@@ -1672,6 +1672,156 @@
     syncV2vDuration();
     toast(tf("motion.takeReady", { sec: (Number(data.seconds) || 0).toFixed(1) }));
   };
+
+  // Motion player view. Workspace layers are only faded out, never removed, so the robot
+  // iframe, the drawing canvas and a running robot take survive a trip to Result.
+  // The Game tab shares the same Workspace / Result switch for its sprite preview.
+  const MOTION_VIEWS = ["workspace", "result"];
+  const VIEW_LANES = ["motion", "game"];
+  state.motionView = "workspace";
+  state.motionResultUnseen = false;
+  state.gameResultUnseen = false;
+  window.h3MotionView = () => state.motionView;
+
+  function inMotionWorkspace() {
+    return VIEW_LANES.some((lane) => document.body.classList.contains(`ws-${lane}`));
+  }
+
+  function viewLane() {
+    return document.body.classList.contains("ws-game") ? "game" : "motion";
+  }
+
+  function unseenKey(lane) {
+    return lane === "game" ? "gameResultUnseen" : "motionResultUnseen";
+  }
+
+  function setMotionView(view, { focus = false } = {}) {
+    const next = MOTION_VIEWS.includes(view) ? view : "workspace";
+    const changed = next !== state.motionView;
+    state.motionView = next;
+    document.body.classList.toggle("mv-result", next === "result");
+    const host = $("motion-view");
+    if (host) host.dataset.view = next;
+    document.querySelectorAll("#motion-view [data-motion-view]").forEach((tab) => {
+      const on = tab.dataset.motionView === next;
+      tab.classList.toggle("on", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      if (on && focus) tab.focus();
+    });
+    if (next === "result" && inMotionWorkspace()) state[unseenKey(viewLane())] = false;
+    if (next !== "result") $("player")?.pause();
+    syncMotionRefPreview();
+    syncMotionResultBadge();
+    if (changed) document.dispatchEvent(new CustomEvent("h3-motion-view", { detail: next }));
+  }
+
+  // Only explicit picks (job Play, gallery card) reveal Result; finished jobs never switch views.
+  function showMotionResult() {
+    if (inMotionWorkspace()) setMotionView("result");
+  }
+
+  function syncMotionRefPreview() {
+    const stage = $("mv-ref-stage");
+    const video = $("mv-ref-video");
+    if (!stage || !video) return;
+    const present = document.body.classList.contains("ws-motion") && window.h3MotionSource?.() === "video";
+    stage.classList.toggle("hidden", !present);
+    const ref = state.v2vVideos[0];
+    const url = ref?.url && ref.url !== "#" ? ref.url : "";
+    if (video.dataset.src !== url) {
+      video.dataset.src = url;
+      if (url) {
+        video.src = url;
+      } else {
+        video.removeAttribute("src");
+        video.load();
+      }
+    }
+    stage.classList.toggle("has-ref", !!url);
+    const tag = $("mv-ref-tag");
+    const sec = Number(ref?.seconds) || 0;
+    if (tag) tag.textContent = url && sec ? tf("motion.refTag", { sec: sec.toFixed(1) }) : "";
+    if (present && url && state.motionView === "workspace") video.play()?.catch?.(() => {});
+    else video.pause();
+  }
+
+  /** Busy / queued state of the Motion (or Game) lane; a running job wins over queued ones. */
+  function motionResultStatus(jobs, lane = viewLane()) {
+    const active = (jobs || []).filter((j) => jobLane(j) === lane && (j.status === "running" || j.status === "queued"));
+    const running = active.find((j) => j.status === "running");
+    if (running) return { state: "busy", pct: Math.max(0, Math.min(100, Math.round(Number(running.progress) || 0))) };
+    return { state: active.length ? "queued" : "idle", pct: 0 };
+  }
+
+  /** A Motion video that finished while Result was not on screen leaves a Ready mark. */
+  function noteMotionResults(prevStatus) {
+    for (const lane of VIEW_LANES) {
+      const fresh = (state.jobs || []).some((j) => {
+        if (jobLane(j) !== lane || j.status !== "done" || !j.output?.url) return false;
+        const was = prevStatus[j.id];
+        const joined = !was && j.mode === "motion_long" && j.motion_long_id === state.pendingMotionLongId;
+        return (was && was !== "done") || joined;
+      });
+      if (!fresh || (inMotionWorkspace() && viewLane() === lane && state.motionView === "result")) continue;
+      state[unseenKey(lane)] = true;
+      const live = $("motion-view-live");
+      if (live && viewLane() === lane) live.textContent = tt("motion.resultReadyTitle");
+    }
+  }
+
+  function syncMotionResultBadge() {
+    const tab = $("motion-view-result");
+    const badge = $("motion-view-badge");
+    if (!tab || !badge) return;
+    const status = motionResultStatus(state.jobs);
+    const kind = state[unseenKey(viewLane())] ? "ready" : status.state;
+    tab.dataset.state = kind;
+    badge.textContent =
+      kind === "ready" ? tt("motion.resultReady") : kind === "busy" ? `${status.pct}%` : kind === "queued" ? tt("motion.resultQueued") : "";
+    tab.title =
+      kind === "ready" ? tt("motion.resultReadyTitle")
+        : kind === "busy" ? tf("motion.resultBusyTitle", { pct: String(status.pct) })
+        : kind === "queued" ? tt("motion.resultQueuedTitle")
+        : tt("motion.viewResultTitle");
+    const body = $("mv-result-empty-body");
+    if (body) {
+      body.textContent =
+        status.state === "busy" ? tf("motion.resultEmptyBusy", { pct: String(status.pct) })
+          : status.state === "queued" ? tt("motion.resultEmptyQueued")
+          : tt(viewLane() === "game" ? "game.resultEmptyBody" : "motion.resultEmptyBody");
+    }
+  }
+
+  function bindMotionView() {
+    const host = $("motion-view");
+    if (!host) return;
+    host.addEventListener("click", (event) => {
+      const tab = event.target.closest("[data-motion-view]");
+      if (tab) setMotionView(tab.dataset.motionView);
+    });
+    host.addEventListener("keydown", (event) => {
+      const step = { ArrowLeft: -1, ArrowRight: 1, Home: "first", End: "last" }[event.key];
+      if (step === undefined) return;
+      event.preventDefault();
+      const i = MOTION_VIEWS.indexOf(state.motionView);
+      const next = step === "first" ? MOTION_VIEWS[0]
+        : step === "last" ? MOTION_VIEWS[MOTION_VIEWS.length - 1]
+        : MOTION_VIEWS[(i + step + MOTION_VIEWS.length) % MOTION_VIEWS.length];
+      setMotionView(next, { focus: true });
+    });
+    document.addEventListener("h3-workspace", () => {
+      if (inMotionWorkspace() && state.motionView === "result") state[unseenKey(viewLane())] = false;
+      syncMotionRefPreview();
+      syncMotionResultBadge();
+    });
+    document.addEventListener("h3-lang", () => {
+      syncMotionRefPreview();
+      syncMotionResultBadge();
+    });
+    setMotionView("workspace");
+  }
+  bindMotionView();
 
   async function uploadImageToList(fileList, targetList, gridId, max, labelFn) {
     const files = Array.from(fileList || []);
@@ -4775,7 +4925,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (state.studioWorkspace !== "director") {
       state.studioWorkspace = "director";
       document.body.classList.add("ws-director");
-      document.body.classList.remove("ws-scene", "ws-motion");
+      document.body.classList.remove("ws-scene", "ws-motion", "ws-game");
       document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
         const on = btn.dataset.ws === "director";
         btn.classList.toggle("on", on);
@@ -4783,6 +4933,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       });
       $("panel-workspace-director")?.classList.add("hidden");
       $("panel-workspace-scene")?.classList.add("hidden");
+      $("panel-workspace-game")?.classList.add("hidden");
       refreshStudioWorkspaceChrome();
       setProdLane("director");
     }
@@ -7470,6 +7621,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (typeof d === "string" && d.trim()) return d;
     if (typeof d === "object" && d !== null) {
       if (typeof d.code === "string" && d.code.startsWith("lora.")) return tt(d.code);
+      if (typeof d.code === "string" && d.code.startsWith("sketch.")) {
+        return tf(d.code, { files: (Array.isArray(d.missing) ? d.missing : []).join(", ") });
+      }
+      if (typeof d.code === "string" && d.code.startsWith("game.")) return tf(d.code, { detail: d.detail || "" });
       if (typeof d.message === "string" && d.message.trim()) return d.message;
       if (typeof d.detail === "string" && d.detail.trim()) return d.detail;
       const s = JSON.stringify(d);
@@ -8621,7 +8776,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     selectJob(newly[0], { play: true, quiet: true });
   }
 
-  const PROD_LANES = ["scene", "director", "motion"];
+  const PROD_LANES = ["scene", "director", "motion", "game"];
   const MOTION_MODES = ["v2v", "motion_long"];
 
   function normLane(lane) {
@@ -8629,12 +8784,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function laneLabel(lane) {
-    return lane === "director" ? tt("prod.laneDirector") : lane === "motion" ? tt("prod.laneMotion") : tt("prod.laneScene");
+    return lane === "director" ? tt("prod.laneDirector") : lane === "motion" ? tt("prod.laneMotion")
+      : lane === "game" ? tt("prod.laneGame") : tt("prod.laneScene");
   }
 
   function jobLane(j) {
     const lane = String(j?.lane || "").trim().toLowerCase();
-    if (lane === "director") return lane;
+    if (lane === "director" || lane === "game") return lane;
     // Older Motion Transfer records were saved with lane "scene".
     if (lane === "motion" || MOTION_MODES.includes(j?.mode)) return "motion";
     if (lane === "scene") return lane;
@@ -8653,7 +8809,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   function refreshStudioWorkspaceChrome() {
     const ws = normLane(state.studioWorkspace);
-    const key = ws === "director" ? "director" : ws === "motion" ? "motion" : "scene";
+    const key = ws === "director" || ws === "motion" || ws === "game" ? ws : "scene";
     const titleEl = $("scene-zone-title");
     const subEl = $("scene-zone-sub");
     if (titleEl) titleEl.textContent = tt(`ws.${key}Title`);
@@ -8667,6 +8823,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     document.body.classList.toggle("ws-director", next === "director");
     document.body.classList.toggle("ws-scene", next === "scene");
     document.body.classList.toggle("ws-motion", next === "motion");
+    document.body.classList.toggle("ws-game", next === "game");
     document.dispatchEvent(new CustomEvent("h3-workspace", { detail: { workspace: next } }));
     document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
       const on = btn.dataset.ws === next;
@@ -8675,7 +8832,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
     // Landing unused — Direktör opens cinema dock directly
     $("panel-workspace-director")?.classList.add("hidden");
-    $("panel-workspace-scene")?.classList.toggle("hidden", next === "director");
+    $("panel-workspace-scene")?.classList.toggle("hidden", next === "director" || next === "game");
+    $("panel-workspace-game")?.classList.toggle("hidden", next !== "game");
     refreshStudioWorkspaceChrome();
     if (next === "motion" && state.produceMode !== "v2v") setProduceMode("v2v");
     if (next === "scene" && (state.produceMode === "v2v" || state.produceMode === "cinema")) setProduceMode("t2v");
@@ -8793,8 +8951,343 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
   })();
 
+  // Long Motion card.
+  function motionLongGroups(jobs) {
+    const groups = new Map();
+    for (const j of jobs) {
+      const id = j.motion_long_id;
+      if (!id) continue;
+      const group = groups.get(id) || { id, parts: [], final: null };
+      if (j.mode === "motion_long") group.final = j;
+      else group.parts.push(j);
+      groups.set(id, group);
+    }
+    for (const group of groups.values()) {
+      group.parts.sort((a, b) => (Number(a.motion_long_index) || 0) - (Number(b.motion_long_index) || 0));
+    }
+    return groups;
+  }
+
+  // One state per long job: a failed part blocks the chain, finished parts are never redone.
+  function motionLongSummary(group) {
+    const parts = group.parts;
+    const total = Math.max(parts.length, Number(parts[0]?.motion_long_total) || 0, group.final?.motion_long_parts?.length || 0);
+    const done = parts.filter((p) => p.status === "done").length;
+    const running = parts.find((p) => p.status === "running");
+    const failed = parts.find((p) => p.status === "error" || p.status === "cancelled");
+    const queued = parts.some((p) => p.status === "queued");
+    const merge = parts.find((p) => p.motion_long_merge)?.motion_long_merge || "";
+    const mergeError = parts.find((p) => p.motion_long_error)?.motion_long_error || "";
+    const busy = !!running || queued;
+    const out = {
+      state: "queued", total, done, index: 0, partPct: 0, error: "",
+      pct: total ? Math.round((100 * done) / total) : 0,
+      canResume: false, canMerge: false, canStop: busy, canDelete: !busy && merge !== "running",
+    };
+    if (group.final) return { ...out, state: "done", done: total, pct: 100, canStop: false };
+    if (running) {
+      const partPct = Math.max(0, Math.min(100, Number(running.progress) || 0));
+      return { ...out, state: "running", index: Number(running.motion_long_index) || done + 1, partPct,
+        pct: total ? Math.round((100 * (done + partPct / 100)) / total) : 0 };
+    }
+    if (failed) {
+      return { ...out, state: "failed", index: Number(failed.motion_long_index) || 0, error: String(failed.error || ""),
+        canResume: !queued };
+    }
+    if (queued) return out;
+    if (done < total) return { ...out, state: "incomplete" };
+    if (merge === "running") return { ...out, state: "merging" };
+    if (merge === "error") return { ...out, state: "mergeError", error: mergeError, canMerge: done === total };
+    return { ...out, state: "waitingMerge", canMerge: done === total };
+  }
+  // End long Motion card.
+
+  async function motionLongAction(button, url, okText) {
+    button.disabled = true;
+    try {
+      const r = await fetch(url, { method: "POST" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      toast(typeof okText === "function" ? okText(data) : okText);
+      await refreshJobs();
+    } catch (err) {
+      toast(String(err.message || err));
+      button.disabled = false;
+    }
+  }
+
+  function renderMotionLongCard(group) {
+    const sum = motionLongSummary(group);
+    const first = group.parts[0] || group.final || {};
+    const li = document.createElement("li");
+    li.className = "job-long";
+    if (sum.state === "running") li.classList.add("job-running");
+    const left = document.createElement("div");
+    const title = htmlEsc(String(first.scene_title || first.motion_long_prompt || first.prompt || "").slice(0, 60));
+    const stClass = { done: "st-done", running: "st-run", merging: "st-run", failed: "st-err", mergeError: "st-err", incomplete: "st-err" }[sum.state] || "";
+    const stText = {
+      done: tf("mlong.done", { n: sum.total }),
+      running: tf("mlong.running", { i: sum.index, n: sum.total, pct: Math.round(sum.partPct) }),
+      queued: tf("mlong.queued", { done: sum.done, n: sum.total }),
+      failed: tf("mlong.failed", { i: sum.index, error: sum.error.slice(0, 90) }),
+      merging: tt("mlong.merging"),
+      mergeError: tf("mlong.mergeError", { error: sum.error.slice(0, 90) }),
+      waitingMerge: tt("mlong.waitingMerge"),
+      incomplete: tf("mlong.incomplete", { done: sum.done, n: sum.total }),
+    }[sum.state];
+    left.innerHTML = `<strong class="job-long-title">${htmlEsc(tf("mlong.title", { n: sum.total }))}</strong>`
+      + `${title ? ` · ${title}` : ""}<br><span class="${stClass}">${htmlEsc(stText)}</span>`;
+    left.title = sum.error || first.motion_long_prompt || first.prompt || "";
+    const track = document.createElement("div");
+    track.className = "job-long-parts";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", "100");
+    track.setAttribute("aria-valuenow", String(sum.pct));
+    for (let i = 0; i < sum.total; i += 1) {
+      const part = group.parts.find((p) => Number(p.motion_long_index) === i + 1);
+      const status = group.final ? "done" : part?.status || "missing";
+      const seg = document.createElement("span");
+      seg.className = `job-long-seg seg-${status}`;
+      if (status === "running") seg.style.setProperty("--seg-pct", `${sum.partPct}%`);
+      const name = status === "missing" ? tt("mlong.partMissing") : tt("job." + status);
+      seg.title = tf("mlong.partStatus", { i: i + 1, status: name.startsWith("job.") ? status : name });
+      track.appendChild(seg);
+    }
+    left.appendChild(track);
+    const right = document.createElement("div");
+    right.className = "job-actions";
+    const prompt = first.motion_long_prompt || first.prompt;
+    if (prompt) {
+      const cp = document.createElement("button");
+      cp.textContent = tt("job.prompt");
+      cp.className = "btn-ghost";
+      cp.title = tt("job.promptTitle");
+      cp.onclick = (e) => {
+        e.stopPropagation();
+        openPromptView(prompt, jobProductionMeta(group.final || first), first.seed, (group.final || first).id);
+      };
+      right.appendChild(cp);
+    }
+    if (group.final) {
+      const play = document.createElement("button");
+      play.textContent = tt("job.play");
+      play.className = "btn-secondary job-action-main";
+      play.onclick = () => {
+        selectJob(group.final);
+        showMotionResult();
+      };
+      right.appendChild(play);
+    }
+    if (sum.canResume) {
+      const resume = document.createElement("button");
+      resume.textContent = tt("mlong.resume");
+      resume.title = tt("mlong.resumeTitle");
+      resume.className = "btn-secondary job-action-main";
+      resume.onclick = (e) => {
+        e.stopPropagation();
+        void motionLongAction(resume, `/api/motion-transfer/long/${group.id}/resume`,
+          (data) => tf("mlong.resumed", { n: data.count || 0 }));
+      };
+      right.appendChild(resume);
+    }
+    if (sum.canMerge) {
+      const merge = document.createElement("button");
+      merge.textContent = tt("mlong.retryMerge");
+      merge.className = "btn-secondary job-action-main";
+      merge.onclick = (e) => {
+        e.stopPropagation();
+        void motionLongAction(merge, `/api/motion-transfer/long/${group.id}/assemble`, tt("mlong.merged"));
+      };
+      right.appendChild(merge);
+    }
+    if (sum.canStop) {
+      const stop = document.createElement("button");
+      stop.textContent = tt("job.stop");
+      stop.className = "btn-ghost btn-job-stop";
+      stop.onclick = async (e) => {
+        e.stopPropagation();
+        if (!tConfirm("mlong.stopConfirm")) return;
+        stop.disabled = true;
+        // Later parts first, so the worker never starts the next part of a chain being stopped.
+        const live = group.parts.filter((p) => p.status === "queued" || p.status === "running").reverse();
+        for (const part of live) {
+          await fetch(`/api/jobs/${part.id}/cancel`, { method: "POST" }).catch(() => {});
+        }
+        tToast("toast.stopped");
+        await refreshJobs();
+      };
+      right.appendChild(stop);
+    }
+    if (sum.canDelete) {
+      const rm = document.createElement("button");
+      rm.textContent = tt("job.del");
+      rm.className = "btn-ghost job-action-delete";
+      rm.onclick = async (e) => {
+        e.stopPropagation();
+        if (!tConfirm("mlong.deleteConfirm")) return;
+        rm.disabled = true;
+        const ids = [group.final, ...group.parts].filter(Boolean).map((j) => j.id);
+        let failure = "";
+        for (const id of ids) {
+          const r = await fetch(`/api/jobs/${id}?delete_files=true`, { method: "DELETE" }).catch(() => null);
+          if (!r?.ok) failure = failure || errDetail(await r?.json().catch(() => ({})) || {});
+          else if (state.selectedJobId === id) clearPlayer();
+        }
+        if (failure) toast(failure);
+        else tToast("toast.recordDeleted");
+        await refreshJobs();
+      };
+      right.appendChild(rm);
+    }
+    li.appendChild(left);
+    li.appendChild(right);
+    return li;
+  }
+
+  // Sketch frame review.
+  function sketchReviewState(job) {
+    if (!job) return "empty";
+    if (job.video_job_id) return "approved";
+    if (job.status === "error" || job.status === "cancelled") return "error";
+    if (job.status === "done") return job.frame_url ? "awaiting" : "error";
+    return job.status === "running" ? "framing" : "queued";
+  }
+
+  // The card the user last created wins; otherwise the newest frame still in progress or waiting on them.
+  function pickSketchReview(jobs, storedId) {
+    const frames = jobs.filter((j) => j.mode === "sketch_frame");
+    const stored = storedId && frames.find((j) => j.id === storedId);
+    if (stored) return stored;
+    return frames
+      .filter((j) => ["queued", "framing", "awaiting"].includes(sketchReviewState(j)))
+      .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0))[0] || null;
+  }
+  // End sketch frame review.
+
+  const SKETCH_REVIEW_KEY = "h3.sketchReviewId";
+  const sketchReview = { id: "", textFor: "", busy: false, seen: {} };
+
+  function storedSketchReviewId() {
+    try { return localStorage.getItem(SKETCH_REVIEW_KEY) || ""; } catch { return ""; }
+  }
+
+  function setSketchReviewId(id) {
+    try { localStorage.setItem(SKETCH_REVIEW_KEY, id || ""); } catch {}
+  }
+
+  function renderSketchReview() {
+    const box = $("sk-review");
+    if (!box) return;
+    const job = pickSketchReview(state.jobs || [], storedSketchReviewId());
+    const st = sketchReviewState(job);
+    const prev = job ? sketchReview.seen[job.id] : "";
+    if (job) {
+      if (prev && prev !== st && st === "awaiting") toast(tt("sketch.frameReady"));
+      sketchReview.seen[job.id] = st;
+    }
+    sketchReview.id = job?.id || "";
+    box.dataset.state = st;
+    const label = {
+      queued: tt("sketch.stateQueued"),
+      framing: tt("sketch.stateFraming"),
+      awaiting: tt("sketch.stateAwaiting"),
+      approved: tt("sketch.stateApproved"),
+      error: tt("sketch.stateError"),
+    }[st] || "";
+    $("sk-review-state").textContent = label;
+    const img = $("sk-review-img");
+    const url = job?.frame_url || "";
+    if (url && img.getAttribute("src") !== url) img.src = url;
+    img.hidden = !url;
+    $("sk-review-frame").disabled = !url;
+    const empty = $("sk-review-empty");
+    empty.hidden = !!url && st !== "error";
+    empty.textContent = st === "error"
+      ? `${tt("sketch.stateError")}: ${String(job?.error || "").slice(0, 240)}`
+      : !url && (st === "queued" || st === "framing")
+        ? (localizeSystemLabel(job?.progress_label) || label)
+        : tt("sketch.reviewEmpty");
+    const bar = $("sk-review-bar");
+    bar.hidden = st !== "framing";
+    bar.firstElementChild.style.width = `${Math.max(0, Math.min(100, Number(job?.progress) || 0))}%`;
+    const text = $("sk-review-text");
+    if (job && sketchReview.textFor !== job.id) {
+      text.value = job.sketch_args?.text || "";
+      sketchReview.textFor = job.id;
+    }
+    text.disabled = !job;
+    $("sk-review-regen").disabled = sketchReview.busy || !job || st === "queued" || st === "framing";
+    $("sk-review-animate").disabled = sketchReview.busy || st !== "awaiting";
+  }
+
+  async function sketchReviewPost(path, body, onOk) {
+    if (!sketchReview.id || sketchReview.busy) return;
+    sketchReview.busy = true;
+    renderSketchReview();
+    try {
+      const r = await fetch(`/api/sketch/${sketchReview.id}/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(errDetail(data));
+      onOk(data);
+      await refreshJobs();
+    } catch (err) {
+      noteGenerate(String(err.message || err));
+    } finally {
+      sketchReview.busy = false;
+      renderSketchReview();
+    }
+  }
+
+  function bindSketchReview() {
+    $("sk-review-frame")?.addEventListener("click", () => {
+      const job = (state.jobs || []).find((j) => j.id === sketchReview.id);
+      if (job?.frame_url) openCinemaStill(job.frame_url, job.scene_title || "");
+    });
+    $("sk-review-regen")?.addEventListener("click", () => {
+      void sketchReviewPost("regenerate", {
+        sketch_text: $("sk-review-text").value.trim(),
+        sketch_method: window.h3SketchMethod?.() || "img2img",
+        sketch_fidelity: window.h3SketchFidelity?.() || "balanced",
+      }, (job) => {
+        setSketchReviewId(job.id);
+        sketchReview.textFor = job.id;
+        noteGenerate(tt("sketch.regenQueued"));
+      });
+    });
+    $("sk-review-animate")?.addEventListener("click", () => {
+      const typed = String(window.getContinuumMainPrompt?.() || $("prompt")?.value || "").trim();
+      void sketchReviewPost("animate", typed ? { prompt: withStyleLock(typed) } : {}, (data) => {
+        setProdLane("motion");
+        noteGenerate(tt(data.duplicate ? "sketch.animateDuplicate" : "sketch.animateQueued"));
+      });
+    });
+  }
+
+  function openSketchReview(id) {
+    setSketchReviewId(id);
+    sketchReview.textFor = "";
+    if (!document.body.classList.contains("ws-motion")) document.querySelector('#workspace-switch .chip[data-ws="motion"]')?.click();
+    if (window.h3MotionSource?.() !== "sketch") document.querySelector('#motion-source [data-motion-source="sketch"]')?.click();
+    setMotionView("workspace");
+    renderSketchReview();
+    $("sk-review")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+
+  function syncGenerateLabel() {
+    const btn = $("btn-generate");
+    if (!btn) return;
+    const sketchSource = document.body.classList.contains("ws-motion") && window.h3MotionSource?.() === "sketch";
+    btn.textContent = tt(sketchSource ? "sketch.makeFrame" : "prompt.generate");
+  }
+
   function renderJobs() {
     if (state.queueDragging) return;
+    renderSketchReview();
     const ul = $("job-list");
     ul.innerHTML = "";
     // Active = eski üretim sırası (FIFO). Finished = yeniler üstte (40 cap), durumdan bağımsız.
@@ -8827,7 +9320,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           : `${label} · ${tt("prod.queue")}`;
     }
     const activeOrder = new Map(active.map((j, i) => [j.id, i + 1]));
+    const longGroups = state.prodLane === "motion" ? motionLongGroups(laneJobs) : new Map();
+    const shownLong = new Set();
     for (const j of jobs) {
+      const longGroup = longGroups.get(j.motion_long_id);
+      if (longGroup) {
+        if (!shownLong.has(longGroup.id)) {
+          shownLong.add(longGroup.id);
+          ul.appendChild(renderMotionLongCard(longGroup));
+        }
+        continue;
+      }
       const li = document.createElement("li");
       if (j.director_parent_id) li.classList.add('job-director-child');
       if (j.status === "running") li.classList.add("job-running");
@@ -8848,7 +9351,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         ? `<span class="job-sira">#${activeOrder.get(j.id)}</span> `
         : "";
       const stName = tt("job." + j.status);
-      const stText = stName.indexOf("job.") === 0 ? j.status : stName;
+      let stText = stName.indexOf("job.") === 0 ? j.status : stName;
+      if (j.mode === "sketch_frame" && j.status === "done") {
+        stText = tt(sketchReviewState(j) === "approved" ? "sketch.stateApproved" : "sketch.stateAwaiting");
+      }
       left.innerHTML = `${sira}<span class="${st}">${stText}</span>${pct} · ${htmlEsc((j.scene_title || j.prompt || "").slice(0, 60))}${err}${lowSteps}`;
       if (j.director_chain_role) {
         const badge = document.createElement('small');
@@ -8929,12 +9435,25 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         };
         right.appendChild(cp);
       }
+      if (j.mode === "sketch_frame" && (j.status === "done" || j.status === "error")) {
+        const review = document.createElement("button");
+        review.textContent = tt("sketch.reviewTitle");
+        review.className = `${sketchReviewState(j) === "awaiting" ? "btn-secondary" : "btn-ghost"} job-action-main`;
+        review.onclick = (e) => {
+          e.stopPropagation();
+          openSketchReview(j.id);
+        };
+        right.appendChild(review);
+      }
       if (j.status === "done") {
         if (!stillJob) {
           const b = document.createElement("button");
           b.textContent = tt("job.play");
           b.className = "btn-secondary job-action-main";
-          b.onclick = () => selectJob(j);
+          b.onclick = () => {
+            selectJob(j);
+            showMotionResult();
+          };
           right.appendChild(b);
         }
         const rm = document.createElement("button");
@@ -9160,6 +9679,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const photos = data.items || [];
       if (!photos.length) {
         grid.innerHTML = `<p class="muted">${tt("gallery.photosEmpty")}</p>`;
+        syncGalleryPhotoToolbar();
         return;
       }
       grid.innerHTML = "";
@@ -9208,6 +9728,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         card.onclick = () => state.galleryPhotoSelectMode ? toggleGalleryPhotoPick(photo.name) : openCinemaStill(photo.url, photo.name || tt("gallery.photo"));
         grid.appendChild(card);
       });
+      syncGalleryPhotoToolbar();
     } catch {
       grid.innerHTML = `<p class="muted">${tt("gallery.fail")}</p>`;
     }
@@ -9244,6 +9765,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       remove.textContent = tf("ui.deleteSelected", { n: state.galleryPhotoPickNames.length });
       remove.disabled = !state.galleryPhotoPickNames.length;
     }
+    syncGallerySelectAll();
   }
 
   async function deletePickedGalleryPhotos() {
@@ -9286,6 +9808,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!done.length) {
       grid.innerHTML = `<p class="muted">${tt("gallery.empty")}</p>`;
       syncMergeToolbar();
+      syncGallerySelectAll();
       return;
     }
     grid.innerHTML = "";
@@ -9410,6 +9933,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           setClipPrompt(j.prompt || "", meta, j.seed);
           toast(tf("gallery.archiveMeta", { meta }));
         }
+        showMotionResult();
         $("view-gallery").classList.add("hidden");
         closePromptView();
       };
@@ -9451,6 +9975,52 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       remove.classList.toggle("hidden", state.galleryKind !== "video" || !state.galleryVideoSelectMode);
       remove.textContent = tf("ui.deleteSelected", { n: state.galleryVideoPickIds.length });
       remove.disabled = !state.galleryVideoPickIds.length;
+    }
+    syncGallerySelectAll();
+  }
+
+  // Gallery select all.
+  // Picks of items deleted elsewhere do not count, so "all" means every item currently listed.
+  function gallerySelectAllNext(allIds, picked) {
+    const full = allIds.length > 0 && allIds.every((id) => picked.includes(id));
+    return { full, next: full ? [] : [...allIds] };
+  }
+  // End gallery select all.
+
+  function galleryListedIds() {
+    if (state.galleryKind === "photo") {
+      return [...document.querySelectorAll("#gallery-grid .gallery-photo-card")].map((card) => card.dataset.photoName || "").filter(Boolean);
+    }
+    return (state.galleryItems || []).map((item) => item.id).filter(Boolean);
+  }
+
+  function gallerySelecting() {
+    return state.galleryKind === "photo" ? !!state.galleryPhotoSelectMode : !!state.galleryVideoSelectMode;
+  }
+
+  function syncGallerySelectAll() {
+    const button = $("btn-gallery-select-all");
+    if (!button) return;
+    const picked = state.galleryKind === "photo" ? state.galleryPhotoPickNames : state.galleryVideoPickIds;
+    const ids = galleryListedIds();
+    const { full } = gallerySelectAllNext(ids, picked || []);
+    button.classList.toggle("hidden", !gallerySelecting());
+    button.disabled = !ids.length;
+    button.textContent = full ? tt("gallery.selectNone") : tf("gallery.selectAll", { n: ids.length });
+    button.title = tt("gallery.selectAllTitle");
+    button.setAttribute("aria-pressed", full ? "true" : "false");
+  }
+
+  function toggleGallerySelectAll() {
+    if (!gallerySelecting()) return;
+    const photo = state.galleryKind === "photo";
+    const { next } = gallerySelectAllNext(galleryListedIds(), (photo ? state.galleryPhotoPickNames : state.galleryVideoPickIds) || []);
+    if (photo) {
+      state.galleryPhotoPickNames = next;
+      patchGalleryPhotoSelection();
+    } else {
+      state.galleryVideoPickIds = next;
+      patchGalleryVideoSelection();
     }
   }
 
@@ -9572,7 +10142,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         }
       }
       renderJobs();
+      document.dispatchEvent(new CustomEvent("h3-jobs", { detail: { jobs: state.jobs } }));
+      noteMotionResults(prevStatus);
       autoPlayNewestFinished(prevStatus);
+      syncMotionResultBadge();
       fillContinueSource();
       if (!$("view-cinema")?.classList.contains("hidden")) {
         syncCinemaShotJobs();
@@ -9773,14 +10346,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         sketch_text: prompt,
         sketch_style: state.projectStyle || null,
         sketch_fidelity: window.h3SketchFidelity?.() || "balanced",
+        sketch_method: window.h3SketchMethod?.() || "img2img",
       };
-      const r = await fetch("/api/sketch/video", {
+      const r = await fetch("/api/sketch/frame", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
+      setSketchReviewId(data.id);
       setProdLane("motion");
       noteGenerate(tt("sketch.queued"));
       await refreshJobs();
@@ -10014,6 +10589,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   $("btn-generate").onclick = () => submitGenerate();
+  bindSketchReview();
+  document.addEventListener("h3-motion-source", syncGenerateLabel);
+  document.addEventListener("h3-workspace", syncGenerateLabel);
+  document.addEventListener("h3-lang", () => { syncGenerateLabel(); renderSketchReview(); });
+  syncGenerateLabel();
   $("btn-fast-preset")?.addEventListener("click", () => applySpeedProfile("draft"));
   $("btn-speed-quick")?.addEventListener("click", () => applySpeedProfile("quick"));
   $("btn-speed-quality")?.addEventListener("click", () => applySpeedProfile("quality"));
@@ -10384,10 +10964,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const host = $("h3-engine-control");
     if (!host) return;
     const en = window.h3Lang?.() === "en";
-    state.videoEngine = engine.active;
-    syncHybridDuration();
-    host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"], ["hybrid", "H3 Hybrid"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${(id === "singularity" && !engine.singularity_ready) || (id === "hybrid" && !engine.hybrid_ready) ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "hybrid" ? "H3 Hybrid b25–49" : engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
-    if(!engine.hybrid_ready){const hint=document.createElement('p');hint.className='muted';const size=engine.hybrid_expected_bytes?` (${(engine.hybrid_expected_bytes/1e9).toFixed(2)} GB)`:'';hint.textContent=en?`H3 Hybrid is unavailable: install the complete Hybrid INT8 model${size} in models/diffusion_models or models/unet, including subfolders, then refresh.`:`H3 Hybrid kullanılamıyor: tam Hybrid INT8 modelini${size} models/diffusion_models veya models/unet altına ekleyip yenileyin; alt klasörler desteklenir.`;host.appendChild(hint);}
+    host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${id === "singularity" && !engine.singularity_ready ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
     host.onclick = async event => {
       const button = event.target.closest("button[data-engine]");
       if (!button || button.disabled) return;
@@ -12727,6 +13304,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     void renderGallery();
   });
   $("btn-gallery-video-delete")?.addEventListener("click", () => void deletePickedGalleryVideos());
+  $("btn-gallery-select-all")?.addEventListener("click", toggleGallerySelectAll);
+  document.addEventListener("keydown", (event) => {
+    if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "a" || event.altKey || event.shiftKey) return;
+    if ($("view-gallery")?.classList.contains("hidden") || !gallerySelecting()) return;
+    if (event.target.closest?.("input, textarea, select, [contenteditable='true']")) return;
+    event.preventDefault();
+    toggleGallerySelectAll();
+  });
+  document.addEventListener("h3-lang", syncGallerySelectAll);
   $("btn-gallery-close")?.addEventListener("click", () => {
     exitGalleryMergeMode();
     $("view-gallery")?.classList.add("hidden");

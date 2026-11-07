@@ -44,30 +44,11 @@ class EngineSelection(unittest.TestCase):
 
     def test_missing_or_unknown_engine_does_not_mutate_selection(self):
         with patch.object(models, "installed", return_value=None), patch.object(h3_models, "save") as save:
-            for engine in ("singularity", "unknown"):
+            for engine in ("singularity", "hybrid", "unknown"):
                 with self.assertRaises(ValueError): models.select_engine(engine)
             save.assert_not_called()
 
-    def test_hybrid_selection_keeps_encoder_and_vae(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root / "diffusion_models").mkdir()
-            (root / "diffusion_models" / models.HYBRID_FILE).write_bytes(b"abc")
-            with patch.object(models, "MODELS_ROOT", root), patch.object(h3_models, "MODELS_ROOT", root), patch.object(h3_models, "SETTINGS_PATH", root / "settings.json"), patch.object(models, "HYBRID_BYTES", 3):
-                h3_models.SETTINGS_PATH.write_text('{"clip":"encoder.safetensors","vae":"vae.safetensors"}')
-                self.assertEqual(models.select_engine("hybrid")["active"], "hybrid")
-                self.assertEqual(h3_models.resolve("ref2va")["unet"], models.HYBRID_FILE)
-                self.assertEqual(h3_models.load()["clip"], "encoder.safetensors")
-                self.assertEqual(h3_models.load()["vae"], "vae.safetensors")
-                self.assertEqual(models.select_engine("minimax")["active"], "minimax")
-
-    def test_long_reference_is_limited_to_hybrid_ref_mode(self):
-        self.assertTrue(models.supports_long_reference(30, "ref", models.HYBRID_FILE))
-        for duration, mode, name in [(60, "ref", models.HYBRID_FILE), (30, "t2v", models.HYBRID_FILE), (30, "continue", models.HYBRID_FILE), (30, "ref", "stock.safetensors")]:
-            self.assertFalse(models.supports_long_reference(duration, mode, name))
-
-    def test_missing_hybrid_does_not_mutate_selection(self):
-        with patch.object(models, "hybrid_installed", return_value=None), patch.object(h3_models, "save") as save:
-            with self.assertRaises(ValueError):
-                models.select_engine("hybrid")
-            save.assert_not_called()
+    def test_engine_status_no_longer_reports_hybrid(self):
+        state = models.engine_status()
+        self.assertIn(state["active"], ("minimax", "singularity", "custom"))
+        self.assertFalse(any(key.startswith("hybrid") for key in state))

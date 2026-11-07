@@ -1,5 +1,13 @@
 # Hybrid H3 reference experiment
 
+> **Removed:** the H3 Hybrid video engine and its reference-only 30-second
+> duration are no longer part of Studio. Video engine offers MiniMax H3 and
+> H3 Singularity only, and the API accepts the standard durations. The
+> Hybrid r48 speed LoRA and its compatibility loader (below) are still used
+> by the Draft and Medium presets. The rest of this page is kept as a record
+> of the original experiment. Its raw records under `studio/data/research-h3`
+> were deleted; only the LoRA loader audit (`hybrid-loader-audit-*`) remains.
+
 Source tutorial: https://www.youtube.com/watch?v=tmw2QOFaaPI (20:38–22:34).
 The author's 30-second example was one reference-conditioned generation at
 approximately 1 MP on a 48 GB GPU. This does not establish the same capacity

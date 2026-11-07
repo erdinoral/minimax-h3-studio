@@ -148,30 +148,3 @@ class ProductionContracts(unittest.TestCase):
             self.assertEqual(prompt.count('He walks to the arch.'), 1)
             prompt = cinema.compose_h3_prompt({'action': 'He walks to the arch.', 'beats': 'He stops before the door.'})
         self.assertIn('Chronological action beats: He stops before the door.', prompt)
-
-    def test_nested_hybrid_uses_loader_relative_path_in_both_graphs(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            nested = root/'diffusion_models'/'video'
-            nested.mkdir(parents=True)
-            filename = 'MiniMax-H3-Hybrid_b25-49_INT8.safetensors'
-            (nested/filename).write_bytes(b'abc')
-            with patch.object(optional_models, 'MODELS_ROOT', root), patch.object(optional_models, 'HYBRID_BYTES', 3), patch.object(h3_models, 'MODELS_ROOT', root), patch.object(h3_models, 'SETTINGS_PATH', root/'settings.json'):
-                (root/'text_encoders').mkdir()
-                (root/'text_encoders'/'encoder.safetensors').write_bytes(b'encoder')
-                h3_models.save({'clip': 'encoder.safetensors'})
-                result = optional_models.select_engine('hybrid')
-                self.assertEqual(result['active'], 'hybrid')
-                self.assertEqual(result['hybrid_file'], 'video/'+filename)
-                self.assertEqual(h3_models.resolve('ref2va')['unet'], 'video/'+filename)
-                self.assertEqual(h3_models.resolve('fl2va')['unet'], 'video/'+filename)
-                self.assertEqual(h3_models.load()['clip'], 'encoder.safetensors')
-                self.assertTrue(optional_models.supports_long_reference(30, 'ref', 'video/'+filename))
-
-    def test_partial_hybrid_never_becomes_ready(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            (root/'unet').mkdir()
-            (root/'unet'/optional_models.HYBRID_FILE).write_bytes(b'ab')
-            with patch.object(optional_models, 'MODELS_ROOT', root), patch.object(optional_models, 'HYBRID_BYTES', 3):
-                self.assertIsNone(optional_models.hybrid_installed())

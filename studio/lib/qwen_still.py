@@ -88,6 +88,20 @@ def build_storyboard_frame(*, prompt: str, negative: str, ref_images: list[str],
     return graph
 
 
+def build_sketch_edit(*, prompt: str, negative: str, reference: str, aspect: str, steps: int, seed: int,
+                      prefix: str = "H3_Studio_Sketch") -> dict:
+    """Drawing as Picture 1 of Qwen-Image-Edit; a fresh latent, so the strokes never show through."""
+    aspect = closest_aspect(aspect)
+    graph = build_graph(prompt=prompt, negative=negative, aspect=aspect, steps=steps, seed=seed, prefix=prefix)
+    graph["10"]["inputs"]["unet_name"] = EDIT_MODEL
+    graph["25"] = {"class_type": "LoadImage", "inputs": {"image": reference}}
+    graph["30"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
+        "clip": ["20", 0], "prompt": prompt, "vae": ["21", 0], "image1": ["25", 0]}}
+    graph["31"] = {"class_type": "TextEncodeQwenImageEditPlus", "inputs": {
+        "clip": ["20", 0], "prompt": negative, "vae": ["21", 0]}}
+    return graph
+
+
 def build_graph(*, prompt: str, negative: str, aspect: str, steps: int, seed: int,
                 source_image: str = "", prefix: str = "H3_Studio_Qwen") -> dict:
     width, height = SIZES.get(aspect, SIZES["16:9"])

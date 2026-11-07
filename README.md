@@ -6,6 +6,8 @@ Optional H3 tools: [LightVAE decoder, ColorAnchor, Spectrum and Meridian prerequ
 
 Director can process each chapter as one ordered Continuum sequence. Each scene keeps its own prompt; only the sequence's first starting image is used. Sampling can pause at a progress checkpoint and resume the same render, while model memory remains allocated. Video details also provide a minimal diagnostic report. See [9.3.2 release notes](docs/releases/v9.3.2.md).
 
+The experimental H3 Hybrid video engine and its reference-only 30-second duration have been removed. Video engine now offers MiniMax H3 and H3 Singularity. The Hybrid r48 speed LoRA used by the Draft and Medium presets is unchanged.
+
 ### Director: New Video and Continuum children
 
 Scene card actions are **Disable → Duplicate → Regenerate → Delete**. Regenerate repeats only that scene from its recorded render: prompt, reference selection, seed, models, sampling and acceleration settings, and original continuation parent. It creates a separate attempt and keeps the old video. **Produce scene** uses the current card and controls instead. Missing historical settings or reference files are reported rather than silently replaced; legacy clips containing multiple scenes cannot be repeated as a single scene.
@@ -171,6 +173,101 @@ with open('reference.mp4', 'rb') as media:
 curl "$BASE_URL/api/loras/guidance?file=YOUR_LORA.safetensors"
 curl -X POST "$BASE_URL/api/loras/guidance" -H "Content-Type: application/json" \
   -d '{"file":"YOUR_LORA.safetensors","triggers":"trigger","guide":"Creator usage notes"}'
+```
+
+### Motion: drawing frames, robot takes and long Motion
+
+- **Draw → Create frame → approve → animate.** In **Motion → Qwen drawing**, draw or load a sketch and press **Create frame**. Qwen paints one still; nothing is sent to H3 yet. The **Frame approval** card previews it, lets you edit the description and **Create again**, and **Animate this frame** queues exactly one H3 I2V clip. Sending the approval twice returns the existing video job instead of a duplicate. A frame waiting for approval survives a Studio restart.
+- **Interpretation.** *Visual reference* conditions Qwen-Image-Edit on the drawing (`TextEncodeQwenImageEditPlus`) and asks it to keep the pose, number of people, placement and object contact while completing anatomy, faces and clothes. It needs `qwen_image_edit_2511_fp8mixed.safetensors` in ComfyUI's models; Studio never downloads it and shows the missing file instead. *Start from lines* is the earlier Qwen-Image 2512 img2img path: shapes stay where you drew them, but a stick figure may stay a stick figure. Neither path's visual quality is guaranteed; check the frame before animating.
+- **Drafts and takes.** The drawing, its tool settings and an un-uploaded robot take are kept in the browser (IndexedDB). A failed robot upload offers **Upload again**, **Download take** (`.mjpeg`) and **Delete take**. Robot takes are encoded locally and no longer require ComfyUI to be open.
+- **Long Motion.** All parts of a long Motion Transfer show as one card with per-part progress, the failing part's error and the join state. **Resume from failed part** re-queues only failed parts; **Retry joining** re-runs just the join. Finished parts are not rendered again and one long job is joined at most once at a time.
+
+```javascript
+// Create a frame from an uploaded drawing (POST /api/refs/upload first), then approve it.
+const frame = await fetch(`${BASE_URL}/api/sketch/frame`, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({prompt: 'She waves and walks forward.', duration: 5, aspect: '16:9', quality: '736',
+    sketch_name: 'UPLOADED_DRAWING.png', sketch_text: 'a girl in a red dress waving',
+    sketch_method: 'edit', sketch_fidelity: 'balanced'})
+}).then(r => r.json());
+// When the job reports status "done" and sketch_state "awaiting_approval":
+const {duplicate, job} = await fetch(`${BASE_URL}/api/sketch/${frame.id}/animate`, {
+  method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'
+}).then(r => r.json());
+```
+
+```python
+import httpx
+caps = httpx.get(f'{BASE_URL}/api/sketch/capabilities').json()
+method = 'edit' if caps['methods']['edit']['available'] else 'img2img'
+httpx.post(f'{BASE_URL}/api/sketch/FRAME_JOB_ID/regenerate',
+           json={'sketch_text': 'a boy holding a kite', 'sketch_method': method}).raise_for_status()
+```
+
+```bash
+curl -X POST "$BASE_URL/api/motion-transfer/long/LONG_ID/resume"    # re-queue failed parts only
+curl -X POST "$BASE_URL/api/motion-transfer/long/LONG_ID/assemble"  # retry the join only
+```
+
+### Game / Sprites (first version)
+
+The **Game / Sprites** tab turns one character image into side-view game animations and exports transparent sprite sheets. It reuses the normal H3 reference job, queue, retry and green/blue screen code; it is not a Motion mode.
+
+- **Generate.** Upload one full-body character, pick animations (idle, walk, run and crouch loop; jump, attack, hurt, defeat, cast and victory play once) and queue them. Every animation is a separate H3 job in the **Game** lane, so a failed one can be retried alone. The prompt asks for a fixed camera, a right-facing side view, in-place walking/running, the whole body in frame, no cuts, zoom, motion blur or cast shadow, and the same identity, outfit, colours and held objects. H3 does not guarantee any of this; check the clip.
+- **Quality preset.** **Fast** (480p · 16 steps), **Balanced** (608p · 20 steps, default) or **Quality** (736p · 24 steps). Sprite clips never use a speed LoRA. Queueing switches on Spectrum (when installed) and Sol-Attn sparse attention in the shared Studio settings if they are off, like the Scene speed presets; SageAttention stays automatic. These step counts have not been compared on real renders yet.
+- **Screen colour.** Studio suggests green or blue from the character's colours; you can override it.
+- **Background removal (local, no AI model).** Frames are keyed at source resolution before any downscaling, using an adjustable YCbCr colour tolerance. Screen areas touching the border are removed; enclosed pockets (between arms, body and legs) are removed only when they clearly match the screen (*Enclosed gap tolerance*, 0 turns it off). Edge spill is cleaned, colours near the border are taken from the character, and a three-frame vote steadies only uncertain pixels. **Preview mask** shows source, removed area (magenta) and cutout without exporting anything.
+- **Sprite processing.** 32, 64 or 128 px cells (default 64). One scale for the whole animation, nearest-neighbour sampling and hard alpha (no blurred edges). Idle/walk/run/crouch pin the feet and torso; jump and the other one-shots keep their own movement, so a jump keeps its height. Frame count, FPS, an optional shared palette (computed from all frames together), and a manual time range are adjustable. Loops are cut at a detected repeat; the **Loop boundary** view shows the last frames next to the first ones and a seam grade, without claiming the loop is seamless.
+- **Reprocess without H3.** The source clip is kept. Changing tolerance, cell size or palette and pressing **Reprocess** only runs the CPU step. An empty or broken mask is reported as failed and produces no export.
+- **Export.** One ZIP with `<anim>_sheet.png`, `frames/<anim>_000.png …`, `<anim>.json` and a README. **Set atlas** combines every processed animation of a set (same cell size) into one sheet, one row per animation.
+
+JSON (`format: "h3-studio-sprite-sheet"`, `version: 1`); every `frames[].x/y/w/h` is the exact rectangle in the sheet:
+
+```json
+{
+  "format": "h3-studio-sprite-sheet", "version": 1,
+  "image": "walk_sheet.png", "image_size": {"w": 512, "h": 64},
+  "cell": {"w": 64, "h": 64},
+  "layout": {"columns": 8, "rows": 1, "order": "row-major"},
+  "animations": [{
+    "name": "walk", "loop": true, "fps": 10, "frame_duration_ms": 100,
+    "pivot": {"x": 32, "y": 62}, "pivot_mode": "locked", "facing": "right",
+    "frames": [{"index": 0, "x": 0, "y": 0, "w": 64, "h": 64, "duration_ms": 100,
+                "file": "frames/walk_000.png", "source_frame": 31}]
+  }],
+  "palette": null
+}
+```
+
+`pivot` is the ground contact point in pixels from a cell's top-left corner (`y` is the row under the feet). Frames face right; mirror them in the engine for left-facing movement.
+
+```javascript
+// Upload the character (POST /api/refs/upload returns {name}), then queue animations.
+const {set_id, jobs} = await fetch(`${BASE_URL}/api/game/animations`, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({ref: 'UPLOADED_CHARACTER.png', animations: ['idle', 'walk', 'jump'],
+    backdrop: 'green', preset: 'balanced', sprite: {cell: 64}})
+}).then(r => r.json());
+// When a job reports status "done", process it (again with new settings at any time).
+const result = await fetch(`${BASE_URL}/api/game/jobs/${jobs[0].id}/process`, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({sprite: {cell: 32, palette: 16, tolerance: 26}})
+}).then(r => r.json());
+if (result.ok) location.href = BASE_URL + result.base_url + result.files.zip;
+```
+
+```python
+import httpx
+hint = httpx.post(f'{BASE_URL}/api/game/backdrop', json={'ref': 'UPLOADED_CHARACTER.png'}).json()
+r = httpx.post(f'{BASE_URL}/api/game/jobs/JOB_ID/process', json={'sprite': {'hole_tolerance': 10}}, timeout=600).json()
+print(r['ok'], r['status'], r['issues'])
+```
+
+```bash
+curl "$BASE_URL/api/game/presets"   # animations, sprite defaults and render presets (fast / balanced / quality)
+curl -X POST "$BASE_URL/api/game/jobs/JOB_ID/preview" -H "Content-Type: application/json" -d '{"sprite":{"tolerance":24}}'
+curl -X POST "$BASE_URL/api/game/sets/SET_ID/atlas"
+curl -X POST "$BASE_URL/api/jobs/JOB_ID/retry"   # retry a failed H3 animation
 ```
 
 ### Support

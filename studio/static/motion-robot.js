@@ -16,11 +16,15 @@
   window.h3MotionSource = () => source;
   let frame = null, win = null, prepared = false, looping = false, lastTick = 0, lastPose = null;
   let gait = GAITS[0], running = false, recording = null, uploading = false, takeSeconds = 10;
-  let stepping = Promise.resolve(), previewBusy = false, notice = null;
+  let stepping = Promise.resolve(), previewBusy = false, notice = null, pendingTake = null;
+  const TAKE_KEY = "robot-take";
 
   const mb = () => (win && win.MB && win.MBCapture ? win.MB : null);
   const modelReady = () => !!(mb() && win.MBCapture.ready());
-  const active = () => document.body.classList.contains("ws-motion") && source === "robot";
+  // The stage stays in the DOM whenever the robot is the source; Result only fades it out,
+  // so the iframe, pose and camera survive and a running take keeps recording.
+  const present = () => document.body.classList.contains("ws-motion") && source === "robot";
+  const active = () => present() && (window.h3MotionView?.() || "workspace") === "workspace";
   const aspect = () => document.querySelector("#aspect-chips .chip.on")?.dataset.aspect || "16:9";
   const takeSize = () => TAKE_SIZES[aspect()] || TAKE_SIZES["16:9"];
   // A macrotask yield: unlike requestAnimationFrame it keeps running in a background tab.
@@ -54,9 +58,8 @@
     $("motion-sketch-panel")?.classList.toggle("hidden", source !== "sketch");
     $("v2v-video-pick")?.classList.toggle("hidden", source !== "video");
     document.dispatchEvent(new CustomEvent("h3-motion-source", { detail: source }));
-    const show = active();
-    $("mb-stage")?.classList.toggle("hidden", !show);
-    if (!show) {
+    $("mb-stage")?.classList.toggle("hidden", !present());
+    if (!active()) {
       if (document.fullscreenElement === $("mb-stage")) document.exitFullscreen?.();
       return;
     }
@@ -132,10 +135,20 @@
     win.MBCapture.render();
   }
 
+  // Capture mode hands each plan over a fixed sim latency after the request and blocks until the
+  // worker answers; single-thread WASM needs ~250 ms, so a 0.12 s latency froze every plan.
+  function tuneLatency() {
+    const { character: ch } = mb();
+    const ms = ch.stats?.avgMs;
+    if (!ch.inference || !(ms > 0)) return;
+    ch.inference.latency = Math.min(0.6, Math.max(0.12, (ms * 1.25) / 1000 + 1 / FPS));
+  }
+
   function loop(now) {
     if (!active() && !recording) { looping = false; return; }
     if (mb() && !recording) {
       if (!prepared) prepare();
+      tuneLatency();
       const dt = Math.min(Math.max((now - lastTick) / 1000, 1 / 240), 1 / 20);
       if (modelReady() && !previewBusy) {
         const target = win;
@@ -187,6 +200,9 @@
     const [w, h] = takeSize();
     const frames = [];
     recording = { stop: false, frames: 0, seconds: takeSeconds };
+    document.body.classList.add("mb-recording");
+    $("motion-view-workspace")?.setAttribute("title", t("motion.recording"));
+    renderTake();
     const helpers = sceneHelpers();
     const total = takeSeconds * FPS;
     try {
@@ -212,29 +228,77 @@
       camera.aspect = win.innerWidth / win.innerHeight;
       camera.updateProjectionMatrix();
       recording = null;
+      document.body.classList.remove("mb-recording");
+      $("motion-view-workspace")?.removeAttribute("title");
+      renderTake();
     }
     if (frames.length < MIN_SECONDS * FPS) {
       notify(t("motion.tooShort"));
       return;
     }
-    await upload(new Blob(frames, { type: "video/x-motion-jpeg" }));
+    await upload({ blob: new Blob(frames, { type: "video/x-motion-jpeg" }), frames: frames.length, savedAt: Date.now() });
   }
 
-  async function upload(blob) {
+  async function upload(take) {
     uploading = true;
     renderStatus();
+    renderTake();
     try {
       const body = new FormData();
-      body.append("file", blob, "robot_take.mjpeg");
+      body.append("file", take.blob, "robot_take.mjpeg");
       const response = await fetch("/api/motionbricks/take", { method: "POST", body });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : response.statusText);
       window.h3SetMotionReference?.(data);
+      dropTake();
     } catch (error) {
-      notify(String(error.message || error));
+      keepTake(take);
+      notify(t("motion.uploadFailed", { error: String(error.message || error) }));
     } finally {
       uploading = false;
       renderStatus();
+      renderTake();
+    }
+  }
+
+  // A take that failed to upload stays here (and in IndexedDB) until it is sent, saved or discarded.
+  function keepTake(take) {
+    pendingTake = take;
+    window.h3MotionStore?.put(TAKE_KEY, take).catch(() => {});
+  }
+
+  function dropTake() {
+    pendingTake = null;
+    void window.h3MotionStore?.delete(TAKE_KEY);
+  }
+
+  function renderTake() {
+    const bar = $("mb-take-retry");
+    if (!bar) return;
+    bar.classList.toggle("hidden", !pendingTake);
+    if (!pendingTake) return;
+    $("mb-take-retry-msg").textContent = t("motion.takePending", { sec: (pendingTake.frames / FPS).toFixed(1) });
+    bar.querySelectorAll("button").forEach((button) => { button.disabled = uploading || !!recording; });
+  }
+
+  function downloadTake() {
+    if (!pendingTake) return;
+    const url = URL.createObjectURL(pendingTake.blob);
+    const link = document.createElement("a");
+    const stamp = new Date(pendingTake.savedAt || Date.now()).toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    link.href = url;
+    link.download = `robot_take_${stamp}.mjpeg`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  async function restoreTake() {
+    const take = await window.h3MotionStore?.get(TAKE_KEY);
+    if (take?.blob && !pendingTake) {
+      pendingTake = take;
+      renderTake();
     }
   }
 
@@ -277,6 +341,11 @@
       });
     });
     $("mb-record")?.addEventListener("click", () => { void record(); focusFrame(); });
+    $("mb-take-upload")?.addEventListener("click", () => { if (pendingTake && !uploading) void upload(pendingTake); });
+    $("mb-take-download")?.addEventListener("click", downloadTake);
+    $("mb-take-discard")?.addEventListener("click", () => {
+      if (pendingTake && window.confirm(t("motion.takeDiscardConfirm"))) { dropTake(); renderTake(); }
+    });
     $("mb-run")?.addEventListener("click", (event) => {
       running = !running;
       event.currentTarget.classList.toggle("on", running);
@@ -299,10 +368,12 @@
     document.querySelector("#aspect-chips")?.addEventListener("click", () => requestAnimationFrame(fit));
     if ($("mb-stage") && window.ResizeObserver) new ResizeObserver(fit).observe($("mb-stage"));
     document.addEventListener("h3-workspace", sync);
-    document.addEventListener("h3-lang", () => { renderGaits(); if (active()) renderStatus(); });
+    document.addEventListener("h3-motion-view", sync);
+    document.addEventListener("h3-lang", () => { renderGaits(); renderTake(); if (present()) renderStatus(); });
   }
 
   bind();
   renderGaits();
   setSource(source);
+  void restoreTake();
 })();

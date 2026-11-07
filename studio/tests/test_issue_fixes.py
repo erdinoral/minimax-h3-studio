@@ -21,16 +21,6 @@ class FilmLoraPersistence(unittest.TestCase):
             cinema.save({'title':'Cleared','lora_selection':[], 'lora_weights':{}})
             self.assertEqual(cinema.load()['lora_selection'],[])
 
-    def test_hybrid_with_alternate_case_and_name_is_selectable_without_mutating_other_slots(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);(root/'diffusion_models').mkdir()
-            name='MiniMax-H3-Hybrid_b25-49_INT8.safetensors'
-            (root/'diffusion_models'/name).write_bytes(b'abc')
-            with patch.object(optional_models,'MODELS_ROOT',root), patch.object(optional_models,'HYBRID_BYTES',3), patch.object(h3_models,'MODELS_ROOT',root), patch.object(h3_models,'SETTINGS_PATH',root/'settings.json'):
-                h3_models.save({'clip':''})
-                self.assertEqual(optional_models.select_engine('hybrid')['active'],'hybrid')
-                self.assertEqual(h3_models.resolve('ref2va')['unet'],name)
-
 
 class GalleryDownloads(unittest.IsolatedAsyncioTestCase):
     async def test_same_director_scene_can_be_queued_twice_with_distinct_jobs(self):

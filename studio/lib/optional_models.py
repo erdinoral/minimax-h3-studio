@@ -21,18 +21,6 @@ SINGULARITY_V2_FILE = "minimaxH3Singularity_v2Int8.safetensors"
 SINGULARITY_V2_BYTES = 34004507622
 SINGULARITY_V2_SHA256 = "db3ec568863db6f5ec1840210d41653afef73d4df7b0cb489c52ad458b6f8a7f"
 ALIASES.append(SINGULARITY_V2_FILE)
-HYBRID_FILE = "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors"
-HYBRID_BYTES = 20970379632
-
-def hybrid_installed():
-    for sub in ('diffusion_models','unet'):
-        folder=MODELS_ROOT/sub
-        if not folder.is_dir(): continue
-        for path in sorted(folder.rglob('*'),key=lambda p:(p.name != HYBRID_FILE,p.as_posix().lower())):
-            normalized=''.join(c for c in path.stem.lower() if c.isalnum())
-            if path.is_file() and path.suffix.lower()=='.safetensors' and 'hybrid' in normalized and ('minimax' in normalized or 'h3' in normalized) and path.stat().st_size==HYBRID_BYTES:
-                return path
-    return None
 
 
 def _loader_name(path):
@@ -43,11 +31,6 @@ def _loader_name(path):
             continue
     raise ValueError('Model is outside the configured model folders')
 
-def supports_long_reference(duration, mode, model):
-    if duration != 30 or mode != 'ref':
-        return False
-    path = hybrid_installed()
-    return model == HYBRID_FILE or bool(path and model == _loader_name(path))
 _status: dict = {}
 _task = None
 
@@ -69,17 +52,12 @@ def engine_status():
     names = [resolved[g]["unet"] for g in resolved]
     active = "singularity" if all(n in ALIASES for n in names) else (
         "minimax" if all(resolved[g]["unet"] == h3_models.defaults()["unet_ref2va" if g == "ref2va" else "unet"] for g in resolved) else "custom")
-    hybrid=hybrid_installed()
-    if hybrid and all(n == _loader_name(hybrid) for n in names):
-        active = "hybrid"
-    return {"active": active, "hybrid_ready": bool(hybrid), "singularity_ready": bool(installed()), "resolved": resolved,
-            "hybrid_file": _loader_name(hybrid) if hybrid else None,
-            "hybrid_expected_bytes": HYBRID_BYTES}
+    return {"active": active, "singularity_ready": bool(installed()), "resolved": resolved}
 
 def select_engine(engine):
-    if engine not in ("minimax", "singularity", "hybrid"):
+    if engine not in ("minimax", "singularity"):
         raise ValueError("Unknown engine")
-    path = hybrid_installed() if engine == "hybrid" else installed() if engine == "singularity" else None
+    path = installed() if engine == "singularity" else None
     if engine != "minimax" and not path:
         raise ValueError(f"{engine} model is not installed")
     name = _loader_name(path) if path else ""

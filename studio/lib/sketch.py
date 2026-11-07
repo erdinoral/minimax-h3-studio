@@ -1,4 +1,9 @@
-"""Hand drawing → finished still for Qwen-Image img2img.
+"""Hand drawing → finished still with Qwen.
+
+Two methods. ``edit`` gives the drawing to Qwen-Image-Edit as a visual reference (Picture 1):
+the model reads pose, count, placement and contact from it and paints a new image, so a
+crude stick figure can become a proper person. ``img2img`` is the fallback for setups
+without the Edit model.
 
 Qwen-Image 2512 cannot read a picture; img2img only starts from it. One pass either keeps
 flat shapes (low denoise) or re-composes the scene from the seed (≥0.78: objects move, get
@@ -24,8 +29,57 @@ NEGATIVE = ("sketch, line drawing, pencil lines, doodle, stick figure, white bac
             "picture frame, border, panels, collage, text, logo, brand name, watermark")
 
 
+METHODS = ("edit", "img2img")
+EDIT_STEPS = 30
+EDIT_FIDELITY = {
+    "faithful": "Follow the drawing's composition strictly; do not move, add or remove anything.",
+    "balanced": "Stay close to the drawing's composition.",
+    "free": "Where the drawing is anatomically impossible, fix it naturally, but keep its composition.",
+}
+
+
+def method(value: str) -> str:
+    value = str(value or "").strip().lower()
+    return value if value in METHODS else METHODS[0]
+
+
 def denoise(fidelity: str) -> float:
     return FIDELITY.get(str(fidelity or "").strip().lower(), FIDELITY["balanced"])
+
+
+def edit_prompt(text: str, style_line: str = "", fidelity: str = "balanced") -> str:
+    """Instruction for Qwen-Image-Edit: the drawing fixes the layout, the text names the subject."""
+    subject = " ".join(str(text or "").split()).rstrip(" .") or "the scene shown in the drawing"
+    style = style_line.strip().rstrip(".")
+    rule = EDIT_FIDELITY.get(str(fidelity or "").strip().lower(), EDIT_FIDELITY["balanced"])
+    parts = [
+        "Picture 1 is a rough hand drawing used only as a layout guide.",
+        f"Create a finished, fully rendered image of: {subject}.",
+        f"Visual style: {style}." if style else "",
+        "Keep exactly what the drawing shows: the same number of people and objects, each figure's pose, "
+        "limb directions and facing, their positions and sizes in the frame, and every place where a person "
+        "touches, holds or stands on something.",
+        "Turn stick figures and crude shapes into anatomically correct people with natural faces, hands, hair "
+        "and fitting clothes, and into the real objects they stand for, with complete details.",
+        "Fill the whole frame with a coherent, detailed background that suits the scene.",
+        rule,
+        "No sketch lines, outlines, paper texture, text or watermark.",
+    ]
+    return " ".join(p for p in parts if p)
+
+
+def prepare_reference(source: Path, dest: Path, width: int, height: int) -> Path:
+    """Fit the drawing on white paper at the output aspect; Qwen-Edit reads it as Picture 1."""
+    with Image.open(source) as im:
+        im = ImageOps.exif_transpose(im)
+        if im.mode in ("RGBA", "LA", "P"):
+            im = im.convert("RGBA")
+            paper = Image.new("RGBA", im.size, "white")
+            im = Image.alpha_composite(paper, im)
+        im = ImageOps.pad(im.convert("RGB"), (width, height), Image.LANCZOS, color="white")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    im.save(dest)
+    return dest
 
 
 def frame_prompt(text: str, style_line: str = "") -> str:

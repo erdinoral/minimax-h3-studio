@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=sketch3" />
+  <link rel="stylesheet" href="/static/app.css?v=game5" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -29,6 +29,7 @@
       <button type="button" class="chip on" data-ws="scene" id="ws-scene" role="tab" aria-selected="true">Sahne</button>
       <button type="button" class="chip chip-director" data-ws="director" id="ws-director" role="tab" aria-selected="false">Direktör</button>
       <button type="button" class="chip" data-ws="motion" id="ws-motion" role="tab" aria-selected="false">Motion</button>
+      <button type="button" class="chip" data-ws="game" id="ws-game" role="tab" aria-selected="false">Oyun / Sprites</button>
     </nav>
     <div class="sysbar" id="sysbar" title="Sistem performansı">
       <div class="sys-item"><span>CPU</span><b id="sys-cpu">—</b></div>
@@ -55,6 +56,11 @@
     <!-- grid: scene | player | ayar / prompt | prod | ayar -->
     <section class="zone zone-scene panel scene">
         <h2 id="scene-zone-title">Sahne</h2>
+        <div class="ios-segment v2v-kind-switch motion-source-switch" id="motion-source" role="group">
+          <button type="button" class="on" data-motion-source="video" aria-pressed="true" data-i18n="motion.sourceVideo" data-i18n-title="hint.v2v">H3 Video</button>
+          <button type="button" data-motion-source="robot" aria-pressed="false" data-i18n="motion.sourceRobot" data-i18n-title="motion.robotHint">MotionBricks</button>
+          <button type="button" data-motion-source="sketch" aria-pressed="false" data-i18n="motion.sourceSketch" data-i18n-title="sketch.hint">Qwen Çizim</button>
+        </div>
         <p class="muted mode-hint" id="scene-zone-sub">Tek video üretimi: yeni / devam / referans. Film için üstten <strong>Direktör</strong>.</p>
 
         <div id="panel-workspace-director" class="panel-workspace-director hidden">
@@ -124,7 +130,6 @@
             <button type="button" data-dur="8" class="chip">8 sn</button>
             <button type="button" data-dur="10" class="chip">10 sn</button>
             <button type="button" data-dur="15" class="chip warn">15 sn</button>
-            <button type="button" data-dur="30" id="hybrid-long-duration" class="chip warn hidden" hidden>30 sn</button>
           </div>
           <p class="v2v-duration-note hidden" id="v2v-duration-note">Referans videonun süresi kadar</p>
           <div id="fl2va-frames">
@@ -205,23 +210,41 @@
         </div>
 
         <div id="panel-mode-v2v" class="hidden">
-          <div class="ios-segment v2v-kind-switch motion-source-switch" id="motion-source" role="group">
-            <button type="button" class="on" data-motion-source="video" aria-pressed="true" data-i18n="motion.sourceVideo" data-i18n-title="hint.v2v">H3 Video</button>
-            <button type="button" data-motion-source="robot" aria-pressed="false" data-i18n="motion.sourceRobot" data-i18n-title="motion.robotHint">MotionBricks</button>
-            <button type="button" data-motion-source="sketch" aria-pressed="false" data-i18n="motion.sourceSketch" data-i18n-title="sketch.hint">Qwen Çizim</button>
-          </div>
           <div id="motion-sketch-panel" class="motion-robot-panel hidden">
             <label class="file-pick">
               <input type="file" id="sk-file" class="file-pick-input" accept="image/*" />
               <span class="file-pick-btn" data-i18n="sketch.upload">Çizim yükle</span>
               <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
             </label>
+            <label data-i18n="sketch.method">Yorumlama</label>
+            <div class="chips" id="sk-method-chips" role="group" aria-label="Yorumlama" data-i18n-aria-label="sketch.method" data-i18n-title="sketch.methodHint">
+              <button type="button" class="chip on" data-sk-method="edit" aria-pressed="true" data-i18n="sketch.methodEdit">Görsel referans</button>
+              <button type="button" class="chip" data-sk-method="img2img" aria-pressed="false" data-i18n="sketch.methodImg2img">Çizgiden başlat</button>
+            </div>
+            <p class="muted sk-method-note hidden" id="sk-method-note" role="status"></p>
             <label data-i18n="sketch.fidelity">Çizime bağlılık</label>
             <div class="chips" id="sk-fidelity-chips" role="group" aria-label="Çizime bağlılık" data-i18n-aria-label="sketch.fidelity" data-i18n-title="sketch.fidelityHint">
               <button type="button" class="chip" data-sk-fidelity="faithful" data-i18n="sketch.faithful">Sadık</button>
               <button type="button" class="chip on" data-sk-fidelity="balanced" data-i18n="sketch.balanced">Dengeli</button>
               <button type="button" class="chip" data-sk-fidelity="free" data-i18n="sketch.free">Serbest</button>
             </div>
+            <section class="sk-review" id="sk-review" aria-labelledby="sk-review-title">
+              <div class="sk-review-head">
+                <strong id="sk-review-title" data-i18n="sketch.reviewTitle">Kare onayı</strong>
+                <span class="sk-review-state" id="sk-review-state" role="status" aria-live="polite"></span>
+              </div>
+              <button type="button" class="sk-review-frame" id="sk-review-frame" title="Kareyi büyüt" data-i18n-title="sketch.openFrame" aria-label="Kareyi büyüt" data-i18n-aria-label="sketch.openFrame" disabled>
+                <img id="sk-review-img" alt="" hidden />
+                <span class="sk-review-empty" id="sk-review-empty" data-i18n="sketch.reviewEmpty">Çiz ve Kare oluştur'a bas; hazır kare burada onayını bekler.</span>
+                <span class="sk-review-bar" id="sk-review-bar" hidden><i></i></span>
+              </button>
+              <label for="sk-review-text" data-i18n="sketch.reviewText">Kare açıklaması</label>
+              <textarea id="sk-review-text" rows="2" maxlength="2000" placeholder="Çizimde ne var?" data-i18n-placeholder="sketch.reviewTextPh"></textarea>
+              <div class="sk-review-actions">
+                <button type="button" class="btn-secondary" id="sk-review-regen" data-i18n="sketch.regenerate" disabled>Yeniden oluştur</button>
+                <button type="button" class="cta" id="sk-review-animate" data-i18n="sketch.animate" disabled>Bu kareyi canlandır</button>
+              </div>
+            </section>
           </div>
           <div id="motion-robot-panel" class="motion-robot-panel hidden">
             <label data-i18n="motion.takeLength">Kayıt süresi</label>
@@ -361,21 +384,118 @@
           <audio id="scene-audio-preview" controls hidden></audio>
         </details>
         </div>
+
+        <div id="panel-workspace-game" class="game-panel hidden">
+          <p class="gs-note" data-i18n="game.identityNote">H3 karakterin kimliğini, kıyafetini, renklerini ve elindeki nesneleri korumaya çalışır; bu garanti değildir. Sonucu önizlemede kontrol et.</p>
+          <label data-i18n="game.character">Karakter görseli</label>
+          <label class="file-pick v2v-drop" id="gs-drop">
+            <input type="file" id="gs-file" class="file-pick-input" accept="image/*" />
+            <span class="v2v-drop-title" data-i18n="game.dropTitle">Karakter görselini bırak veya seç</span>
+            <span class="v2v-drop-sub" data-i18n="game.dropSub">Tek karakter, tam boy; yandan görünüş en iyi sonucu verir</span>
+          </label>
+          <div class="gs-ref hidden" id="gs-ref" title="Değiştirmek için yeni görseli buraya bırak" data-i18n-title="game.refReplace">
+            <img id="gs-ref-img" alt="" />
+            <button type="button" class="btn-ghost" id="gs-ref-remove" data-i18n="game.remove">Kaldır</button>
+          </div>
+          <label for="gs-desc" data-i18n="game.description">Karakter tanımı (isteğe bağlı)</label>
+          <input type="text" id="gs-desc" maxlength="400" data-i18n-placeholder="game.descriptionPh" placeholder="ör. kırmızı pelerinli şövalye, sağ elinde kılıç" />
+          <p class="muted gs-small" data-i18n="game.promptAuto">Prompt yazmana gerek yok: her animasyon için hazır H3 prompt'u otomatik hazırlanır (hareket, sabit kamera, fon, kimlik koruma). Tanım yazarsan prompt'a eklenir.</p>
+          <label data-i18n="game.animations">Animasyonlar</label>
+          <div class="gs-anims" id="gs-anims" role="group" aria-label="Animasyonlar" data-i18n-aria-label="game.animations"></div>
+          <p class="muted gs-small" data-i18n="game.animHint">Yandan görünüş, sağa bakan tek karakter. Döngüler yerinde oynar; kamera sabit kalır.</p>
+          <label data-i18n="game.backdrop">Fon rengi</label>
+          <div class="chips" id="gs-backdrop" role="group" aria-label="Fon rengi" data-i18n-aria-label="game.backdrop">
+            <button type="button" class="chip" data-gs-backdrop="green" aria-pressed="false" data-i18n="backdrop.green">Yeşil perde</button>
+            <button type="button" class="chip" data-gs-backdrop="blue" aria-pressed="false" data-i18n="backdrop.blue">Mavi perde</button>
+          </div>
+          <p class="muted gs-small" id="gs-backdrop-hint"></p>
+          <label data-i18n="game.preset">Kalite ön ayarı</label>
+          <div class="chips" id="gs-preset" role="group" aria-label="Kalite ön ayarı" data-i18n-aria-label="game.preset">
+            <button type="button" class="chip" data-gs-preset="fast" aria-pressed="false" data-i18n="game.preset.fast">Hızlı</button>
+            <button type="button" class="chip" data-gs-preset="balanced" aria-pressed="false" data-i18n="game.preset.balanced">Dengeli</button>
+            <button type="button" class="chip" data-gs-preset="quality" aria-pressed="false" data-i18n="game.preset.quality">Kalite</button>
+          </div>
+          <p class="muted gs-small" id="gs-preset-hint"></p>
+          <details class="gs-settings" id="gs-settings" open>
+            <summary data-i18n="game.spriteSettings">Sprite ayarları</summary>
+            <p class="muted gs-small" data-i18n="game.settingsHint">Bu ayarlar H3'ü yeniden çalıştırmadan, seçili animasyon için “Yeniden işle” ile uygulanır.</p>
+            <label data-i18n="game.cell">Hücre boyutu</label>
+            <div class="chips" id="gs-cell" role="group" aria-label="Hücre boyutu" data-i18n-aria-label="game.cell">
+              <button type="button" class="chip" data-gs-cell="32" aria-pressed="false">32×32</button>
+              <button type="button" class="chip" data-gs-cell="64" aria-pressed="false">64×64</button>
+              <button type="button" class="chip" data-gs-cell="128" aria-pressed="false">128×128</button>
+            </div>
+            <div class="gs-row">
+              <label><span data-i18n="game.frames">Kare sayısı</span><input type="number" id="gs-frames" min="2" max="32" step="1" /></label>
+              <label><span data-i18n="game.fps">Oynatma FPS</span><input type="number" id="gs-fps" min="1" max="60" step="1" /></label>
+            </div>
+            <label><span data-i18n="game.palette">Ortak renk paleti</span>
+              <select id="gs-palette">
+                <option value="0" data-i18n="game.paletteOff">Sınırsız</option>
+                <option value="8">8</option>
+                <option value="16">16</option>
+                <option value="32">32</option>
+                <option value="64">64</option>
+              </select>
+            </label>
+            <label class="gs-range"><span data-i18n="game.tolerance">Renk toleransı</span><output id="gs-tolerance-val"></output>
+              <input type="range" id="gs-tolerance" min="5" max="80" step="1" />
+            </label>
+            <label class="gs-range"><span data-i18n="game.hole">Kapalı boşluk toleransı</span><output id="gs-hole-val"></output>
+              <input type="range" id="gs-hole" min="0" max="60" step="1" />
+            </label>
+            <p class="muted gs-small" data-i18n="game.holeHint">Kol, gövde ve bacak arasındaki kapalı fon boşlukları. Karakterde fona benzeyen renkler siliniyorsa düşür; 0 kapatır.</p>
+            <label class="gs-range"><span data-i18n="game.edge">Kenar temizliği</span><output id="gs-edge-val"></output>
+              <input type="range" id="gs-edge" min="0" max="3" step="1" />
+            </label>
+            <label data-i18n="game.detail">İnce parçalar</label>
+            <div class="chips" id="gs-detail" role="group" aria-label="İnce parçalar" data-i18n-aria-label="game.detail">
+              <button type="button" class="chip" data-gs-detail="fine" aria-pressed="false" data-i18n="game.detailFine">Koru</button>
+              <button type="button" class="chip" data-gs-detail="balanced" aria-pressed="false" data-i18n="game.detailBalanced">Dengeli</button>
+              <button type="button" class="chip" data-gs-detail="clean" aria-pressed="false" data-i18n="game.detailClean">Temiz kenar</button>
+            </div>
+            <div class="gs-row">
+              <label><span data-i18n="game.loopStart">Aralık başı (sn)</span><input type="number" id="gs-loop-start" min="0" max="120" step="0.05" data-i18n-placeholder="game.auto" placeholder="otomatik" /></label>
+              <label><span data-i18n="game.loopEnd">Aralık sonu (sn)</span><input type="number" id="gs-loop-end" min="0" max="120" step="0.05" data-i18n-placeholder="game.auto" placeholder="otomatik" /></label>
+            </div>
+          </details>
+          <button type="button" class="cta gs-generate" id="gs-generate" data-i18n="game.generate">Animasyonları kuyruğa ekle</button>
+          <p class="muted gs-small" id="gs-generate-hint"></p>
+        </div>
     </section>
 
     <section class="zone zone-player panel player">
       <a id="sponsor-banner" class="sponsor-banner" href="https://buymeacoffee.com/erdindev" target="_blank" rel="noopener noreferrer" aria-label="Buy me a coffee">
         <span class="sponsor-banner-message"></span>
       </a>
-      <div class="player-stage">
+      <div class="motion-view-switch" id="motion-view" role="tablist" data-view="workspace" aria-label="Oynatıcı görünümü" data-i18n-aria-label="motion.viewAria">
+        <button type="button" role="tab" class="on" id="motion-view-workspace" data-motion-view="workspace" aria-selected="true" aria-controls="player-stage" tabindex="0">
+          <span class="mv-rec" aria-hidden="true"></span><span data-i18n="motion.viewWorkspace">Çalışma alanı</span>
+        </button>
+        <button type="button" role="tab" id="motion-view-result" data-motion-view="result" aria-selected="false" aria-controls="player-stage" tabindex="-1">
+          <span data-i18n="motion.viewResult">Sonuç</span><span class="mv-badge" id="motion-view-badge"></span>
+        </button>
+        <span class="sr-only" id="motion-view-live" role="status" aria-live="polite"></span>
+      </div>
+      <div class="player-stage" id="player-stage">
         <button type="button" class="player-nav player-nav-next hidden" id="btn-player-next" title="Sonraki video" aria-label="Sonraki video" data-i18n-title="ui.btn-player-next.title" data-i18n-aria-label="ui.btn-player-next.aria-label">‹</button>
         <button type="button" class="player-close hidden" id="btn-player-close" title="Aktif üretimi kapat">×</button>
         <video id="player" controls playsinline></video>
         <button type="button" class="player-nav player-nav-prev hidden" id="btn-player-prev" title="Önceki video" aria-label="Önceki video" data-i18n-title="ui.btn-player-prev.title" data-i18n-aria-label="ui.btn-player-prev.aria-label">›</button>
         <div class="player-empty muted" id="player-empty">Henüz video yok</div>
+        <div class="mv-empty mv-result-empty" id="mv-result-empty">
+          <strong data-i18n="motion.resultEmptyTitle">Henüz sonuç yok</strong>
+          <span id="mv-result-empty-body"></span>
+        </div>
         <div class="mb-stage hidden" id="mb-stage">
           <div class="mb-frame" id="mb-frame"></div>
           <div class="mb-status" id="mb-status" role="status" aria-live="polite"></div>
+          <div class="mb-take-retry hidden" id="mb-take-retry" role="group">
+            <span id="mb-take-retry-msg"></span>
+            <button type="button" class="mb-btn" id="mb-take-upload" data-i18n="motion.takeRetry">Tekrar yükle</button>
+            <button type="button" class="mb-btn" id="mb-take-download" data-i18n="motion.takeDownload">Kaydı indir</button>
+            <button type="button" class="mb-btn" id="mb-take-discard" data-i18n="motion.takeDiscard">Kaydı sil</button>
+          </div>
           <div class="mb-hud">
             <div class="mb-hud-top">
               <span class="mb-rec hidden" id="mb-rec"><i></i><span id="mb-rec-time">0.0</span></span>
@@ -417,6 +537,52 @@
             </div>
           </div>
         </div>
+        <div class="mb-stage mv-ref-stage hidden" id="mv-ref-stage">
+          <video id="mv-ref-video" muted loop playsinline preload="metadata" controls></video>
+          <span class="mv-ref-tag" id="mv-ref-tag"></span>
+          <div class="mv-empty" id="mv-ref-empty">
+            <strong data-i18n="motion.refEmptyTitle">Henüz referans video yok</strong>
+            <span data-i18n="motion.refEmptyBody">Soldaki panelden 4–30 sn'lik bir video ekle; hareketi burada önizlersin.</span>
+          </div>
+        </div>
+        <div class="mb-stage gs-stage hidden" id="gs-stage">
+          <div class="gs-view" id="gs-view" data-bg="checker">
+            <canvas id="gs-canvas" class="hidden"></canvas>
+            <img id="gs-mask-img" class="hidden" alt="Maske önizlemesi" title="Tam boyutta aç" data-i18n-title="game.maskOpen" />
+            <div class="mv-empty gs-empty" id="gs-empty">
+              <strong data-i18n="game.emptyTitle">Henüz sprite yok</strong>
+              <span id="gs-empty-body"></span>
+            </div>
+          </div>
+          <div class="mb-hud">
+            <div class="mb-hud-top">
+              <div class="mb-gaits" id="gs-bg" role="group" aria-label="Arka plan" data-i18n-aria-label="game.bg">
+                <button type="button" class="mb-btn" data-gs-bg="checker" data-i18n="game.bgChecker">Dama</button>
+                <button type="button" class="mb-btn" data-gs-bg="light" data-i18n="game.bgLight">Açık</button>
+                <button type="button" class="mb-btn" data-gs-bg="dark" data-i18n="game.bgDark">Koyu</button>
+              </div>
+              <div class="mb-gaits" id="gs-zoom" role="group" aria-label="Yakınlaştırma" data-i18n-aria-label="game.zoom">
+                <button type="button" class="mb-btn" data-gs-zoom="0" data-i18n="game.zoomFit">Sığdır</button>
+                <button type="button" class="mb-btn" data-gs-zoom="1">1×</button>
+                <button type="button" class="mb-btn" data-gs-zoom="2">2×</button>
+                <button type="button" class="mb-btn" data-gs-zoom="4">4×</button>
+                <button type="button" class="mb-btn" data-gs-zoom="8">8×</button>
+              </div>
+              <span class="mb-hud-spacer"></span>
+              <button type="button" class="mb-btn" id="gs-pivot" aria-pressed="true" data-i18n="game.pivot">Pivot</button>
+              <button type="button" class="mb-btn" id="gs-play" data-i18n="game.pause">Duraklat</button>
+            </div>
+            <div class="mb-hud-bottom">
+              <div class="mb-gaits" id="gs-views" role="group" aria-label="Önizleme" data-i18n-aria-label="game.views">
+                <button type="button" class="mb-btn" data-gs-view="anim" data-i18n="game.viewAnim">Animasyon</button>
+                <button type="button" class="mb-btn" data-gs-view="seam" data-i18n="game.viewSeam">Döngü sınırı</button>
+                <button type="button" class="mb-btn" data-gs-view="mask" data-i18n="game.viewMask">Maske</button>
+                <button type="button" class="mb-btn" data-gs-view="sheet" data-i18n="game.viewSheet">Sheet</button>
+              </div>
+              <span class="gs-info" id="gs-info"></span>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="player-actions">
         <button type="button" class="btn-secondary" id="btn-use-in-continue">Bu videodan devam</button>
@@ -453,6 +619,23 @@
         <button type="button" class="cta" id="btn-generate">Üret</button>
       </div>
       <p class="muted gen-hint" id="gen-hint">Mod: Yeni video · Sıraya ekle = kuyruğa ekle</p>
+      <div class="game-results" id="game-results">
+        <div class="gs-results-head">
+          <h2 data-i18n="game.animations">Animasyonlar</h2>
+          <span class="gs-set-label" data-i18n="game.set">Set</span>
+          <select id="gs-set" aria-label="Set" data-i18n-aria-label="game.set"></select>
+        </div>
+        <p class="muted gs-small" id="gs-results-empty" data-i18n="game.resultsEmpty">Henüz oyun animasyonu yok. Soldan karakteri yükle, animasyonları seç ve kuyruğa ekle.</p>
+        <ul class="gs-jobs" id="gs-jobs"></ul>
+        <div class="gs-actions">
+          <button type="button" class="btn-secondary" id="gs-preview" data-i18n="game.previewMask">Maskeyi önizle</button>
+          <button type="button" class="btn-secondary" id="gs-process" data-i18n="game.reprocess">Yeniden işle</button>
+          <a class="btn-secondary disabled" id="gs-zip" download aria-disabled="true" data-i18n="game.zip">ZIP indir</a>
+          <button type="button" class="btn-ghost" id="gs-atlas" data-i18n="game.atlas" data-i18n-title="game.atlasTitle" title="Bu setteki işlenmiş animasyonları tek sheet ve JSON olarak indir">Set atlası</button>
+        </div>
+        <p class="gs-status" id="gs-status" role="status" aria-live="polite"></p>
+        <p class="gs-status gs-notice" id="gs-notice" aria-live="polite"></p>
+      </div>
     </section>
 
     <section class="zone zone-lora panel">
@@ -507,6 +690,7 @@
           <button type="button" class="chip on" data-lane="scene" id="prod-lane-scene">Sahne</button>
           <button type="button" class="chip" data-lane="director" id="prod-lane-director">Direktör</button>
           <button type="button" class="chip" data-lane="motion" id="prod-lane-motion">Motion</button>
+          <button type="button" class="chip" data-lane="game" id="prod-lane-game">Oyun</button>
         </div>
         <div class="job-queue">
           <div class="job-queue-head">Kuyruk</div>
@@ -1227,6 +1411,7 @@
         <span class="muted gallery-merge-hint hidden" id="gallery-merge-hint"></span>
         <span class="muted gallery-merge-count hidden" id="gallery-merge-count"></span>
         <button type="button" class="btn-secondary" id="btn-gallery-video-select">Video seç</button>
+        <button type="button" class="btn-secondary hidden" id="btn-gallery-select-all" aria-pressed="false">Tümünü seç</button>
         <button type="button" class="btn-secondary" id="btn-gallery-download-zip" data-i18n="gallery.downloadZip">Tümünü / seçilenleri ZIP indir</button>
         <button type="button" class="btn-secondary hidden" id="btn-gallery-video-delete">Seçilenleri sil</button>
         <button type="button" class="btn-secondary hidden" id="btn-gallery-photo-select">Fotoğraf seç</button>
@@ -1460,22 +1645,23 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=sketch4" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=game5" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
   <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
-  <script src="/static/app.js?v=sketch1" charset="utf-8"></script>
+  <script src="/static/app.js?v=engine2" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
-  <script src="/static/studio-guide.js?v=6" charset="utf-8"></script>
+  <script src="/static/studio-guide.js?v=7" charset="utf-8"></script>
   <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
 <script src="/static/h3-enhancements.js?v=3"></script>
   <script src="/static/video-workflows.js?v=13"></script>
-  <script src="/static/motion-sketch.js?v=2"></script>
-  <script src="/static/motion-robot.js?v=4"></script>
+  <script src="/static/motion-sketch.js?v=4"></script>
+  <script src="/static/motion-robot.js?v=7"></script>
+  <script src="/static/game-sprites.js?v=5"></script>
   <script src="/static/scene-selectors.js?v=3"></script>
   <script src="/static/scene-settings.js?v=3"></script>
   <script src="/static/sponsor-banner.js?v=3"></script>

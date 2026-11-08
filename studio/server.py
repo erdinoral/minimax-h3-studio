@@ -564,6 +564,8 @@ def _lora_fields(body: Any) -> dict[str, Any]:
 
 
 def _sage_mode(src: Any = None) -> str:
+    if not h3_acceleration.load_settings().get("sage_enabled", True):
+        return "disabled"
     return detect_sage_mode(COMFY_ROOT) or "disabled"
 
 
@@ -2254,6 +2256,7 @@ class H3AccelerationBody(BaseModel):
     spectrum_preset: Optional[Literal["light", "balanced", "strong", "custom"]] = None
     spectrum_blend_weight: Optional[float] = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     sparse_enabled: Optional[bool] = None
+    sage_enabled: Optional[bool] = None
 
 
 @app.get("/api/h3-acceleration")
@@ -2261,6 +2264,7 @@ async def get_h3_acceleration():
     settings = h3_acceleration.load_settings(DATA / "h3_acceleration.json")
     installed = (COMFY_ROOT / "custom_nodes" / "ComfyUI-Spectrum-MiniMax-H3" / "__init__.py").is_file()
     return {**settings, "spectrum_installed": installed,
+            "sage_available": detect_sage_mode(COMFY_ROOT) is not None,
             "spectrum_presets": [{"id": key, "blend_weight": value} for key, value in h3_acceleration.PRESETS.items()]}
 
 

@@ -249,6 +249,7 @@
     const lines = p ? [t("game.presetInfo", { q: p.quality, steps: p.steps })] : [];
     const missing = missingAccel();
     if (live.accel) lines.push(missing.length ? t("game.accelPending", { list: missing.join(", ") }) : t("game.accelOn"));
+    if (live.accel?.sage_available) lines.push(t(live.accel.sage_enabled ? "game.sageOn" : "game.sageOff"));
     if (live.accel && !live.accel.spectrum_installed) lines.push(t("game.accelNoSpectrum"));
     hint.textContent = lines.join(" ");
   }

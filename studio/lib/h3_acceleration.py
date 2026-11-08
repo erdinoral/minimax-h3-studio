@@ -49,7 +49,9 @@ def clean_settings(raw):
         preset = "custom"
     return {"spectrum_enabled": raw.get("spectrum_enabled") is True,
             "spectrum_preset": preset, "spectrum_blend_weight": weight,
-            "sparse_enabled": raw.get("sparse_enabled") is True}
+            "sparse_enabled": raw.get("sparse_enabled") is True,
+            # Missing means on: SageAttention ran automatically before it became switchable.
+            "sage_enabled": raw.get("sage_enabled") is not False}
 
 
 def load_settings(path=None):

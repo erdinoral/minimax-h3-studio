@@ -21,7 +21,24 @@ class AccelerationSettingsTests(unittest.TestCase):
     def test_legacy_file_keeps_the_existing_default(self):
         self.assertEqual(h3_acceleration.clean_settings({'spectrum_enabled': True}),
                          dict(spectrum_enabled=True, spectrum_preset='balanced', spectrum_blend_weight=0.5,
-                              sparse_enabled=False))
+                              sparse_enabled=False, sage_enabled=True))
+
+    def test_sage_switch_persists_and_defaults_on(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'settings.json'
+            self.assertTrue(h3_acceleration.load_settings(path)['sage_enabled'])
+            h3_acceleration.save_settings(h3_acceleration.update_settings({}, {'sage_enabled': False}), path)
+            self.assertFalse(h3_acceleration.load_settings(path)['sage_enabled'])
+
+    def test_sage_mode_follows_the_switch(self):
+        import server
+        with patch.object(server, 'detect_sage_mode', return_value='auto'):
+            with patch.object(server.h3_acceleration, 'load_settings', return_value={'sage_enabled': False}):
+                self.assertEqual(server._sage_mode(), 'disabled')
+            with patch.object(server.h3_acceleration, 'load_settings', return_value={'sage_enabled': True}):
+                self.assertEqual(server._sage_mode(), 'auto')
+        with patch.object(server, 'detect_sage_mode', return_value=None):
+            self.assertEqual(server._sage_mode(), 'disabled')
 
     def test_presets_manual_values_and_toggle_preserve_each_other(self):
         settings = h3_acceleration.update_settings({}, {'spectrum_enabled': True, 'spectrum_preset': 'strong'})
@@ -78,7 +95,8 @@ class AccelerationApiTests(unittest.TestCase):
             node.decorator_list = []
         self.ns = dict(BaseModel=BaseModel, Field=Field, Optional=Optional, Literal=Literal,
                        DATA=self.data, COMFY_ROOT=self.data, COMFY_URL='http://comfy',
-                       h3_acceleration=h3_acceleration, HTTPException=HTTPException)
+                       h3_acceleration=h3_acceleration, HTTPException=HTTPException,
+                       detect_sage_mode=lambda root: None)
         exec(compile(ast.Module(body=nodes, type_ignores=[]), 'acceleration_api', 'exec'), self.ns)
 
     def test_api_rejects_out_of_range_nan_and_unknown_presets(self):
@@ -100,6 +118,10 @@ class AccelerationApiTests(unittest.TestCase):
             third = await self.ns['set_h3_acceleration'](Model(spectrum_preset='balanced'))
             self.assertEqual(third['spectrum_blend_weight'], 0.5)
             self.assertEqual(len(third['spectrum_presets']), 3)
+            fourth = await self.ns['set_h3_acceleration'](Model(sage_enabled=False))
+            self.assertFalse(fourth['sage_enabled'])
+            self.assertFalse(fourth['sage_available'])
+            self.assertEqual(fourth['spectrum_blend_weight'], 0.5)
         asyncio.run(run())
 
     def test_missing_spectrum_node_does_not_save_enabled_settings(self):

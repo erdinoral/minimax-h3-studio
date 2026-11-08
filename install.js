@@ -3,6 +3,14 @@ module.exports = {
     bundle: "ai"
   },
   run: [
+    {
+      when: "{{gpu !== 'nvidia'}}",
+      method: "notify",
+      params: {
+        html: "MiniMax H3 Studio requires an NVIDIA GPU (16 GB+ VRAM recommended). Installation stopped."
+      },
+      next: null
+    },
     // MiniMax H3 runs natively in ComfyUI (comfy_extras/nodes_minimax_h3.py on
     // master) -- no custom nodes or wrapper repos are needed.
     {

@@ -31,7 +31,7 @@ SECTION_FIELDS = (
 
 def planning_messages(current, template, story, count, clip, ui_lang, guidance="", *, continuum=False):
     assets = {group: [
-        {key: asset.get(key, "") for key in ("name", "notes", "voice", "use_lora", "lora_id", "lora_file")}
+        {key: asset.get(key, "") for key in ("name", "notes", "voice")}
         for asset in current.get(group, []) if isinstance(asset, dict)
     ] for group in GROUPS}
     system = (
@@ -47,8 +47,8 @@ def planning_messages(current, template, story, count, clip, ui_lang, guidance="
         "or restart completed actions in a later section. Keep geography, direction of travel, props and injuries consistent. "
         "For continue, copy the previous ending_frame into this section's opening_frame, then advance from that state. "
         "Opening/action/ending must describe the same physical progression; no unexplained teleporting between locations. "
-        "Reuse existing asset names EXACTLY when relevant. Preserve the learned identity of LoRA characters; "
-        "do not invent another face for them or select/change LoRAs. Only invent new assets required by the story. "
+        "Reuse existing asset names EXACTLY when relevant; do not select or change LoRAs. "
+        "Only invent new assets required by the story. "
         "Each new asset needs a name and detailed English notes for reference-image generation. "
         "Character names in sections must be exact asset names, comma-separated; location must be an exact location name. "
         "The first section must be t2v. Use continue for the SAME uninterrupted shot, location and physical moment; "

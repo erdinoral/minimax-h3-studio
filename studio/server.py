@@ -593,10 +593,7 @@ def _graph_for_mode(mode: str) -> str:
 
 
 def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
-    """Pick a LoRA that actually applies on this shot's graph.
-
-    Character LoRA wins on Ref2VA when the global pick is FL2VA-only turbo.
-    """
+    """Pick a LoRA that actually applies on this shot's graph."""
     graph = _graph_for_mode(mode)
 
     class LoraSrc:
@@ -619,25 +616,17 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
     chosen = {}
     weights = getattr(body, "lora_strengths", {}) or {}
 
-    def _add(spec, strength=None, *, actor=False):
+    def _add(spec, strength=None):
         if not _ok(spec) or not spec_ready(spec):
-            code = "lora.actorUnavailable" if actor else "lora.selectionUnavailable"
-            raise HTTPException(400, {"code": code})
+            raise HTTPException(400, {"code": "lora.selectionUnavailable"})
         name = spec["file"]
         if strength is None:
             strength = spec.get("strength")
         if strength is None:
             strength = 0.8
-        # A character card owns its adapter's weight, even when also selected globally.
         if name not in chosen:
             chosen[name] = spec
             src.lora_strengths[name] = float(strength)
-
-    for actor in (bound or {}).get("hits") or []:
-        if actor.get("kind") == "character" and cinema.uses_lora(actor):
-            actor_id = str(actor.get("lora_id") or "").strip()
-            _add(find_spec(lora_id=actor_id) if actor_id else None,
-                 actor.get("lora_strength"), actor=True)
 
     requested = list(dict.fromkeys(name.strip() for name in
         str(getattr(body, "lora_name", None) or "").split("|") if name.strip()))
@@ -647,21 +636,10 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
             raise HTTPException(400, {"code": "lora.selectionUnavailable"})
         if selected.get("file"):
             requested = [selected["file"]]
-    excluded_characters = 0
     for name in requested:
         spec = find_spec(file=name)
         if not spec or not spec_ready(spec):
             raise HTTPException(400, {"code": "lora.selectionUnavailable"})
-        shot_prompt = (bound or {}).get("prompt") or ""
-        if (spec.get("category") == "character" and spec["file"] not in chosen
-                and re.search(r"\bMain characters?\s*:", shot_prompt, re.I)):
-            actor_label = re.sub(r"\s*\(.*", "", spec.get("label") or "").strip()
-            if not cinema.asset_mentioned(shot_prompt, {
-                "kind":"character", "name":actor_label, "trigger":spec.get("trigger") or ""
-            }):
-                excluded_characters += 1
-                slog.info("offscreen character lora skipped", lora=name)
-                continue
         if not _ok(spec) and spec.get("preset"):
             companion = {("lightx2v-fl2v-4step-v12", "ref2va"): "lightx2v-ref2v-4step",
                          ("erosmax-beta1-fl2v-4step", "ref2va"): "lightx2v-ref2v-4step",
@@ -687,7 +665,7 @@ def _lora_src_for_shot(body: Any, bound: Optional[dict[str, Any]], mode: str):
         raise HTTPException(400, str(exc)) from exc
     if len(chosen) > 5:
         raise HTTPException(400, {"code": "lora.stackLimit"})
-    if requested and not chosen and excluded_characters != len(requested):
+    if requested and not chosen:
         raise HTTPException(400, {"code": "lora.noCompatibleSelection"})
     if chosen:
         if any(spec.get("required_inputs") for spec in chosen.values()):
@@ -5389,8 +5367,6 @@ async def _queue_director_chains(*, body, parsed, prompts, lib, audio, cinema_ba
             plans = reference_plans[group['offset']:group['offset'] + len(group['shots'])]
             if any(s.get('first_frame_name') for s in group['shots']):
                 raise HTTPException(400, 'Continue uses its parent clip; put separate starting images on New scenes')
-            if any(cinema.uses_lora(a) for plan in plans for a in plan.get('hits', [])):
-                raise HTTPException(400, 'Continuum cannot switch separate character LoRA stacks; use image references')
             # Fail before queuing any root, rather than leave a partial chain.
             for start in range(0, len(plans), pack):
                 try:
@@ -5683,8 +5659,6 @@ async def _attach_look_sheet_views(job: dict, kind: str, aid: str) -> None:
     found = next((x for x in lib.get(key, []) if str(x.get("id")) == aid), None)
     if not found:
         raise ValueError("Look Sheets asset was deleted")
-    if kind == "character" and cinema.uses_lora(found):
-        raise ValueError("LoRA mode was enabled; generated images were not attached")
     views = job.get("sheet_view_outputs") or []
     if len(views) != look_sheets.view_count(kind):
         raise ValueError("Look Sheets did not return all requested views")
@@ -5835,11 +5809,6 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
             provider = "image_studio" if body.production_method == "qwen" else "minimax"
         elif provider == "look_sheets":
             sheet_method = "look_sheets"
-        sheet_asset = next((x for x in cinema.load().get("characters", [])
-                            if body.kind == "character" and body.asset_id and x.get("id") == body.asset_id), None)
-        # H3 character weights cannot be applied to a Qwen image model.
-        if sheet_asset and cinema.uses_lora(sheet_asset):
-            raise ValueError("Character images are not rendered while Use LoRA is on")
         if sheet_method == "standard" and provider == "image_studio":
             return await _queue_cinema_qwen_sheet_job(
                 kind=body.kind or "character", name=body.name, notes=body.notes or "",
@@ -5871,8 +5840,6 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
     kind, key = cinema.asset_kind_key(kwargs.get("kind") or "character")
     actor = next((a for a in cinema.load().get(key, [])
                   if kwargs.get("asset_id") and a.get("id") == kwargs["asset_id"]), None)
-    if kind == "character" and actor and cinema.uses_lora(actor):
-        raise HTTPException(400, "Character images are not rendered while Use LoRA is on")
     if kwargs.get("ref_image") and actor:
         images = actor.get("images") or []
         auto_only = not images or all(str(im.get("file") or "").startswith("h3_sheet_") for im in images)
@@ -6463,8 +6430,6 @@ async def _generate_cinema_image_studio_sheet(
     )
     if source_name and not auto_only and len(old_images) + len(uploaded) > cinema.MAX_ASSET_IMAGES:
         raise HTTPException(409, "Not enough image slots to attach reference views")
-    if previous and kind == "character" and cinema.uses_lora(previous):
-        raise HTTPException(409, "LoRA mode was enabled during generation; images were not attached")
     asset = cinema.upsert_asset(kind, {
         **(previous or {}), **({"id": asset_id} if asset_id else {}),
         "name": name, "notes": notes,
@@ -6496,9 +6461,6 @@ async def _queue_cinema_sheet_job(
     name = (name or "").strip()
     if not name:
         raise ValueError("name is required")
-    selected_actor = next((a for a in cinema.load().get("characters", []) if asset_id and a.get("id") == asset_id), None)
-    if kind == "character" and selected_actor and cinema.uses_lora(selected_actor):
-        raise ValueError("Character images are not rendered while Use LoRA is on")
     notes = (notes or "").strip()
     style_key = normalize_style(style) if style else "realistic"
     if not style:
@@ -6544,17 +6506,6 @@ async def _queue_cinema_sheet_job(
         if manual and len(old) + look_sheets.view_count(kind) > cinema.MAX_ASSET_IMAGES:
             raise ValueError("Not enough image slots for Look Sheets; remove existing card images first")
         prompt = look_sheets.prompt(kind, notes, style_line, outfit=len(refs) == 2)
-    character_lora = None
-    if kind == "character" and previous_asset and cinema.uses_lora(previous_asset):
-        character_lora = find_spec(lora_id=previous_asset["lora_id"])
-        if not character_lora or not spec_ready(character_lora):
-            raise ValueError("The character LoRA file is not ready")
-        graph = "ref2va" if has_ref else "fl2va"
-        if graph not in (character_lora.get("graphs") or ["fl2va", "ref2va"]):
-            raise ValueError("The character LoRA is not compatible with this image render type")
-        trigger = str(previous_asset.get("trigger") or "").strip()
-        if trigger:
-            prompt = trigger + ", " + prompt
     asset_payload: dict[str, Any] = {
         **(previous_asset or {}),
         "name": name,
@@ -6589,11 +6540,7 @@ async def _queue_cinema_sheet_job(
         "sheet_spectrum_full": True,
     }
     still = still_catalog_spec()
-    if character_lora:
-        gen_kwargs["lora_id"] = character_lora["id"]
-        gen_kwargs["lora_name"] = character_lora["file"]
-        gen_kwargs["lora_strength"] = previous_asset.get("lora_strength", 0.7)
-    elif sheet_method == "standard" and still and spec_ready(still):
+    if sheet_method == "standard" and still and spec_ready(still):
         gen_kwargs["lora_id"] = still.get("id") or ""
         gen_kwargs["lora_name"] = still.get("file") or ""
         gen_kwargs["lora_strength"] = still.get("strength") or 1.0
@@ -6641,8 +6588,6 @@ async def _queue_cinema_sheet_job(
 
 def _asset_needs_sheet(asset: Any, *, force: bool = False) -> bool:
     if not isinstance(asset, dict):
-        return False
-    if cinema.uses_lora(asset):
         return False
     if not str(asset.get("name") or "").strip():
         return False
@@ -6885,12 +6830,6 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
             kind = str(asset.get("kind") or "")
             if kind not in ("character", "creature", "vehicle", "location") or not _asset_needs_sheet(asset):
                 continue
-            if kind == "character" and asset.get("lora_id"):
-                if not any(j.get("sheet_asset_id") == asset.get("id") and j.get("status") in ("queued", "running") for j in _jobs):
-                    await _queue_cinema_sheet_job(kind=kind, name=asset.get("name") or "", notes=asset.get("notes") or "",
-                                                  asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
-                                                  aspect=body.aspect, style=style)
-                raise HTTPException(409, "The LoRA character image is being prepared; render the scene again when it is done")
             await _generate_cinema_image_studio_sheet(
                 kind=kind, name=str(asset.get("name") or ""), notes=str(asset.get("notes") or ""),
                 asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
@@ -7376,10 +7315,7 @@ async def cinema_produce(body: CinemaProduceBody):
     still_lock = bool(cast_refs)
     identity_plans = [_asset_plan(p, shot.get("bindings"), lib)
                       for p, shot in zip(prompts, to_queue)]
-    # Multishot uses one adapter stack for the whole pack. Character identities
-    # need separate per-shot stacks, including when all actors are LoRA-only.
     if any((shot.get("first_frame_name") and not (want_seamless and body.seamless_backend == "continuum" and shot.get("mode") == "t2v")) or (plan["ref_images"] and body.seamless_backend != "continuum")
-           or any(cinema.uses_lora(a) for a in plan.get("hits", []))
            for shot, plan in zip(to_queue, identity_plans)):
         want_seamless = False
     if want_seamless and still_lock and body.seamless_backend != "continuum":
@@ -7998,10 +7934,9 @@ async def cinema_ai_plan(body: CinemaAIPlanBody):
             raise HTTPException(503, "aiDirector.offline")
         model = await llm.resolve_model(body.model or _director_model)
         clip = int(current.get("duration") or 5)
-        names = [a.get("lora_file") for a in current.get("characters", []) if a.get("use_lora") and a.get("lora_file")]
         continuum_mode = body.continuum if body.continuum is not None else current.get('studio_mode') == 'seamless'
         messages = cinema_planner.planning_messages(current, cinema.project_json_template(),
-            body.story.strip(), body.shot_count, clip, body.ui_lang, guidance_block(names),
+            body.story.strip(), body.shot_count, clip, body.ui_lang, "",
             continuum=continuum_mode)
         try:
             package = await cinema_planner.generate_package(llm, model, messages, current, body.shot_count, continuum=continuum_mode)

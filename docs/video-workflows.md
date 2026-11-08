@@ -79,7 +79,7 @@ Spectrum video prediction blend is configurable in engine settings: Light 0.25, 
 
 ### Director visual references
 
-Director Continuum uses the resolved visual references from each scene, including explicit asset bindings. Unique images are collected per take (maximum 9) and assigned only to their relevant native chunks. Section-local reference labels are mapped to fixed V39 `@R` slots; the native sampler accounts for first-frame offsets and active subsets. Ref2VA is selected when visual references exist. Character portraits no longer force the ordinary per-shot fallback for Continuum; Multishot retains that fallback. A first-frame guide is supported at the start of a New take. A new guide on a Continue scene or a separate character LoRA stack is rejected rather than silently changing the requested method.
+Director Continuum uses the resolved visual references from each scene, including explicit asset bindings. Unique images are collected per take (maximum 9) and assigned only to their relevant native chunks. Section-local reference labels are mapped to fixed V39 `@R` slots; the native sampler accounts for first-frame offsets and active subsets. Ref2VA is selected when visual references exist. Character portraits no longer force the ordinary per-shot fallback for Continuum; Multishot retains that fallback. A first-frame guide is supported at the start of a New take. A new guide on a Continue scene is rejected rather than silently changing the requested method.
 
 ### Director mode and reference detail defaults
 

@@ -66,11 +66,9 @@ class LookSheetsEndpointTests(unittest.IsolatedAsyncioTestCase):
         qwen.assert_not_called()
         self.assertEqual(enqueue.call_args.kwargs['sheet_method'], 'look_sheets')
 
-    async def test_missing_reference_and_lora_mode_do_not_queue(self):
+    async def test_missing_reference_does_not_queue(self):
         import server
-        with patch.object(server.cinema, 'load', return_value={'characters':[{'id':'a', 'kind':'character', 'use_lora':True}]}), patch.object(server, 'generate', AsyncMock()) as generate:
-            with self.assertRaisesRegex(ValueError, 'LoRA'):
-                await server._queue_cinema_sheet_job(kind='character', name='Ada', asset_id='a', sheet_method='look_sheets', ref_image='ada.png')
+        with patch.object(server.cinema, 'load', return_value={'characters':[]}), patch.object(server, 'generate', AsyncMock()) as generate:
             with self.assertRaisesRegex(ValueError, 'source reference'):
                 await server._queue_cinema_sheet_job(kind='vehicle', name='Car', sheet_method='look_sheets')
         generate.assert_not_called()

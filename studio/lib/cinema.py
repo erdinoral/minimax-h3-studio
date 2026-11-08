@@ -1420,9 +1420,6 @@ def _copy_asset_stills(dest: dict[str, Any], src: dict[str, Any]) -> dict[str, A
         row["id"] = src.get("id") or row.get("id")
     if src.get("library_id"):
         row["library_id"] = src.get("library_id")
-    if src.get("lora_id"):
-        row["lora_id"] = src.get("lora_id")
-        row["lora_strength"] = src.get("lora_strength") or row.get("lora_strength") or 0.8
     if src.get("voice_audio"):
         row["voice_audio"] = src.get("voice_audio")
     return row
@@ -1573,18 +1570,7 @@ def _clean_asset(item: Any, kind: str) -> dict[str, Any]:
     voice_audio = str(item.get("voice_audio") or "").strip()
     if voice_audio:
         out["voice_audio"] = Path(voice_audio).name
-    if kind == "character":
-        out["lora_id"] = str(item.get("lora_id") or "").strip()
-        out["use_lora"] = bool(item.get("use_lora", bool(out["lora_id"])))
-        try:
-            out["lora_strength"] = float(item.get("lora_strength") if item.get("lora_strength") is not None else 0.8)
-        except (TypeError, ValueError):
-            out["lora_strength"] = 0.8
     return out
-
-
-def uses_lora(asset: dict) -> bool:
-    return bool(asset.get("use_lora", bool(asset.get("lora_id")))) and asset.get("kind", "character") == "character"
 
 
 def new_asset(kind: str, **fields: Any) -> dict[str, Any]:
@@ -1602,7 +1588,7 @@ def upsert_asset(kind: str, asset: dict[str, Any]) -> dict[str, Any]:
     if idx >= 0:
         items[idx] = cleaned
     else:
-        if not _asset_has_still(asset) and not asset.get("lora_id"):
+        if not _asset_has_still(asset):
             donor = _library_asset(kind, cleaned["name"])
             if donor:
                 cleaned = _clean_asset({**donor, "id": cleaned["id"], "name": cleaned["name"],
@@ -1697,7 +1683,6 @@ def asset_mentioned(text: str, asset: dict[str, Any]) -> bool:
             text = cast.group(1)
         else:
             text = re.sub(r"CAST VOICE BIBLE[^\n]*\n(?:[^\n]+\n)*", "", text or "", flags=re.I)
-            text = re.sub(r"^Character .+ uses the learned identity:.*$", "", text, flags=re.M)
             text = re.sub(r"<d>.*?</d>", "", text, flags=re.S | re.I)
     if _hit_token(text, asset.get("trigger") or "") or _hit_token(text, asset.get("name") or ""):
         return True
@@ -1915,20 +1900,12 @@ def bind_prompt(
             break
     refs = refs[:9]
     bound_rows = bound_rows[:9]
-    chosen_lora = (lora_id or "").strip()
-    chosen_strength = None
-    if not chosen_lora:
-        for h in hits:
-            if h.get("kind") == "character" and h.get("lora_id"):
-                chosen_lora = str(h["lora_id"])
-                chosen_strength = h.get("lora_strength")
-                break
     return {
         "prompt": annotate_prompt(text, hits, bound_rows) if hits else (text or "").strip(),
         "ref_images": refs,
         "hits": hits,
-        "lora_id": chosen_lora,
-        "lora_strength": chosen_strength,
+        "lora_id": (lora_id or "").strip(),
+        "lora_strength": None,
         "has_character": any(h.get("kind") == "character" for h in hits),
         "has_location": any(h.get("kind") == "location" for h in hits),
         "has_vehicle": any(h.get("kind") == "vehicle" for h in hits),
@@ -2044,7 +2021,7 @@ def _library_asset(kind: str, name: str) -> dict[str, Any] | None:
     _, group = asset_kind_key(kind)
     for card in load_library().get(group) or []:
         if " ".join(str(card.get("name") or "").split()).casefold() == key:
-            if _asset_has_still(card) or (kind == "character" and uses_lora(card) and card.get("lora_id")):
+            if _asset_has_still(card):
                 return {**card, "library_id": card.get("library_id") or card.get("id")}
     return None
 
@@ -2073,7 +2050,7 @@ def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: lis
         # A new cast member inherits the saved actor, not an AI-invented face.
         # Existing film cards remain authoritative, including deliberately removed images.
         donor = (_library_asset(kind, name) if reuse_library
-                 and not prev and not _asset_has_still(raw) and not raw.get("lora_id") else None)
+                 and not prev and not _asset_has_still(raw) else None)
         if donor:
             prev = {**donor, "id": str(uuid.uuid4())}
         merged = {
@@ -2088,10 +2065,6 @@ def _merge_named_assets(kind: str, existing: list[dict[str, Any]], incoming: lis
         for field in ("library_id", "source_ref", "sheet_overview", "sheet_method", "voice_audio", "trigger", "url"):
             if prev.get(field):
                 merged[field] = prev[field]
-        if kind == "character":
-            merged["lora_id"] = raw.get("lora_id") or prev.get("lora_id") or ""
-            merged["use_lora"] = raw.get("use_lora", prev.get("use_lora", bool(merged["lora_id"])))
-            merged["lora_strength"] = raw.get("lora_strength", prev.get("lora_strength", 0.8))
         by_key[key] = _clean_asset(merged, kind)
         if key not in order:
             order.append(key)
@@ -2131,7 +2104,7 @@ def bound_character_portraits(text: str, lib: Optional[dict[str, Any]] = None) -
     files: list[str] = []
     seen: set[str] = set()
     for hit in match_prompt(text, lib):
-        if hit.get("kind") != "character" or uses_lora(hit):
+        if hit.get("kind") != "character":
             continue
         for file in character_portrait_files(hit):
             if file not in seen:
@@ -2163,8 +2136,6 @@ def storyboard_frame_refs(
     out: list[dict[str, str]] = []
     for hit in hits:
         kind = str(hit.get("kind") or "")
-        if kind == "character" and uses_lora(hit):
-            continue
         files = character_portrait_files(hit) if kind != "location" else [
             str((im.get("file") if isinstance(im, dict) else im) or "").strip()
             for im in hit.get("images") or []
@@ -2333,8 +2304,6 @@ def lint_shots(
                     and hit.get("id") not in {b.get("asset_id") for b in bindings if isinstance(b, dict)}
                     and name.casefold() not in cast_field):
                 add("warn", "cast_unbound", idx, sid, name=name)
-            if uses_lora(hit):
-                continue
             if name and name not in stills_flagged and not character_portrait_files(hit):
                 stills_flagged.add(name)
                 add("info", "no_still", idx, sid, name=name)
@@ -2929,8 +2898,6 @@ def _blank_seamless_template() -> dict[str, Any]:
                 "notes": "",
                 "voice": "",
                 "trigger": "",
-                "lora_id": "",
-                "lora_strength": 0.8,
             }
         ],
         "locations": [{"name": "", "notes": "", "trigger": ""}],
@@ -2987,8 +2954,6 @@ def project_json_template(kind: str = "") -> dict[str, Any]:
                 "notes": "",
                 "voice": "",
                 "trigger": "",
-                "lora_id": "",
-                "lora_strength": 0.8,
             }
         ],
         "locations": [{"name": "", "notes": "", "trigger": ""}],
@@ -3024,9 +2989,6 @@ def _asset_public(asset: Any, kind: str) -> dict[str, Any]:
     }
     if kind == "character":
         out["voice"] = item.get("voice") or ""
-        if item.get("lora_id"):
-            out["lora_id"] = item.get("lora_id") or ""
-            out["lora_strength"] = item.get("lora_strength") or 0.8
     if item.get("trigger") and item.get("trigger") != item.get("name"):
         out["trigger"] = item.get("trigger") or ""
     return out

@@ -182,24 +182,6 @@ CATALOG: list[dict[str, Any]] = [{
         "preset": False,
     },
     {
-        "id": "pinkfluffybunny",
-        "label": "PinkFluffyBunny (character)",
-        "file": "PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors",
-        "aliases": ["PinkFluffyBunny-pruned-v1-rank128.safetensors"],
-        "steps": None,
-        "sampler": None,
-        "scheduler": None,
-        "strength": 0.75,
-        "graphs": ["fl2va", "ref2va"],
-        "hint": "Character LoRA · New video + Ref/face · same steps",
-        "size_hint": "~2.3 GB",
-        "url": (
-            "https://huggingface.co/SexGod1979/PinkFluffyBunny-MiniMax-H3/resolve/main/"
-            "PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors?download=true"
-        ),
-        "preset": False,
-    },
-    {
         "id": "cinematic-look",
         "label": "Cinematic Look (DY)",
         "file": "minimax_h3_cinematic_look_v01.safetensors",
@@ -535,7 +517,7 @@ def filename_from_url(url: str, fallback: str = "") -> str:
 
 
 def apply_selected_triggers(text: str, lora_id: str = "", file: str = "") -> str:
-    """Apply every loaded adapter's trigger, including secondary character adapters."""
+    """Apply every loaded adapter's trigger, including secondary adapters."""
     names = [name.strip() for name in (file or "").split("|") if name.strip()]
     specs = [find_spec(file=name) for name in names] if names else [find_spec(lora_id=lora_id)]
     specs.sort(key=lambda spec: bool((spec or {}).get("trigger_position") == "start"))

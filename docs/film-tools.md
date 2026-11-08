@@ -2,14 +2,12 @@
 
 Pinokio now provides **Optional Film LoRAs** and **Optional Film Tools**. These are separate from the default installation. Studio Settings links to the installed ComfyUI tools.
 
-The adapter catalog includes Fyre and AI30 (characters), Mara Whitlock and Albedo's H3 versions, Natural Face & Speech v2, Camera Motion, FaceSwap REF2VA, Character Swap, Focus Slider and Detail Slider. The installer compares existing SHA256 hashes, reuses matching files, and validates the downloaded container, size and published hash before activation. It does not overwrite a valid file with an HTML error response.
+The adapter catalog includes Natural Face & Speech v2, Camera Motion, FaceSwap REF2VA, Character Swap, Focus Slider and Detail Slider. The installer compares existing SHA256 hashes, reuses matching files, and validates the downloaded container, size and published hash before activation. It does not overwrite a valid file with an HTML error response.
 
 Some Civitai files require authentication. Enter a Civitai API key under **Settings → H3 LoRAs**, then download the desired catalog entry. The key is stored only in local runtime data, is never returned by the API, and is only attached to requests to civitai.com. No key is bundled with the app.
 
 ## Adapter usage
 
-- **Fyre:** trigger `Fyre`; **AI30:** trigger `ai30`. Both are offered for FL2VA; Ref2VA performance has not been established.
-- **Mara:** trigger `marawhitlock`; **Albedo:** trigger `lbd0c1tr0n`. Only the MiniMax H3 versions belong in this app's catalog.
 - **Natural Face & Speech v2:** no trained trigger; recommended starting strength 0.6–0.8, 15–30 steps, T2V/I2V. Published speech examples concern English; Turkish output needs testing.
 - **Camera Motion:** `camera motion` is placed first in the actual model prompt, even after reference/continuation instructions are assembled. Starting strength 0.8; describe the desired movement.
 - **FaceSwap / Character Swap:** provide a source video and target-character image in Reference or Motion Transfer. Character Swap has no trained trigger. Name the person to replace, especially with multiple people in frame. These are experimental edits, not guarantees of timing or expression preservation.

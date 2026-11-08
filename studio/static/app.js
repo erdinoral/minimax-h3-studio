@@ -2214,7 +2214,7 @@
     }
   }
 
-  const LORA_CATEGORIES = ["speed", "character", "style", "motion", "speech", "camera", "swap", "other"];
+  const LORA_CATEGORIES = ["speed", "style", "motion", "speech", "camera", "swap", "other"];
   function loraCategory(spec) {
     let custom = {};
     try { custom = JSON.parse(localStorage.getItem("h3-lora-categories") || "{}"); } catch {}
@@ -2225,34 +2225,11 @@
     if (/camera[-_ ]?motion/.test(name)) return "camera";
     if (LORA_CATEGORIES.includes(spec.category)) return spec.category;
     if (/turbo|lightx|flashgen|fasth3|[468][-_ ]?step|pdd/.test(name)) return "speed";
-    if (/pinkfluffy|chr[_-]|character|albedo|masafy/.test(name)) return "character";
     if (/combat|motion|physics|wushu/.test(name)) return "motion";
     if (/cinematic|realism|photoreal|style|anime|animation/.test(name)) return "style";
     return "other";
   }
   function loraCategoryLabel(category) { return tt("lora.category." + category); }
-
-  function cinemaLoraOptions(selected) {
-    const catalog = state.loraCatalog || [];
-    const opts = ['<option value="">' + htmlEsc(tt("ayar.loraNoneOpt")) + "</option>"];
-    catalog.forEach((spec) => {
-      if (!spec.id || !spec.file || loraCategory(spec) !== "character") return;
-      if (spec.ready === false) return;
-      const graphs = spec.graphs || ["fl2va", "ref2va"];
-      if (!graphs.includes("ref2va")) return;
-      const sel = spec.id === selected ? " selected" : "";
-      opts.push(
-        '<option value="' +
-          htmlEsc(spec.id) +
-          '"' +
-          sel +
-          ">" +
-          htmlEsc(spec.label || spec.id) +
-          "</option>"
-      );
-    });
-    return opts.join("");
-  }
 
   function htmlEsc(s) {
     return String(s || "")
@@ -2446,26 +2423,18 @@
 
   function cinemaCardHtml(item, kind) {
     const isChar = kind === "character";
-    const useLora = isChar && (item.use_lora ?? !!item.lora_id);
     const nameLabel = isChar ? tt("cinema.charName") : tt("cinema.locName");
     const descLabel = tt("cinema.desc");
     const namePh = isChar ? "Ada" : "Rooftop";
     const descPh = isChar ? tt("cinema.charDescPh") : tt("cinema.locDescPh");
-    const lora = useLora
-      ? '<label class="cinema-field-label">' +
-        htmlEsc(tt("cinema.charLora")) +
-        '</label><select data-field="lora_id">' +
-        cinemaLoraOptions(item.lora_id || "") +
-        "</select>"
-      : "";
     return (
       '<div class="cinema-card" data-id="' +
       htmlEsc(item.id) +
       '" data-kind="' +
       kind +
       '">' +
-      (useLora ? "" : cinemaFolderHtml(item, kind)) +
-      '<div class="fields"' + (useLora ? ' style="grid-column: 1 / -1"' : '') + '>' +
+      cinemaFolderHtml(item, kind) +
+      '<div class="fields">' +
       '<label class="cinema-field-label">' +
       nameLabel +
       "</label>" +
@@ -2474,7 +2443,6 @@
       '" value="' +
       htmlEsc(item.name) +
       '" />' +
-      (isChar ? '<label class="cinema-character-rebuild-toggle"><span>' + htmlEsc(tt("cinema.useLora")) + '</span><input type="checkbox" data-field="use_lora"' + (useLora ? ' checked' : '') + ' /><span class="cinema-ios-track" aria-hidden="true"><span></span></span></label>' : '') +
       '<label class="cinema-field-label">' +
       descLabel +
       "</label>" +
@@ -2493,8 +2461,7 @@
           htmlEsc(item.voice) +
           "</textarea>"
         : "") +
-      lora +
-      (useLora ? '<div class="row-btns">' : '<div class="row-btns"><label class="file-pick file-pick-inline">' +
+      '<div class="row-btns"><label class="file-pick file-pick-inline">' +
       '<input type="file" class="file-pick-input cinema-img" accept="image/*" multiple' +
       (cinemaAssetImages(item).length >= 5 ? " disabled" : "") +
       " />" +
@@ -2505,11 +2472,11 @@
       htmlEsc(tf("cinema.imgMax", { slug: cinemaCallSlug(item.name) })) +
       "</span>" +
       '<button type="button" class="btn-secondary cinema-asset-regen">' + htmlEsc(tt("cinema.regenEntity")) + "</button>" +
-      '<label class="file-pick file-pick-inline"><input type="file" class="file-pick-input cinema-look-ref" accept="image/*" /><span class="file-pick-btn">' + htmlEsc(tt("cinema.lookFromRef")) + '</span></label>') +
-      (!useLora && item.sheet_overview ? '<button type="button" class="btn-secondary cinema-img-zoom" data-url="/api/refs/' + htmlEsc(encodeURIComponent(item.sheet_overview)) + '" data-name="' + htmlEsc(item.name) + '">' + htmlEsc(tt("cinema.lookOverview")) + '</button>' : '') +
+      '<label class="file-pick file-pick-inline"><input type="file" class="file-pick-input cinema-look-ref" accept="image/*" /><span class="file-pick-btn">' + htmlEsc(tt("cinema.lookFromRef")) + '</span></label>' +
+      (item.sheet_overview ? '<button type="button" class="btn-secondary cinema-img-zoom" data-url="/api/refs/' + htmlEsc(encodeURIComponent(item.sheet_overview)) + '" data-name="' + htmlEsc(item.name) + '">' + htmlEsc(tt("cinema.lookOverview")) + '</button>' : '') +
       '<button type="button" class="btn-ghost cinema-del">' +
       htmlEsc(tt("cinema.deleteAsset")) +
-      "</button></div>" + (!useLora ? cinemaLookReferenceHtml(kind, item.id) : "") + "</div></div>"
+      "</button></div>" + cinemaLookReferenceHtml(kind, item.id) + "</div></div>"
     );
   }
 
@@ -2526,7 +2493,6 @@
         ? item.voice_audio
         : tt("pick.none");
     }
-    $("cinema-character-lora").innerHTML = cinemaLoraOptions(item.lora_id || "");
     modal.classList.remove("hidden");
     modal.setAttribute("aria-hidden", "false");
   }
@@ -2568,7 +2534,6 @@
       name: $("cinema-character-name")?.value || "",
       notes: $("cinema-character-notes")?.value || "",
       voice: $("cinema-character-voice")?.value || "",
-      lora_id: $("cinema-character-lora")?.value || "",
     };
     if (item.voice_audio) payload.voice_audio = item.voice_audio;
     const saved = await patchCinemaAsset("character", item.id, payload);
@@ -4399,7 +4364,7 @@ function filmHasStillCards() {
 
 function setCinemaAssetTab(kind, tab, skipLibraryLoad = false) {
     const k = cinemaKindMeta(kind).kind;
-    const t = tab === "lora" && k === "character" ? "lora" : tab === "create" ? "create" : tab === "library" ? "library" : "list";
+    const t = tab === "create" ? "create" : tab === "library" ? "library" : "list";
     document.querySelectorAll(`.cinema-asset-tabs[data-asset-kind="${k}"] .chip`).forEach((btn) => {
       btn.classList.toggle("on", btn.dataset.assetTab === t);
     });
@@ -4407,7 +4372,6 @@ function setCinemaAssetTab(kind, tab, skipLibraryLoad = false) {
       panel.classList.toggle("hidden", panel.dataset.assetPanel !== t);
     });
     if (t === "library" && !skipLibraryLoad) void loadCinemaLibrary();
-    if (t === "lora") void loadCinemaActorLoras();
   }
 
   let cinemaLibraryModal = null;
@@ -4968,64 +4932,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     syncCinemaMusicWorkflow();
     void saveCinema(true);
   }
-
-  let cinemaActorLoraRequest = 0;
-  async function loadCinemaActorLoras() {
-    await loadLoras();
-    const select = $("cinema-actor-lora");
-    if (!select) return;
-    const previous = select.value;
-    select.innerHTML = cinemaLoraOptions(previous);
-    if (select.value) await selectCinemaActorLora();
-  }
-  async function selectCinemaActorLora() {
-    const request = ++cinemaActorLoraRequest;
-    const id = $("cinema-actor-lora")?.value;
-    const spec = (state.loraCatalog || []).find(x => x.id === id);
-    $("cinema-actor-lora-name").value = spec?.label || "";
-    $("cinema-actor-lora-trigger").value = "";
-    $("cinema-actor-lora-notes").value = "";
-    $("cinema-actor-lora-guide").textContent = "";
-    $("cinema-actor-lora-status").textContent = "";
-    $("cinema-actor-lora-strength").value = "0.7";
-    if (!spec) return;
-    try {
-      const response = await fetch("/api/loras/guidance?file=" + encodeURIComponent(spec.file));
-      const row = await response.json();
-      if (!response.ok) throw new Error(errDetail(row));
-      if (request !== cinemaActorLoraRequest) return;
-      $("cinema-actor-lora-trigger").value = row.triggers || spec.trigger || "";
-      $("cinema-actor-lora-guide").textContent = row.guide || "";
-    } catch (e) {
-      if (request === cinemaActorLoraRequest) $("cinema-actor-lora-status").textContent = String(e.message || e);
-    }
-  }
-  async function addCinemaLoraActor() {
-    const button = $("cinema-actor-lora-add");
-    const spec = (state.loraCatalog || []).find(x => x.id === $("cinema-actor-lora")?.value);
-    const name = $("cinema-actor-lora-name").value.trim();
-    const trigger = $("cinema-actor-lora-trigger").value.trim();
-    const appearance = $("cinema-actor-lora-notes").value.trim();
-    const strength = Number($("cinema-actor-lora-strength").value);
-    if (!spec?.ready || !name || !trigger || !Number.isFinite(strength) || strength < 0 || strength > 2) {
-      $("cinema-actor-lora-status").textContent = tt("cinema.loraActorNeed");
-      return;
-    }
-    button.disabled = true;
-    try {
-      const asset = await addCinemaAsset("character", {
-        name, trigger, notes: [trigger, appearance].filter(Boolean).join(", "),
-        lora_id: spec.id, lora_strength: strength, use_lora: true,
-      });
-      if (asset?.id) {
-        setCinemaAssetTab("character", "list");
-        if (filmWorkspace) filmWorkspace.render();
-      }
-    } finally { button.disabled = false; }
-  }
-  $("cinema-actor-lora")?.addEventListener("change", () => void selectCinemaActorLora());
-  $("cinema-actor-lora-refresh")?.addEventListener("click", () => void loadCinemaActorLoras());
-  $("cinema-actor-lora-add")?.addEventListener("click", () => void addCinemaLoraActor());
 
   async function addCinemaAsset(kind, fields = {}) {
     const meta = typeof cinemaKindMeta === "function" ? cinemaKindMeta(kind) : null;
@@ -10939,7 +10845,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         saved[spec.file] = categorySelect.value;
         localStorage.setItem("h3-lora-categories", JSON.stringify(saved));
         fillLoraSelect();
-        renderCinemaAssetCards("character", { force: true });
       };
       card.appendChild(categorySelect);
       categoryItems.appendChild(card);
@@ -11162,7 +11067,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     await loadLoras(false);
     syncLoraSelection(selectedLoraIds().filter(id => state.loraCatalog.some(s => s.id === id && s.ready)));
     await loadH3Models();
-    await loadCinemaActorLoras();
   });
 
   async function loadLoras(retry = true) {
@@ -12483,8 +12387,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const field = e.target.dataset.field;
       if (!field) return;
       void patchCinemaAsset(kind, id, { [field]: e.target.type === "checkbox" ? e.target.checked : e.target.value }).then(() => {
-        if (field === "use_lora") renderCinemaAssetCards(kind, { force: true });
-        if (field === "name" || field === "use_lora") renderCinema();
+        if (field === "name") renderCinema();
       });
     });
     $(rootId)?.addEventListener("change", async (e) => {

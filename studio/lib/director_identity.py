@@ -76,7 +76,5 @@ def prompt_for_shot(shot, lib, silent=False):
 
 def manifest(plan):
     return [{"asset_id":a.get("id"),"name":a.get("name"),"voice":a.get("voice") or "",
-             "use_lora":cinema.uses_lora(a),"lora_id":a.get("lora_id") if cinema.uses_lora(a) else "",
-             "lora_strength":a.get("lora_strength") if cinema.uses_lora(a) else None,
              "reference_files":[r["file"] for r in plan.get("rows",[]) if (r.get("asset") or {}).get("id")==a.get("id")]}
             for a in plan.get("hits",[]) if isinstance(a,dict) and a.get("kind")=="character"]

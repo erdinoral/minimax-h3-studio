@@ -44,18 +44,11 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
         hits, rows = result["hits"], result["rows"]
         automatic_ids = {b.get("asset_id") for b in bindings if b.get("files") is None}
         fixed_files.update(f for b in bindings for f in (b.get("files") or []))
-        # Explicit picture selections must not suppress named LoRA actors.
-        # Only add learned identities; image-reference selections stay explicit.
-        selected_ids = {a.get("id") for a in hits}
-        for actor in cinema.match_prompt(text, lib):
-            if cinema.uses_lora(actor) and actor.get("id") not in selected_ids:
-                hits.append(actor)
-                selected_ids.add(actor.get("id"))
     else:
         hits = cinema.match_prompt(text, lib)
         rows = [{**im, "asset": asset} for asset in hits
-                for im in cinema.mentioned_images(text, asset) if not cinema.uses_lora(asset)]
-        missing = [a.get("name", "Asset") for a in hits if not cinema.uses_lora(a) and not cinema.mentioned_images(text, a)]
+                for im in cinema.mentioned_images(text, asset)]
+        missing = [a.get("name", "Asset") for a in hits if not cinema.mentioned_images(text, a)]
         if missing:
             raise ValueError("Reference image is missing: " + ", ".join(missing))
         for asset in hits:
@@ -63,22 +56,6 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
                 fixed_files.update(im["file"] for im in cinema.mentioned_images(text, asset))
             else:
                 automatic_ids.add(asset.get("id"))
-    for actor in hits:
-        if not cinema.uses_lora(actor):
-            continue
-        from .loras import find_spec, spec_ready
-        from .lora_guidance import guidance
-        spec = find_spec(lora_id=actor.get("lora_id") or "")
-        if not spec or not spec_ready(spec):
-            raise ValueError("A ready character LoRA file must be selected: " + actor.get("name", ""))
-        try:
-            trigger = guidance(spec["file"]).get("triggers")
-        except (ValueError, OSError):
-            trigger = ""
-        trigger = trigger or spec.get("trigger") or actor.get("trigger") or ""
-        text += "\nCharacter " + actor.get("name", "") + " uses the learned identity: " + trigger + "."
-        if actor.get("voice"):
-            text += " Voice: " + actor["voice"] + "."
     ordered = []
     by_file = {}
     for row in rows:
@@ -102,9 +79,8 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
         raise ValueError(f"At most {limit} references can be used in this shot; select fewer.")
     if any(int(n) < 1 or int(n) > len(ordered) for n in re.findall(r"<Picture\s+(\d+)>", text, re.I)):
         raise ValueError("A Picture number in the prompt is not in the selected reference list")
-    lora_owner = next((a for a in hits if a.get("kind") == "character" and cinema.uses_lora(a) and a.get("lora_id")), {})
     return {"prompt": text, "rows": ordered, "ref_images": [r["file"] for r in ordered],
-            "hits": hits, "lora_id": lora_owner.get("lora_id", ""), "lora_strength": lora_owner.get("lora_strength"),
+            "hits": hits, "lora_id": "", "lora_strength": None,
             **{"has_" + k[:-1]: any(a.get("kind") == k[:-1] for a in hits) for k in film_project.KINDS}}
 
 

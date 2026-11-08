@@ -2,7 +2,6 @@ import ast
 import asyncio
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Optional, Literal
 from pydantic import BaseModel, Field, field_validator
 from fastapi import HTTPException
@@ -29,7 +28,6 @@ class DirectorChains(unittest.IsolatedAsyncioTestCase):
                   Any=Any, Optional=Optional, Literal=Literal, HTTPException=HTTPException,
                   continuum=continuum, batch=batch, _queue_cinema_seamless=seamless,
                   workflow_capabilities=capabilities, _sage_mode=lambda b: 'disabled',
-                  cinema=SimpleNamespace(uses_lora=lambda a: bool(a.get('use_lora'))),
                   _clip_record=lambda id: {'id': id, 'director_root_id': 'old-root'},
                   _save_jobs=lambda: None, _jobs=[], _gallery=[])
         ns['normalize_quality'] = lambda value: value

@@ -44,9 +44,8 @@ After updating in Pinokio, stop and start Studio, then reload the browser to loa
 
 ## v9.0.0 — Film & AI Director update
 
-- **AI Director:** describe your story and target duration inside Director. Your configured LLM creates character/location cards and detailed, editable scenes directly in the film. Existing cast, voice settings and LoRA assignments are preserved. Review the plan, then start production; JSON import/export remains available.
+- **AI Director:** describe your story and target duration inside Director. Your configured LLM creates character/location cards and detailed, editable scenes directly in the film. Existing cast and voice settings are preserved. Review the plan, then start production; JSON import/export remains available.
 - **Shared asset references:** explicitly select characters, locations, creatures and vehicles in Scene or Director. Continuations combine the previous final frame with the selected asset references. Standalone Scene no longer silently borrows Director characters by name.
-- **Character LoRA mode:** keep the character name and voice, use a compatible character adapter, and skip automatic character image generation. Previously generated card images are ignored while this mode is enabled.
 - **Organized LoRAs:** categorized selectors, automatic trigger words from available metadata, and up to three adapters with independent weights. Installed catalog files are reused when downloading.
 - **Optional H3 Singularity:** an actual main-model selector in Settings, with a separate approximately 21 GB download. Experimental; improved quality and character identity are not guaranteed. Standard installation keeps MiniMax H3.
 - **Production tools:** four vehicle views, individual asset-image deletion, shot review and previewed repairs, and trimmed video/audio reference uploads.
@@ -337,13 +336,11 @@ Production **Ayarlar**: named list — **click a LoRA to download it**, then **U
 | **Spatial & Physics** | ~148 MB | Collision / gravity / objects · stacks with turbo. |
 | **Ref2V Turbo (8 step)** | ~933 MB | Ref/face only · 8-step · skipped on T2V (fills the Ref turbo gap). |
 | **Photoreal still** | ~148 MB | Character/location sheets only · trigger `ph0t0r34l` · **not** applied to the video queue. |
-| **PinkFluffyBunny** | ~2.3 GB | Character LoRA · works on new video and Ref/face. |
-
 Missing files download into `app/models/loras` from Hugging Face when you click the name (or **Uygula**). Same files are also in Pinokio **Download Models**.
 
 Drop extra H3 `.safetensors` via **LoRA ekle**, paste a Hugging Face **resolve** URL into **URL’den al**, or copy the file into `app/models/loras` — they appear in the same list. Studio hides SDXL / Pony / Wan / Flux / ClipProj files; those are not MiniMax H3 video LoRAs. Catalog hints may mention 4-step / 6-step as a recommendation only.
 
-Cinema studio has the **same LoRA list** next to duration/steps (film-wide; still-only rows stay in the shop). Character cards still have an optional per-character LoRA for Ref2VA identity shots. For a consistent person without a character LoRA, use **Yüz referansı** or a Direktör still (Ref2VA). If **Photoreal still** is on disk, sheet jobs pick it automatically.
+Cinema studio has the **same LoRA list** next to duration/steps (film-wide; still-only rows stay in the shop). Character identity comes from image references: use **Yüz referansı** or a Direktör still (Ref2VA). If **Photoreal still** is on disk, sheet jobs pick it automatically.
 
 **Post-pass (one, no community workflow JSON):** next to quality chips — **1.5× upscale** (`ImageScaleBy` lanczos) or **24→48 VFI** when a FILM/RIFE file is in `app/models/frame_interpolation`. Not both.
 
@@ -416,7 +413,7 @@ Optional full v2 extras (LLM writer, `context_pin`, accelerators) stay out of St
 
 **Sahne → Direktör** opens a two-column cinema studio for long-form films.
 
-- **Sol sütun (üst/alt):** **Karakter ekle+** opens a card (name, description, reference still; optional character LoRA). **Mekan ekle+** is the same for locations (region name, description, still).
+- **Sol sütun (üst/alt):** **Karakter ekle+** opens a card (name, description, reference still). **Mekan ekle+** is the same for locations (region name, description, still).
 - **Film setup presets:** the first pill (**Ön ayar / Preset**) fills camera, color palette, lighting, era, purpose, style, and audio mode. You can still override any pill afterwards. **Auto** clears those locks.
 - **Gallery delete** removes the card and the files: studio clip, last frame, Comfy `app/output/video/H3_Studio` copy, and uploaded last-frame stills.
 - **Kalite:** duration, 480/720/1080, steps, film LoRA, and **Kesintisiz zincir** live in this panel and drive the queue.
@@ -850,15 +847,9 @@ Your feedback on video continuation, file selection, queue control, LoRAs, scene
 
 The model is covered by the [MiniMax H3 Community License](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE). Review it before commercial use. ComfyUI is GPL-3.0.
 
-### LoRA actors
-
-Director → Characters → LoRA adds an installed character LoRA as a film actor with its name, trigger, appearance notes and strength. The actor is added in Use LoRA mode and used directly in video generation without generating character visuals. Style and acceleration LoRAs are not character identities.
-
-Character cards have a **Use LoRA** switch. When enabled, only the actor name, voice and LoRA selector are shown. No character sheet is generated (including forced rebuild); existing character images and appearance notes are not sent as visual references. The selected installed LoRA and its trigger supply identity directly to video generation. Disable the switch to restore the ordinary description/image workflow.
-
 ### Reusing library assets
 
-When JSON, AI Director, or a new asset card introduces a name matching a saved library asset of the same kind (character, creature, location, or vehicle), Studio links the saved images and, for characters, the character LoRA to the film instead of generating it again. Matching ignores capitalization and surrounding/repeated whitespace; partial names do not match. Existing film cards remain authoritative. Use **Regenerate characters** or the card regeneration action to create fresh images when wanted. Removing a film image does not automatically restore it from the library.
+When JSON, AI Director, or a new asset card introduces a name matching a saved library asset of the same kind (character, creature, location, or vehicle), Studio links the saved images to the film instead of generating it again. Matching ignores capitalization and surrounding/repeated whitespace; partial names do not match. Existing film cards remain authoritative. Use **Regenerate characters** or the card regeneration action to create fresh images when wanted. Removing a film image does not automatically restore it from the library.
 
 ### RefMod and automatic speed presets
 

@@ -291,7 +291,7 @@
         </div>
 
         <div id="panel-mode-cinema" class="hidden">
-          <p class="muted mode-hint">Higgsfield tarzı sinema stüdyosu: karakter + mekan kartları, çağırma kodu, karakter LoRA. Prompt’ta isim geçince görsel otomatik referans olur. Uzun film = shot zinciri.</p>
+          <p class="muted mode-hint">Higgsfield tarzı sinema stüdyosu: karakter + mekan kartları, çağırma kodu. Prompt’ta isim geçince görsel otomatik referans olur. Uzun film = shot zinciri.</p>
           <button type="button" class="cta" id="btn-open-cinema">Sinema stüdyosunu aç</button>
         </div>
 
@@ -1049,7 +1049,6 @@
                 <button type="button" class="chip on" data-asset-tab="list" id="cinema-char-tab-list">Bu film</button>
                 <button type="button" class="chip hidden" data-asset-tab="library" id="cinema-char-tab-library">Kütüphane</button>
                 <button type="button" class="chip" data-asset-tab="create" id="cinema-char-tab-create">Oluştur</button>
-                <button type="button" class="chip" data-asset-tab="lora" id="cinema-char-tab-lora">LoRA</button>
               </div>
               <div class="cinema-asset-tab-panel" data-asset-kind="character" data-asset-panel="list">
                 <p class="muted mode-hint" id="cinema-char-hint">Bu filmdeki karakterler. Shot metninde adını yazınca yüz kilitlenir. İstersen Kaydet ile kütüphaneye al.</p>
@@ -1064,23 +1063,6 @@
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="character" data-asset-panel="library">
                 <p class="muted mode-hint" id="cinema-char-lib-hint" data-i18n="ui.cinema-char-lib-hint">Kalıcı karakterler — Filme ekle ile buraya çek.</p>
                 <div id="cinema-char-library" class="cinema-library-list"></div>
-              </div>
-              <div class="cinema-asset-tab-panel hidden" data-asset-kind="character" data-asset-panel="lora">
-                <p class="muted mode-hint" data-i18n="cinema.loraActorHint">Karakter LoRA’sından oyuncu ekle. Görselleri karttaki Görsel oluştur ile üret.</p>
-                <label class="cinema-field-label">LoRA</label>
-                <select id="cinema-actor-lora"></select>
-                <button type="button" class="btn-ghost" id="cinema-actor-lora-refresh" data-i18n="ayar.loraRefresh">Yenile</button>
-                <label class="cinema-field-label" data-i18n="cinema.charName">Karakter adı</label>
-                <input id="cinema-actor-lora-name" />
-                <label class="cinema-field-label" data-i18n="cinema.loraActorTrigger">Tetikleyici</label>
-                <input id="cinema-actor-lora-trigger" />
-                <label class="cinema-field-label" data-i18n="cinema.loraActorAppearance">Karakterin görünümü (kıyafet, saç, yüz)</label>
-                <textarea id="cinema-actor-lora-notes" rows="3"></textarea>
-                <label class="cinema-field-label" data-i18n="cinema.loraActorStrength">LoRA gücü</label>
-                <input id="cinema-actor-lora-strength" type="number" min="0" max="2" step="0.05" value="0.7" />
-                <p id="cinema-actor-lora-guide" class="muted mode-hint"></p>
-                <button type="button" class="btn-secondary" id="cinema-actor-lora-add" data-i18n="cinema.loraActorAdd">Karakter olarak filme ekle</button>
-                <p id="cinema-actor-lora-status" class="muted" role="status"></p>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="character" data-asset-panel="create">
                 <p class="muted mode-hint" id="cinema-char-create-hint" data-i18n="ui.cinema-char-create-hint">Ayarlar ön ayarına göre · isteğe bağlı yüz fotoğrafı · son kare still · video silinir. Bittince otomatik kütüphaneye kaydolur.</p>
@@ -1301,7 +1283,6 @@
             <span class="file-pick-btn" id="cinema-character-voice-file-btn">Ses klibi (v2.7)</span>
             <span class="file-pick-name" id="cinema-character-voice-file-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
-          <label><span>Karakter LoRA</span><select id="cinema-character-lora"></select></label>
           <div class="row-btns">
             <button type="button" class="btn-secondary" id="btn-cinema-character-cancel" data-i18n="ui.btn-cinema-character-cancel">İptal</button>
             <button type="button" class="cta" id="btn-cinema-character-save" data-i18n="cinema.save">Kaydet</button>
@@ -1646,18 +1627,18 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=mcont1" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=nolora1" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
-  <script src="/static/lora-guidance.js?v=4" charset="utf-8"></script>
+  <script src="/static/lora-guidance.js?v=5" charset="utf-8"></script>
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=en1" charset="utf-8"></script>
+  <script src="/static/app.js?v=nolora1" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
-  <script src="/static/studio-guide.js?v=7" charset="utf-8"></script>
+  <script src="/static/studio-guide.js?v=8" charset="utf-8"></script>
   <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
 <script src="/static/h3-enhancements.js?v=3"></script>
   <script src="/static/video-workflows.js?v=13"></script>

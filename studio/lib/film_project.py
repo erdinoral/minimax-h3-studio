@@ -40,11 +40,6 @@ def resolve(shot, lib, exists, *, check_limit=True):
         snap = binding.get("snapshot")
         frozen = isinstance(snap, dict) and snap.get("id") == aid
         asset = copy.deepcopy(snap if frozen else asset)
-        from .cinema import uses_lora
-        # Live actor mode governs routing even when a shot has frozen visual refs.
-        if uses_lora(assets[aid]):
-            hits.append(copy.deepcopy(assets[aid]))
-            continue
         identity = str(asset.get("identity_id") or aid)
         if identity in identities:
             errors.append("Two looks of the same identity are selected: " + asset.get("name", aid))

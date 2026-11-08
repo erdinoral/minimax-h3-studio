@@ -61,15 +61,14 @@ class LibraryCharacterReuse(unittest.TestCase):
             self.assertFalse(actor['images'])
             self.assertNotIn('library_id', actor)
 
-    def test_ai_ingest_reuses_lora_only_actor_without_generating_portrait(self):
+    def test_legacy_lora_only_library_actor_is_not_reused(self):
         cinema.upsert_library_asset('character', {'id': 'nea-lib', 'name': 'NEA',
             'use_lora': True, 'lora_id': 'nea', 'lora_strength': 0.9})
         result = cinema.apply_ingest({'characters': [{'name': 'NEA'}]}, '')
         actor = result['characters'][0]
-        self.assertTrue(cinema.uses_lora(actor))
-        self.assertEqual(actor['lora_id'], 'nea')
-        self.assertEqual(actor['lora_strength'], 0.9)
-        self.assertEqual(actor['library_id'], 'nea-lib')
+        self.assertNotIn('library_id', actor)
+        for key in ('use_lora', 'lora_id', 'lora_strength'):
+            self.assertNotIn(key, actor)
 
     def test_manual_add_reuses_but_removing_images_does_not_restore_them(self):
         actor = cinema.upsert_asset('character', {'name': 'Lara'})

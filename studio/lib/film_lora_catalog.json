@@ -1,51 +1,5 @@
 [
   {
-    "id": "mara-whitlock",
-    "label": "Mara Whitlock",
-    "file": "Mara_Whitlock_H3_v1_000000750.safetensors",
-    "aliases": [],
-    "category": "character",
-    "graphs": [
-      "fl2va",
-      "ref2va"
-    ],
-    "strength": 0.8,
-    "trigger": "marawhitlock",
-    "url": "https://civitai.com/api/download/models/3368628?fileId=3256695",
-    "sha256": "733dac0c321fec5f939e7eed381a8311156d1946cd4c2f5bb662a818fac4cb8b",
-    "expected_bytes": 155110368,
-    "source": "https://civitai.com/models/2968829?modelVersionId=3368628",
-    "preset": false,
-    "steps": null,
-    "sampler": null,
-    "scheduler": null,
-    "hint": "Creator guidance; compatibility and quality require local testing",
-    "size_hint": "147.9 MB"
-  },
-  {
-    "id": "albedo-h3",
-    "label": "Albedo (H3 English Dub)",
-    "file": "AlbedoOverlordEng_H3_v1.safetensors",
-    "aliases": [],
-    "category": "character",
-    "graphs": [
-      "fl2va",
-      "ref2va"
-    ],
-    "strength": 0.8,
-    "trigger": "lbd0c1tr0n",
-    "url": "https://civitai.com/api/download/models/3343083?fileId=3229876",
-    "sha256": "d9e0aec252e9b9b70a053031405d6115121a7bbae94cb8e4bc1457b274277bf5",
-    "expected_bytes": 279622904,
-    "source": "https://civitai.com/models/2809374?modelVersionId=3343083",
-    "preset": false,
-    "steps": null,
-    "sampler": null,
-    "scheduler": null,
-    "hint": "Creator guidance; compatibility and quality require local testing",
-    "size_hint": "266.7 MB"
-  },
-  {
     "id": "natural-face-speech",
     "label": "Natural Face & Speech v2",
     "file": "nafasp_h3_lora_v2_500.safetensors",
@@ -188,48 +142,6 @@
     "scheduler": null,
     "hint": "Creator guidance; compatibility and quality require local testing",
     "size_hint": "5.4 MB"
-  },
-  {
-    "id": "fyre",
-    "label": "Fyre",
-    "file": "minimaxh3-fyre-v01.safetensors",
-    "category": "character",
-    "graphs": [
-      "fl2va"
-    ],
-    "strength": 0.8,
-    "trigger": "Fyre",
-    "url": "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/fyre-fictional-character/minimaxh3-fyre-v01.safetensors",
-    "sha256": "d128d0b5e7c07061dc5fe7f391f7d90c780894fb40dfda3b32294f1e7ec6c406",
-    "expected_bytes": 232639584,
-    "source": "https://civitai.com/models/2386526",
-    "preset": false,
-    "steps": null,
-    "sampler": null,
-    "scheduler": null,
-    "hint": "Creator guidance; compatibility and quality require local testing",
-    "size_hint": "221.9 MB"
-  },
-  {
-    "id": "ai30",
-    "label": "AI30",
-    "file": "MiniMax H3  AI Girl Fictional Women Series30.safetensors",
-    "category": "character",
-    "graphs": [
-      "fl2va"
-    ],
-    "strength": 0.8,
-    "trigger": "ai30",
-    "url": "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/ai-girl-fictional-women-series30-30-minimax-h3/MiniMax%20H3%20%20AI%20Girl%20Fictional%20Women%20Series30.safetensors",
-    "sha256": "5b02993e44cf59f874352d64751e5dc2806026402ecb879adc3133790d65e79d",
-    "expected_bytes": 298260352,
-    "source": "https://civitai.com/models/2845077",
-    "preset": false,
-    "steps": null,
-    "sampler": null,
-    "scheduler": null,
-    "hint": "Creator guidance; compatibility and quality require local testing",
-    "size_hint": "284.4 MB"
   },
   {
     "id": "character-swap",

@@ -7,7 +7,7 @@ from lib import director_identity
 class DirectorIdentityTests(unittest.TestCase):
     def film(self):
         return {"characters":[
-            {"id":"albedo","kind":"character","name":"Albedo","use_lora":True,"lora_id":"albedo-h3","voice":"soft melodic"},
+            {"id":"albedo","kind":"character","name":"Albedo","voice":"soft melodic","images":[{"file":"albedo.png"}]},
             {"id":"ainz","kind":"character","name":"Ainz","voice":"deep resonant","images":[{"file":"ainz.png"}]}
         ],"locations":[{"id":"throne","name":"Throne Room","images":[{"file":"throne.png"}]}]}
 

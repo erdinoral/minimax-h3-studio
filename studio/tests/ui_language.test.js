@@ -20,7 +20,7 @@ test('LoRA selection errors use the active UI language',()=>{
  const start=source.indexOf('  function errDetail('), end=source.indexOf('  function formatStreamError(',start);
  for(const lang of ['en','tr']){
   const context={tt:k=>dict[lang][k]||k};vm.createContext(context);vm.runInContext(source.slice(start,end),context);
-  for(const code of ['lora.actorUnavailable','lora.selectionUnavailable','lora.stackLimit','lora.noCompatibleSelection'])
+  for(const code of ['lora.selectionUnavailable','lora.stackLimit','lora.noCompatibleSelection'])
    assert.equal(context.errDetail({detail:{code}}),dict[lang][code]);
   assert.equal(context.errDetail({detail:'A user-authored error'}),'A user-authored error');
  }

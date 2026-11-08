@@ -338,6 +338,11 @@ class ComfyClient:
                                     return "VRAM yetersiz (CUDA OOM) — kaliteyi düşür veya Comfy'yi boşalt"
                                 if "shape" in em.lower():
                                     return f"{et}: tensor/shape uyumsuzluğu (first_frame boyutu?)".strip(": ")
+                                # CUDA errors append a long debugging boilerplate; the cause is the first line.
+                                head = next((line.strip() for line in em.splitlines() if line.strip()), "")
+                                if head and "tensor(" not in head.lower():
+                                    head = head if len(head) <= 200 else head[:200] + "…"
+                                    return f"{et}: {head}".strip(": ")
                                 return (f"{et}: Comfy node hatası (ayrıntı kısaltıldı)".strip(": ")
                                         or "Comfy node hatası")
                             return f"{et}: {em}".strip(": ")

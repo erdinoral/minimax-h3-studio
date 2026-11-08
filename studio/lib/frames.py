@@ -10,7 +10,7 @@ from pathlib import Path
 def _ffmpeg() -> str:
     exe = shutil.which("ffmpeg")
     if not exe:
-        raise RuntimeError("ffmpeg bulunamadı (Pinokio PATH / conda)")
+        raise RuntimeError("ffmpeg not found (Pinokio PATH / conda)")
     return exe
 
 
@@ -96,7 +96,7 @@ def extract_last_frame(video_path: Path, out_path: Path) -> Path:
     if r.returncode == 0 and _ok_image(out_path):
         return out_path
     last_err = ((r.stderr or r.stdout or last_err)[-500:]).strip()
-    raise RuntimeError(f"son kare alınamadı: {last_err or 'ffmpeg çıktı vermedi'}")
+    raise RuntimeError(f"last frame could not be extracted: {last_err or 'ffmpeg produced no output'}")
 
 
 def extract_audio_tail(video_path: Path, out_path: Path, seconds: float = 5.0) -> Path:
@@ -111,7 +111,7 @@ def extract_audio_tail(video_path: Path, out_path: Path, seconds: float = 5.0) -
     ])
     if r.returncode != 0 or not out_path.exists() or out_path.stat().st_size < 1024:
         detail = ((r.stderr or r.stdout or "")[-500:]).strip()
-        raise RuntimeError(f"önceki klibin sesi alınamadı: {detail or 'ses kanalı yok'}")
+        raise RuntimeError(f"could not get the previous clip audio: {detail or 'no audio track'}")
     return out_path
 
 
@@ -120,7 +120,7 @@ def resize_image(src: Path, out_path: Path, width: int, height: int) -> Path:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     w, h = int(width), int(height)
     if w < 16 or h < 16:
-        raise RuntimeError(f"geçersiz boyut {w}x{h}")
+        raise RuntimeError(f"invalid size {w}x{h}")
     cmd = [
         _ffmpeg(),
         "-y",
@@ -134,7 +134,7 @@ def resize_image(src: Path, out_path: Path, width: int, height: int) -> Path:
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0 or not out_path.exists():
-        raise RuntimeError(f"kare ölçeklenemedi ({w}x{h}): {(r.stderr or '')[-400:]}")
+        raise RuntimeError(f"frame could not be scaled ({w}x{h}): {(r.stderr or '')[-400:]}")
     return out_path
 
 
@@ -199,6 +199,6 @@ def strip_audio(video_path: Path) -> Path:
         ]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0 or not tmp.exists():
-            raise RuntimeError(f"ses silinemedi: {(r.stderr or '')[-400:]}")
+            raise RuntimeError(f"audio could not be removed: {(r.stderr or '')[-400:]}")
     tmp.replace(video_path)
     return video_path

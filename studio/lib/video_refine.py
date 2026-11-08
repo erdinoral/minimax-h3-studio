@@ -13,7 +13,7 @@ def probe(path):
         '-show_entries', 'stream=codec_type,width,height,nb_frames,avg_frame_rate,duration:format=duration',
         '-of', 'json', str(path)], capture_output=True, text=True)
     if result.returncode:
-        raise ValueError('Video bilgisi okunamadı: ' + result.stderr[-300:])
+        raise ValueError('Could not read video info: ' + result.stderr[-300:])
     data = json.loads(result.stdout)
     stream = next(s for s in data['streams'] if s.get('codec_type') == 'video')
     numerator, denominator = map(float, stream['avg_frame_rate'].split('/'))
@@ -32,11 +32,11 @@ def probe(path):
 def verify_output(path, source, width, height):
     actual = probe(path)
     if (actual['width'], actual['height']) != (width, height):
-        raise ValueError('Kalite artırma hedef çözünürlüğüne ulaşamadı')
+        raise ValueError('The enhancement did not reach the target resolution')
     if actual['frames'] != source['frames'] or abs(actual['fps'] - source['fps']) > 0.001:
-        raise ValueError('Kalite artırma sırasında kare sayısı veya kare hızı değişti')
+        raise ValueError('The frame count or frame rate changed during enhancement')
     if actual['audio'] != source['audio']:
-        raise ValueError('Kalite artırma sırasında kaynak ses durumu değişti')
+        raise ValueError('The source audio changed during enhancement')
 
 
 def validate_memory(meta, width, height):
@@ -45,7 +45,7 @@ def validate_memory(meta, width, height):
     # copies, leaving memory for the VAE/runtime. Tiled VAE only bounds VRAM.
     required = meta['frames'] * 12 * (meta['width'] * meta['height'] + 2 * width * height)
     if required > psutil.virtual_memory().total * 0.65:
-        raise ValueError('Bu uzunluk ve çözünürlük RAM sınırını aşıyor. Daha kısa klip veya daha düşük hedef çözünürlük seç.')
+        raise ValueError('This length and resolution exceed the RAM limit. Choose a shorter clip or a lower target resolution.')
 
 
 def build(job, uploaded_video):

@@ -713,14 +713,14 @@ class LlmRouter:
                 self._local_compat_key(provider),
             )
             if not names:
-                raise RuntimeError(f"{provider}: yüklü model yok — sunucuda bir model aç")
+                raise RuntimeError(f"{provider}: no model loaded — load a model on the server")
             return names[0]
         if cfg.get("ollama_model"):
             return str(cfg["ollama_model"]).strip()
         names = await self.ollama.list_models()
         picked = self.ollama.pick_default_model(names)
         if not picked:
-            raise RuntimeError("Ollama'da model yok")
+            raise RuntimeError("No model in Ollama")
         return picked
 
     async def chat(
@@ -795,7 +795,7 @@ class LlmRouter:
             names = await self._compat_list_models(base, key)
             picked = names[0] if names else ""
         if not picked:
-            raise RuntimeError(f"{provider}: model yok — LM Studio / llama.cpp içinde bir model yükle")
+            raise RuntimeError(f"{provider}: no model — load a model in LM Studio / llama.cpp")
         label = "LM Studio" if provider == "lmstudio" else "llama.cpp"
         try:
             return await self._openai_compat_chat(
@@ -851,7 +851,7 @@ class LlmRouter:
         cfg = self.load()
         key = (cfg.get("openai_api_key") or "").strip()
         if not key:
-            raise RuntimeError("OpenAI API key yok — Ayarlar’dan ekle")
+            raise RuntimeError("No OpenAI API key — add it in Settings")
         return await self._openai_compat_chat(
             base_url="https://api.openai.com/v1",
             key=key,
@@ -915,7 +915,7 @@ class LlmRouter:
         cfg = self.load()
         key = (cfg.get("nvidia_api_key") or "").strip()
         if not key:
-            raise RuntimeError("NVIDIA API key yok — Ayarlar’dan nvapi-… key ekle")
+            raise RuntimeError("No NVIDIA API key — add an nvapi-… key in Settings")
         return await self._openai_compat_chat(
             base_url=NVIDIA_API_BASE,
             key=key,
@@ -979,11 +979,11 @@ class LlmRouter:
                     text = (msg.get("content") or "").strip()
                     if text:
                         return text
-                last_err = RuntimeError(f"{label} boş yanıt")
+                last_err = RuntimeError(f"{label} empty reply")
             except Exception as e:
                 last_err = e
             payload["temperature"] = max(0.2, temperature - 0.15 * (attempt + 1))
-        raise RuntimeError(f"{label} chat başarısız: {last_err}")
+        raise RuntimeError(f"{label} chat failed: {last_err}")
 
     # ── Gemini ─────────────────────────────────────────────────────
 
@@ -1024,7 +1024,7 @@ class LlmRouter:
         cfg = self.load()
         key = (cfg.get("gemini_api_key") or "").strip()
         if not key:
-            raise RuntimeError("Gemini API key yok — Ayarlar’dan ekle")
+            raise RuntimeError("No Gemini API key — add it in Settings")
         model = _normalize_gemini_model(model or cfg.get("gemini_model"))
         system_bits = [
             m["content"]
@@ -1110,7 +1110,7 @@ class LlmRouter:
                             except Exception:
                                 pass
                         return text
-                    last_err = RuntimeError("Gemini boş yanıt")
+                    last_err = RuntimeError("Gemini returned an empty reply")
                 except Exception as e:
                     last_err = e
                     msg = str(e).lower()
@@ -1129,7 +1129,7 @@ class LlmRouter:
                     payload["generationConfig"]["temperature"] = max(
                         0.2, temperature - 0.15 * (attempt + 1)
                     )
-        raise RuntimeError(f"Gemini chat başarısız: {last_err}")
+        raise RuntimeError(f"Gemini chat failed: {last_err}")
 
     async def _gemini_stream_once(
         self,
@@ -1238,7 +1238,7 @@ class LlmRouter:
             pf = data.get("promptFeedback") or {}
             br = pf.get("blockReason") or data.get("error", {}).get("message")
             if br:
-                raise RuntimeError(f"Gemini engelledi: {br}")
+                raise RuntimeError(f"Gemini blocked the request: {br}")
             return ""
         parts = ((cands[0].get("content") or {}).get("parts")) or []
         # Prefer non-thought parts (final answer); fall back to any text
@@ -1269,7 +1269,7 @@ class LlmRouter:
         cfg = self.load()
         key = (cfg.get("grok_api_key") or "").strip()
         if not key:
-            raise RuntimeError("Grok (xAI) API key yok — Ayarlar’dan ekle")
+            raise RuntimeError("No Grok (xAI) API key — add it in Settings")
         return await self._openai_compat_chat(
             base_url="https://api.x.ai/v1",
             key=key,
@@ -1312,7 +1312,7 @@ class LlmRouter:
         cfg = self.load()
         key = (cfg.get("claude_api_key") or "").strip()
         if not key:
-            raise RuntimeError("Claude API key yok — Ayarlar’dan ekle")
+            raise RuntimeError("No Claude API key — add it in Settings")
         model = model or cfg.get("claude_model") or CLAUDE_MODELS[0]
         system = "\n\n".join(
             m["content"]
@@ -1368,11 +1368,11 @@ class LlmRouter:
                 ).strip()
                 if text:
                     return text
-                last_err = RuntimeError("Claude boş yanıt")
+                last_err = RuntimeError("Claude returned an empty reply")
             except Exception as e:
                 last_err = e
             payload["temperature"] = max(0.2, temperature - 0.15 * (attempt + 1))
-        raise RuntimeError(f"Claude chat başarısız: {last_err}")
+        raise RuntimeError(f"Claude chat failed: {last_err}")
 
     @staticmethod
     def _http_err(r: httpx.Response, *, label: str = "") -> str:

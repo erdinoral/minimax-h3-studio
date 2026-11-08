@@ -21,7 +21,7 @@ class ExecutionErrorFormat(unittest.TestCase):
         oom = ComfyClient.format_execution_error(_messages("torch.OutOfMemoryError", "CUDA out of memory. " + "x" * 400))
         self.assertIn("CUDA OOM", oom)
         dump = ComfyClient.format_execution_error(_messages("RuntimeError", "tensor([" + "1, " * 200 + "])"))
-        self.assertEqual(dump, "RuntimeError: Comfy node hatası (ayrıntı kısaltıldı)")
+        self.assertEqual(dump, "RuntimeError: Comfy node error (details shortened)")
 
     def test_very_long_first_line_is_clipped(self):
         text = ComfyClient.format_execution_error(_messages("RuntimeError", "y" * 500))

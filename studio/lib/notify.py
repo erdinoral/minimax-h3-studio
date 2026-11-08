@@ -110,7 +110,7 @@ class NotifyService:
         imported = self._read_akifactory_telegram(path)
         if not imported:
             raise FileNotFoundError(
-                "AkiFactory telegram.json bulunamadı — yolu kontrol et"
+                "AkiFactory telegram.json not found — check the path"
             )
         return self.save(
             {
@@ -189,8 +189,8 @@ class NotifyService:
             "on_error": bool(cfg.get("on_error", True)),
             "akifactory_path": cfg.get("akifactory_path") or "",
             "hint": (
-                "AkiFactory Telegram botu ile üretim bitince mesaj gelir. "
-                "İstersen Ayarlar’dan AkiFactory’den aktar."
+                "The AkiFactory Telegram bot messages you when a render finishes. "
+                "You can import it from AkiFactory in Settings."
             ),
         }
 
@@ -220,9 +220,9 @@ class NotifyService:
         token = (cfg.get("telegram_bot_token") or "").strip()
         chat_id = str(cfg.get("telegram_chat_id") or "").strip()
         if not token:
-            return {"ok": False, "detail": "telegram_bot_token yok"}
+            return {"ok": False, "detail": "telegram_bot_token is missing"}
         if not chat_id:
-            return {"ok": False, "detail": "telegram_chat_id yok — bota /start yaz"}
+            return {"ok": False, "detail": "telegram_chat_id is missing — send /start to the bot"}
         text = f"{(title or 'H3 Studio').strip()}\n\n{(message or '').strip()}".strip()[:3900]
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         try:
@@ -334,10 +334,10 @@ class NotifyService:
         if status == "error":
             if not cfg.get("on_error"):
                 return
-            err = str(job.get("error") or "bilinmeyen hata")[:180]
-            title = "H3 · üretim hatası"
+            err = str(job.get("error") or "unknown error")[:180]
+            title = "H3 · render failed"
             if bi and bt:
-                title = f"H3 · hata {bi}/{bt}"
+                title = f"H3 · error {bi}/{bt}"
             await self.send(title, err, priority=4, tags="warning,video_camera")
             return
 
@@ -366,12 +366,12 @@ class NotifyService:
             )
 
         if cfg.get("on_each_clip"):
-            title = "H3 · klip hazır"
+            title = "H3 · clip ready"
             if job.get("sheet_asset_id"):
                 title = f"H3 · sheet · {job.get('sheet_name') or job.get('sheet_kind') or 'ref'}"
             elif bi and bt:
-                title = f"H3 · klip {bi}/{bt} hazır"
-            meta = (f"{res} · {dur}sn" if res or dur else "hazır").strip(" ·")
+                title = f"H3 · clip {bi}/{bt} ready"
+            meta = (f"{res} · {dur} s" if res or dur else "ready").strip(" ·")
             caption = f"{title}\n{meta}".strip()
             sent = {"ok": False}
             if (cfg.get("provider") or "telegram").lower() == "telegram":
@@ -388,10 +388,10 @@ class NotifyService:
 
         if batch_complete and cfg.get("on_batch_done"):
             await self.send(
-                f"H3 · seri bitti ({bt} shot)",
-                f"Tüm klipler hazır"
+                f"H3 · series finished ({bt} shots)",
+                f"All clips ready"
                 + (f" · {res}" if res else "")
-                + (f" · {dur}sn/klip" if dur else ""),
+                + (f" · {dur} s/clip" if dur else ""),
                 priority=4,
                 tags="white_check_mark,movie_camera",
             )
@@ -399,10 +399,10 @@ class NotifyService:
 
         if prod_idle and cfg.get("on_batch_done") and not (bi and bt and bi < bt):
             await self.send(
-                "H3 · üretim bitti",
-                f"Kuyruk boş"
-                + (f" · son klip {res}" if res else "")
-                + (f" · {dur}sn" if dur else ""),
+                "H3 · render finished",
+                f"Queue empty"
+                + (f" · last clip {res}" if res else "")
+                + (f" · {dur} s" if dur else ""),
                 priority=4,
                 tags="white_check_mark,movie_camera",
             )

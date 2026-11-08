@@ -37,7 +37,7 @@ def _prepare_cast(shot, lib):
             continue
         actor = by_name.get(name.strip().casefold())
         if not actor:
-            raise ValueError("Sahne karakteri kartlarda bulunamadı: " + name.strip())
+            raise ValueError("Scene character not found on the cards: " + name.strip())
         if actor["id"] not in {a["id"] for a in actors}:
             actors.append(actor)
     ids = {a["id"] for a in actors}

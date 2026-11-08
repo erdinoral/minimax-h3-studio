@@ -7607,9 +7607,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   function localizeSystemLabel(value) {
     const text = String(value || "");
-    const labels = {"sırada": "ui.progress0", "tekrar sırada": "ui.progress1", "sırada (yeniden)": "ui.progress2", "iptal": "ui.progress3", "hata": "ui.progress4", "bitti": "ui.progress5", "Qwen görseli üretiliyor": "ui.progress6", "Comfy örnekliyor": "ui.progress7", "Comfy kuyruğunda": "ui.progress8", "çıktı bekleniyor": "ui.progress9", "Comfy’nin işi alması bekleniyor": "ui.progress10", "Yönetmen düşünüyor…": "ui.progress11", "Yeniden deniyor…": "ui.progress12", "kesildi — yeniden sırada": "ui.progress13", "Comfy’de sürüyor — yeniden bağlanılacak": "ui.progress14", "Comfy çıktısı bulundu — galeriye alınıyor": "ui.progress15", "bitti (Comfy çıktısı kurtarıldı)": "ui.progress16"};
+    const labels = {"sırada": "ui.progress0", "tekrar sırada": "ui.progress1", "sırada (yeniden)": "ui.progress2", "iptal": "ui.progress3", "hata": "ui.progress4", "bitti": "ui.progress5", "Qwen görseli üretiliyor": "ui.progress6", "Comfy örnekliyor": "ui.progress7", "Comfy kuyruğunda": "ui.progress8", "çıktı bekleniyor": "ui.progress9", "Comfy’nin işi alması bekleniyor": "ui.progress10", "Yönetmen düşünüyor…": "ui.progress11", "Yeniden deniyor…": "ui.progress12", "kesildi — yeniden sırada": "ui.progress13", "Comfy’de sürüyor — yeniden bağlanılacak": "ui.progress14", "Comfy çıktısı bulundu — galeriye alınıyor": "ui.progress15", "bitti (Comfy çıktısı kurtarıldı)": "ui.progress16",
+      "queued": "ui.progress0", "queued again": "ui.progress1", "queued (again)": "ui.progress2", "cancelled": "ui.progress3", "error": "ui.progress4", "done": "ui.progress5", "Comfy sampling": "ui.progress7", "In Comfy queue": "ui.progress8", "waiting for output": "ui.progress9", "Waiting for Comfy to pick up the job": "ui.progress10", "interrupted — queued again": "ui.progress13", "Still running in Comfy — reconnecting": "ui.progress14", "Comfy output found — adding to gallery": "ui.progress15", "done (Comfy output recovered)": "ui.progress16"};
     const parts = text.split(" · ");
-    const sampling = /^örnekleme (\d+)\/(\d+)$/.exec(parts[0]);
+    const sampling = /^(?:örnekleme|sampling) (\d+)\/(\d+)$/.exec(parts[0]);
     if (sampling) parts[0] = tf("ui.samplingCount", {step:sampling[1], max:sampling[2]});
     else if (labels[parts[0]]) parts[0] = tt(labels[parts[0]]);
     return parts.join(" · ");
@@ -8707,6 +8708,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         $("sys-gpu").textContent = `${short}${util}`;
         $("sys-gpu").title = raw + (s.gpu_util != null ? ` · ${Math.round(s.gpu_util)}%` : "");
       }
+      window.h3VramTotalGb = s.vram_total_gb;
       $("sys-vram").textContent =
         s.vram_total_gb != null
           ? `${s.vram_used_gb}/${s.vram_total_gb}G`
@@ -9548,7 +9550,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         clipPct = Math.max(0, Math.min(100, Math.round((100 * Number(step)) / Number(stepMax))));
       }
       let clipLabel = localizeSystemLabel(job.progress_label) || tt("prod.comfyProgress");
-      if (progressSource !== "queue" && step != null && stepMax > 0 && !/örnekleme\s+\d+\/\d+/i.test(clipLabel)) {
+      if (progressSource !== "queue" && step != null && stepMax > 0 && !/(?:örnekleme|sampling)\s+\d+\/\d+/i.test(clipLabel)) {
         clipLabel = tf("job.sampling", { step: String(step), max: String(stepMax) });
       }
       const bits = [];
@@ -10489,6 +10491,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_images = state.v2vImages.map((x) => x.name);
         body.ref_image_size = state.refImageSize || "match";
         body.include_video_audio = !!$("v2v-include-audio")?.checked;
+        if ($("v2v-continuum")?.checked) {
+          if (window.isDirectorContinuumReady?.() === true) body.join_method = "continuum";
+          else noteGenerate(tt("v2v.continuumOff"));
+        }
         // The Motion tab hides the project type picker.
         body.purpose = null;
         body.silent_audio = false;
@@ -10516,6 +10522,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_image_size = "max";
         body.ref_role = "face";
       }
+      const vramPatch = await window.h3VramGuard?.confirm({
+        quality: normalizeQuality(body.quality),
+        duration: Number(body.duration) || 5,
+        motion: isV2v,
+        continuum: isV2v ? body.join_method === "continuum" : body.continuation_method === "continuum",
+        refImages: (body.ref_images || []).length,
+        canSplit: mode === "t2v" && !isI2v && !body.scene_audio_file && window.isDirectorContinuumReady?.() === true,
+      }, (q) => resolveSize(body.aspect, q), window.h3VramTotalGb);
+      if (vramPatch === "cancel") {
+        noteGenerate(tt("vram.cancelled"));
+        return false;
+      }
+      if (vramPatch) Object.assign(body, vramPatch);
       // Motion Transfer always renders the whole reference video, part by part.
       const r = await fetch(isV2v ? "/api/motion-transfer/long" : "/api/generate", {
         method: "POST",
@@ -10533,8 +10552,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.playerCleared = false;
       state.pendingContinueChild = isContinue ? data.id : null;
       setProdLane(isV2v ? "motion" : "scene");
-      const queuedLabel = data.motion_long_id
-        ? tf("toast.v2vLongQueued", { sec: Number(data.seconds || 0).toFixed(1), n: String(data.count || 1) })
+      const queuedLabel = data.motion_long_id || data.join_method === "continuum"
+        ? tf("toast.v2vLongQueued", {
+          sec: Number(data.seconds || 0).toFixed(1),
+          n: String(data.join_method === "continuum" ? (data.continuum_prompts || []).length || 1 : data.count || 1),
+        })
         : isContinue
         ? faceLockOn
           ? tt("toast.continueFaceQueued")

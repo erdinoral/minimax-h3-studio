@@ -61,21 +61,21 @@ def clone(source):
     """One source render -> one fresh job. Never overwrite its completed video."""
     original = source.get('reproduction_snapshot') or source
     if source.get('status', 'done') not in ('done', 'error', 'cancelled'):
-        raise ValueError('Bu sahne zaten sırada veya üretiliyor.')
+        raise ValueError('This scene is already queued or rendering.')
     if len(original.get('continuum_scene_ids') or []) > 1:
-        raise ValueError('Bu eski klip birden fazla sahne içeriyor; tek sahne olarak aynen tekrarlanamaz.')
+        raise ValueError('This older clip contains more than one scene; it cannot be repeated exactly as a single scene.')
     required = ('prompt', 'duration', 'width', 'height', 'seed', 'steps', 'sampler', 'scheduler', 'h3_models')
     if any(original.get(k) is None for k in required) or not original.get('prompt'):
-        raise ValueError('Önceki üretimin ayar kaydı eksik; aynı ayarlarla yeniden üretilemiyor.')
+        raise ValueError('The previous render has no settings record; it cannot be rendered again with the same settings.')
     if any(not (original.get('h3_models') or {}).get(k) for k in ('unet', 'clip', 'vae', 'audio_vae')):
-        raise ValueError('Önceki üretimin model kaydı eksik; güncel modellerle değiştirilmedi.')
+        raise ValueError('The previous render has no model record; it was not swapped for the current models.')
     if original.get('mode') not in ('t2v', 'ref', 'face', 'continue', 'face_continue', 'continuum'):
-        raise ValueError('Bu üretim türü tek sahne tekrarını desteklemiyor.')
+        raise ValueError('This render type does not support repeating a single scene.')
     if not original.get('acceleration_settings'):
-        raise ValueError('Eski üretimde hızlandırma ayarları kaydedilmemiş; birebir tekrar kullanılamıyor.')
+        raise ValueError('The older render did not save its acceleration settings; it cannot be repeated exactly.')
     job = snapshot(original)
     job.update(id=str(uuid.uuid4()), status='queued', progress=0,
-               progress_label='aynı ayarlarla tekrar sırada', error=None, output=None,
+               progress_label='queued again with the same settings', error=None, output=None,
                created_at=time.time(), reproduce_of=source['id'], lane='director',
                batch_index=1, batch_total=1, cinema_batch=str(uuid.uuid4())[:8])
     if job.get('continuum_run'):

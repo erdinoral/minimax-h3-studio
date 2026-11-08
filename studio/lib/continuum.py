@@ -175,6 +175,12 @@ def build(job):
     if job.get('first_frame_name'):
         graph['c_first']=dict(class_type='LoadImage',inputs={'image':job['first_frame_name']})
         inputs['first_frame']=['c_first',0]
+    if job.get('continuum_ref_video'):
+        # Follow Timeline gives each chunk its own interval of this 24 fps source.
+        graph['c_video_in']=dict(class_type='LoadVideo',inputs={'file':job['continuum_ref_video']})
+        graph['c_video_frames']=dict(class_type='GetVideoComponents',inputs={'video':['c_video_in',0]})
+        inputs.update(reference_video_1=['c_video_frames',0], video_reference_mode='Follow Timeline',
+                      video_reference_size='Match Output')
     refs=job.get('ref_images') or []
     if refs:
         assignments=job.get('continuum_ref_assignments')

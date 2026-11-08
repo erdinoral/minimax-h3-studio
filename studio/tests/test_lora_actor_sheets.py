@@ -37,12 +37,12 @@ class LoraOnlyActors(unittest.IsolatedAsyncioTestCase):
         node=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='_queue_cinema_sheet_job')
         env=dict(Any=Any,Optional=Optional,cinema=NS(asset_kind_key=lambda k:(k,'characters'),load=lambda:{'characters':[self.actor()]},uses_lora=cinema.uses_lora))
         exec(compile(ast.Module(body=[node],type_ignores=[]),'sheet','exec'),env)
-        with self.assertRaisesRegex(ValueError,'üretilmez'):
+        with self.assertRaisesRegex(ValueError,'not rendered while Use LoRA is on'):
             await env['_queue_cinema_sheet_job'](kind='character',name='NEA',asset_id='actor')
     def test_enabled_without_selection_never_falls_back_to_old_photos(self):
         actor=self.actor(); actor['lora_id']=''
         with patch('lib.loras.find_spec',return_value=None):
-            with self.assertRaisesRegex(ValueError,'LoRA dosyası seçilmeli'):
+            with self.assertRaisesRegex(ValueError,'LoRA file must be selected'):
                 asset_references.resolve('NEA walks.',None,{'characters':[actor]},lambda f:True)
 
     def test_switch_off_restores_normal_asset_mode(self):

@@ -30,12 +30,12 @@ def resolve(shot, lib, exists, *, check_limit=True):
     owners = {}
     for binding in shot.get("bindings", []):
         if not isinstance(binding, dict):
-            errors.append("Geçersiz asset seçimi")
+            errors.append("Invalid asset selection")
             continue
         aid = str(binding.get("asset_id") or "")
         asset = assets.get(aid)
         if not asset:
-            errors.append("Seçili varlık artık projede yok: " + aid)
+            errors.append("A selected asset is no longer in the project: " + aid)
             continue
         snap = binding.get("snapshot")
         frozen = isinstance(snap, dict) and snap.get("id") == aid
@@ -47,25 +47,25 @@ def resolve(shot, lib, exists, *, check_limit=True):
             continue
         identity = str(asset.get("identity_id") or aid)
         if identity in identities:
-            errors.append("Aynı kimliğin iki görünümü seçili: " + asset.get("name", aid))
+            errors.append("Two looks of the same identity are selected: " + asset.get("name", aid))
         identities.add(identity)
         images = asset.get("images") or ([{"file": asset["image"]}] if asset.get("image") else [])
         files = binding.get("files")
         if files is not None and (not isinstance(files, list) or any(not isinstance(f, str) for f in files)):
-            errors.append(asset.get("name", aid) + ": geçersiz görsel seçimi")
+            errors.append(asset.get("name", aid) + ": invalid image selection")
             continue
         if files is not None:
             missing = set(files) - {im.get("file") for im in images}
             if missing:
-                errors.append(asset.get("name", aid) + ": seçili görsel kartta yok — " + ", ".join(sorted(missing)))
+                errors.append(asset.get("name", aid) + ": the selected image is not on the card — " + ", ".join(sorted(missing)))
             images = [im for im in images if im.get("file") in files]
         if not images:
-            errors.append(asset.get("name", aid) + ": referans görseli seçilmeli")
+            errors.append(asset.get("name", aid) + ": a reference image must be selected")
         parent = asset.get("identity_reference") or assets.get(identity)
         if identity != aid:
             portrait = (parent or {}).get("images") or []
             if not portrait:
-                errors.append(asset.get("name", aid) + ": ana kimliğin yüz referansı eksik")
+                errors.append(asset.get("name", aid) + ": the main identity face reference is missing")
             else:
                 images = [{**portrait[0], "reference_role": "face only; identity reference sheet — not the filmed frame; ignore clothing; never show collage panels"},
                           *[{**im, "reference_role": "wardrobe and body appearance only; appearance reference — not the filmed frame; use the separate identity face; never paste sheet layout"} for im in images]]
@@ -73,20 +73,20 @@ def resolve(shot, lib, exists, *, check_limit=True):
         for im in images:
             file = str(im.get("file") or "")
             if not exists(file):
-                errors.append(asset.get("name", aid) + ": görsel bulunamadı — " + file)
+                errors.append(asset.get("name", aid) + ": image not found — " + file)
             if file in owners and owners[file] != aid:
-                errors.append("Aynı görsel farklı varlıklara atanmış: " + file)
+                errors.append("The same image is assigned to different assets: " + file)
             owners[file] = aid
             if file and file not in refs:
                 refs.append(file)
                 rows.append({**im, "asset": asset})
     if check_limit and len(refs) > 9:
-        errors.append("Bu çekimde en fazla 9 referans kullanılabilir; seçimi azaltın.")
+        errors.append("At most 9 references can be used in this shot; select fewer.")
     first = str(shot.get("first_frame_name") or "")
     if first and not exists(first):
-        errors.append("Onaylı başlangıç karesi bulunamadı; yeniden yükleyin.")
+        errors.append("The approved start frame was not found; upload it again.")
     if check_limit and first and len(refs) > 8:
-        errors.append("Başlangıç karesiyle birlikte en fazla 8 varlık referansı kullanılabilir.")
+        errors.append("At most 8 asset references can be used together with a start frame.")
     return {"ref_images": refs, "rows": rows, "hits": hits, "errors": errors,
             "first_frame_name": first,
             **{"has_" + k[:-1]: any(a.get("kind") == k[:-1] for a in hits) for k in KINDS}}
@@ -113,7 +113,7 @@ def continuity(shots):
             changed = prev is None or "bindings" not in prev or key(s) != key(prev) or s.get("chapter") != prev.get("chapter") or s.get("scene") != prev.get("scene")
             if changed and s.get("mode") == "continue":
                 s["mode"] = "t2v"
-                s["continuity_note"] = "Referans, görünüm veya sahne değişti; yeni çekim kullanılacak."
+                s["continuity_note"] = "The reference, look or scene changed; a new shot will be used."
         prev = s
     return out
 
@@ -123,7 +123,7 @@ def parse_markdown(text):
     assets = {k: [] for k in KINDS}
     section, chapter, current = "", "Bölüm 1", None
     shots = []
-    title = "İçe aktarılan film"
+    title = "Imported film"
     for line in text.splitlines():
         if line.startswith("# "):
             title = line[2:].strip()
@@ -161,6 +161,6 @@ def parse_markdown(text):
         for name in s.pop("_names"):
             a = by_name.get(name.casefold())
             if a: s["bindings"].append({"asset_id": a["id"]})
-            else: warnings.append("Kart bulunamadı: " + name)
-    if not shots: raise ValueError("Çekim bulunamadı. **Shot 1** ve mode/cast/place/action alanları bekleniyor.")
+            else: warnings.append("Card not found: " + name)
+    if not shots: raise ValueError("No shots found. Expected **Shot 1** with mode/cast/place/action fields.")
     return {"title": title, **assets, "shots": shots, "warnings": list(dict.fromkeys(warnings))}

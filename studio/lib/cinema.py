@@ -400,7 +400,7 @@ def save_film_asset_to_library(kind: str, asset_id: str) -> dict[str, Any]:
     data = load()
     found = next((x for x in (data.get(key) or []) if str(x.get("id") or "") == aid), None)
     if not found:
-        raise ValueError("asset yok")
+        raise ValueError("no asset")
     payload = dict(found)
     payload["library_id"] = str(found.get("library_id") or found.get("id") or "")
     saved = upsert_library_asset(k, payload)
@@ -418,7 +418,7 @@ def pull_library_to_film(kind: str, library_id: str) -> dict[str, Any]:
     lib = load_library()
     found = next((x for x in (lib.get(key) or []) if str(x.get("id") or "") == lid), None)
     if not found:
-        raise ValueError("kütüphanede yok")
+        raise ValueError("not in library")
     data = load()
     # If already in film (same library_id or same name+images), return existing
     for x in data.get(key) or []:
@@ -2569,14 +2569,14 @@ def new_film() -> dict[str, Any]:
 def switch_film(film_id: str) -> dict[str, Any]:
     fid = (film_id or "").strip()
     if not fid:
-        raise ValueError("film yok")
+        raise ValueError("no film")
     save(load())
     path = FILMS_DIR / f"{fid}.json"
     if not path.is_file():
-        raise FileNotFoundError("film bulunamadı")
+        raise FileNotFoundError("film not found")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise ValueError("film bozuk")
+        raise ValueError("film is corrupt")
     data["film_id"] = fid
     CINEMA_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return load()
@@ -2852,12 +2852,12 @@ def _shots_from_take_blocks(
                     idx += 1
     if split_n:
         notes.append(
-            f"{split_n} take {SEAMLESS_MAX_SHOTS} shot sınırını aştı — fazla beat sonraki take oldu"
+            f"{split_n} takes exceeded the {SEAMLESS_MAX_SHOTS}-shot limit — extra beats moved to the next take"
         )
     if take_n:
         notes.append(
-            f"Kesintisiz {len(shots)} shot → {take_n} take "
-            f"({SEAMLESS_MAX_SHOTS} shot/take, örn. 8×5sn = 40sn)"
+            f"Seamless {len(shots)} shots → {take_n} takes "
+            f"({SEAMLESS_MAX_SHOTS} shots/take, e.g. 8×5 s = 40 s)"
         )
     return shots
 
@@ -3281,7 +3281,7 @@ def _coerce_project_payload(raw: Any) -> dict[str, Any]:
     if isinstance(raw, str):
         raw = json.loads(raw)
     if not isinstance(raw, dict):
-        raise ValueError("JSON nesne olmalı")
+        raise ValueError("Must be a JSON object")
     # Allow wrappers from external tools
     for key in ("film", "cinema", "project", "data"):
         nested = raw.get(key)
@@ -3366,8 +3366,8 @@ def import_project_json(
             _stamp_flat_takes(shots)
             takes = (len(shots) + SEAMLESS_MAX_SHOTS - 1) // SEAMLESS_MAX_SHOTS
             warnings.append(
-                f"Kesintisiz {len(shots)} shot → {takes} take "
-                f"({SEAMLESS_MAX_SHOTS} shot/take, örn. 8×5sn = 40sn)"
+                f"Seamless {len(shots)} shots → {takes} takes "
+                f"({SEAMLESS_MAX_SHOTS} shots/take, e.g. 8×5 s = 40 s)"
             )
 
     chars_in = payload.get("characters") or payload.get("cast") or []
@@ -3520,7 +3520,7 @@ def import_project_json(
         for ch in out.get("characters") or []:
             if character_portrait_files(ch):
                 warnings.append(
-                    "Kartta portre var — Üret Kesintisiz yerine yüz kilitli Continue’a düşer"
+                    "The card has a portrait — Seamless falls back to face-locked Continue"
                 )
                 break
 
@@ -3580,10 +3580,10 @@ def import_zip(raw: bytes) -> dict[str, Any]:
         names = zf.namelist()
         cine_name = next((n for n in names if n.endswith("cinema.json")), None)
         if not cine_name:
-            raise ValueError("zip içinde cinema.json yok")
+            raise ValueError("no cinema.json in the zip")
         data = json.loads(zf.read(cine_name).decode("utf-8"))
         if not isinstance(data, dict):
-            raise ValueError("cinema.json bozuk")
+            raise ValueError("cinema.json is corrupt")
         REFS_DIR.mkdir(parents=True, exist_ok=True)
         for n in names:
             if not n.startswith("refs/") or n.endswith("/"):

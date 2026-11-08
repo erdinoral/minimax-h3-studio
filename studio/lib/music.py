@@ -18,14 +18,14 @@ ALLOWED_EXT = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
 def _ffmpeg() -> str:
     exe = shutil.which("ffmpeg")
     if not exe:
-        raise RuntimeError("ffmpeg bulunamadı (Pinokio PATH / conda)")
+        raise RuntimeError("ffmpeg not found (Pinokio PATH / conda)")
     return exe
 
 
 def _ffprobe() -> str:
     exe = shutil.which("ffprobe")
     if not exe:
-        raise RuntimeError("ffprobe bulunamadı (Pinokio PATH / conda)")
+        raise RuntimeError("ffprobe not found (Pinokio PATH / conda)")
     return exe
 
 
@@ -42,11 +42,11 @@ def probe_duration_sec(path: Path) -> float:
     ]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"ffprobe hata: {(r.stderr or '')[-400:]}")
+        raise RuntimeError(f"ffprobe error: {(r.stderr or '')[-400:]}")
     try:
         return max(0.1, float((r.stdout or "").strip()))
     except ValueError as e:
-        raise RuntimeError(f"süre okunamadı: {r.stdout!r}") from e
+        raise RuntimeError(f"could not read duration: {r.stdout!r}") from e
 
 
 def suggested_sections(duration_sec: float, clip_sec: int = 5) -> list[dict[str, Any]]:
@@ -219,7 +219,7 @@ def save_upload(
 def load_meta(music_dir: Path, music_id: str) -> dict[str, Any]:
     p = music_dir / f"{music_id}.json"
     if not p.exists():
-        raise FileNotFoundError("şarkı kaydı yok")
+        raise FileNotFoundError("no song record")
     meta = json.loads(p.read_text(encoding="utf-8"))
     path = Path(meta.get("path") or "")
     if not path.exists():
@@ -227,7 +227,7 @@ def load_meta(music_dir: Path, music_id: str) -> dict[str, Any]:
         hits = list(music_dir.glob(f"{music_id}.*"))
         hits = [h for h in hits if h.suffix.lower() in ALLOWED_EXT]
         if not hits:
-            raise FileNotFoundError("şarkı dosyası yok")
+            raise FileNotFoundError("song file is missing")
         meta["path"] = str(hits[0])
     return meta
 
@@ -319,12 +319,12 @@ def concat_and_mux(
 ) -> Path:
     """Concat clips (video only), then replace audio with the user song."""
     if not video_paths:
-        raise ValueError("birleştirilecek video yok")
+        raise ValueError("no videos to join")
     for p in video_paths:
         if not p.exists():
-            raise FileNotFoundError(f"video yok: {p}")
+            raise FileNotFoundError(f"no video: {p}")
     if not audio_path.exists():
-        raise FileNotFoundError(f"şarkı yok: {audio_path}")
+        raise FileNotFoundError(f"song missing: {audio_path}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     work = out_path.parent / f"_mux_{out_path.stem}"
@@ -376,7 +376,7 @@ def concat_and_mux(
             r1b = subprocess.run(cmd1b, capture_output=True, text=True)
             if r1b.returncode != 0 or not silent.exists():
                 raise RuntimeError(
-                    f"video birleştirme başarısız: {(r1b.stderr or r1.stderr or '')[-600:]}"
+                    f"video join failed: {(r1b.stderr or r1.stderr or '')[-600:]}"
                 )
 
         cmd2 = [
@@ -401,7 +401,7 @@ def concat_and_mux(
         ]
         r2 = subprocess.run(cmd2, capture_output=True, text=True)
         if r2.returncode != 0 or not out_path.exists():
-            raise RuntimeError(f"şarkı mux başarısız: {(r2.stderr or '')[-600:]}")
+            raise RuntimeError(f"song mux failed: {(r2.stderr or '')[-600:]}")
         return out_path
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -656,7 +656,7 @@ def _normalize_clip_keep_audio(
         ]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0 or not dest.exists():
-        raise RuntimeError(f"klip normalize başarısız: {(r.stderr or '')[-600:]}")
+        raise RuntimeError(f"clip normalize failed: {(r.stderr or '')[-600:]}")
 
 
 def concat_keep_audio(
@@ -669,10 +669,10 @@ def concat_keep_audio(
 ) -> Path:
     """Join clips in order, keep each clip's dialogue/SFX."""
     if not video_paths:
-        raise ValueError("birleştirilecek video yok")
+        raise ValueError("no videos to join")
     for p in video_paths:
         if not p.exists():
-            raise FileNotFoundError(f"video yok: {p}")
+            raise FileNotFoundError(f"no video: {p}")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     work = out_path.parent / f"_cinema_cat_{out_path.stem}"
     work.mkdir(parents=True, exist_ok=True)
@@ -701,7 +701,7 @@ def concat_keep_audio(
         ]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0 or not out_path.exists():
-            raise RuntimeError(f"video birleştirme başarısız: {(r.stderr or '')[-600:]}")
+            raise RuntimeError(f"video join failed: {(r.stderr or '')[-600:]}")
         return out_path
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -719,12 +719,12 @@ def concat_keep_audio_mix_score(
 ) -> Path:
     """Concat clips keeping dialogue/SFX, then mix one film score underneath."""
     if not video_paths:
-        raise ValueError("birleştirilecek video yok")
+        raise ValueError("no videos to join")
     for p in video_paths:
         if not p.exists():
-            raise FileNotFoundError(f"video yok: {p}")
+            raise FileNotFoundError(f"no video: {p}")
     if not audio_path.exists():
-        raise FileNotFoundError(f"film müziği yok: {audio_path}")
+        raise FileNotFoundError(f"film music missing: {audio_path}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     work = out_path.parent / f"_cinema_mux_{out_path.stem}"
@@ -757,7 +757,7 @@ def concat_keep_audio_mix_score(
         ]
         r1 = subprocess.run(cmd1, capture_output=True, text=True)
         if r1.returncode != 0 or not concat.exists():
-            raise RuntimeError(f"video birleştirme başarısız: {(r1.stderr or '')[-600:]}")
+            raise RuntimeError(f"video join failed: {(r1.stderr or '')[-600:]}")
 
         vol = max(0.02, min(0.6, float(score_volume)))
         cmd2 = [
@@ -790,7 +790,7 @@ def concat_keep_audio_mix_score(
         ]
         r2 = subprocess.run(cmd2, capture_output=True, text=True)
         if r2.returncode != 0 or not out_path.exists():
-            raise RuntimeError(f"film müziği karışımı başarısız: {(r2.stderr or '')[-600:]}")
+            raise RuntimeError(f"film music mix failed: {(r2.stderr or '')[-600:]}")
         return out_path
     finally:
         shutil.rmtree(work, ignore_errors=True)

@@ -57,7 +57,7 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
                 for im in cinema.mentioned_images(text, asset) if not cinema.uses_lora(asset)]
         missing = [a.get("name", "Asset") for a in hits if not cinema.uses_lora(a) and not cinema.mentioned_images(text, a)]
         if missing:
-            raise ValueError("Referans görseli eksik: " + ", ".join(missing))
+            raise ValueError("Reference image is missing: " + ", ".join(missing))
         for asset in hits:
             if any(cinema._hit_token(text, im.get("name") or "") for im in asset.get("images", [])):
                 fixed_files.update(im["file"] for im in cinema.mentioned_images(text, asset))
@@ -70,7 +70,7 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
         from .lora_guidance import guidance
         spec = find_spec(lora_id=actor.get("lora_id") or "")
         if not spec or not spec_ready(spec):
-            raise ValueError("Karakter LoRA dosyası seçilmeli ve hazır olmalı: " + actor.get("name", ""))
+            raise ValueError("A ready character LoRA file must be selected: " + actor.get("name", ""))
         try:
             trigger = guidance(spec["file"]).get("triggers")
         except (ValueError, OSError):
@@ -84,7 +84,7 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
     for row in rows:
         previous = by_file.get(row["file"])
         if previous and (previous.get("asset") or {}).get("id") != (row.get("asset") or {}).get("id"):
-            raise ValueError("Aynı görsel farklı assetlere atanmış: " + row["file"])
+            raise ValueError("The same image is assigned to different assets: " + row["file"])
         by_file[row["file"]] = row
     seen = set()
     for row in [*(by_file.get(f, {"file": f}) for f in existing), *rows]:
@@ -92,16 +92,16 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
         if not file or file in seen:
             continue
         if Path(file).name != file or "/" in file or "\\" in file or not exists(file):
-            raise ValueError("Referans görseli bulunamadı: " + file)
+            raise ValueError("Reference image not found: " + file)
         seen.add(file)
         ordered.append(row)
     limit = 8 if continuation else 9
     if len(ordered) > limit and not re.search(r"<Picture\s+\d+>", text, re.I):
         ordered = _fit_automatic_views(ordered, automatic_ids, fixed_files, limit)
     if len(ordered) > limit:
-        raise ValueError(f"Bu çekimde en fazla {limit} referans kullanılabilir; seçimi azaltın.")
+        raise ValueError(f"At most {limit} references can be used in this shot; select fewer.")
     if any(int(n) < 1 or int(n) > len(ordered) for n in re.findall(r"<Picture\s+(\d+)>", text, re.I)):
-        raise ValueError("Prompttaki Picture numarası seçili referans listesinde yok")
+        raise ValueError("A Picture number in the prompt is not in the selected reference list")
     lora_owner = next((a for a in hits if a.get("kind") == "character" and cinema.uses_lora(a) and a.get("lora_id")), {})
     return {"prompt": text, "rows": ordered, "ref_images": [r["file"] for r in ordered],
             "hits": hits, "lora_id": lora_owner.get("lora_id", ""), "lora_strength": lora_owner.get("lora_strength"),
@@ -127,13 +127,13 @@ async def materialize(rows, refs_dir, input_dir, upload):
     for row in rows:
         source_name = row.get("source_file") or row["file"]
         if Path(source_name).name != source_name or "/" in source_name or "\\" in source_name:
-            raise ValueError("Geçersiz referans dosyası")
+            raise ValueError("Invalid reference file")
         source = Path(refs_dir) / source_name
         if source.is_file():
             uploaded = await upload(source, source_name)
         elif (Path(input_dir) / source_name).is_file():
             uploaded = source_name
         else:
-            raise ValueError("Kuyruktaki referans görseli artık bulunamıyor: " + source_name)
+            raise ValueError("A queued reference image can no longer be found: " + source_name)
         result.append({**row, "source_file": source_name, "file": uploaded})
     return result

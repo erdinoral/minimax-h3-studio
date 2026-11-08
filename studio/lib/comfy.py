@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import struct
+import subprocess
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
@@ -202,7 +204,7 @@ class ComfyClient:
             except Exception as e:
                 last_err = e
                 await asyncio.sleep(1.2 * (attempt + 1))
-        raise RuntimeError(f"Comfy queue başarısız: {last_err}")
+        raise RuntimeError(f"Comfy queue failed: {last_err}")
 
     async def history(self, prompt_id: str) -> dict:
         async with httpx.AsyncClient(timeout=30.0) as c:
@@ -272,7 +274,7 @@ class ComfyClient:
                         pct = int(round(100.0 * value / maxv))
                         await _emit(
                             max(0, min(99, pct)),
-                            f"örnekleme {int(value)}/{int(maxv)}",
+                            f"sampling {int(value)}/{int(maxv)}",
                             meta={
                                 "comfy_step": int(value),
                                 "comfy_step_max": int(maxv),
@@ -282,13 +284,13 @@ class ComfyClient:
                     elif mtype == "executing":
                         node = data.get("node")
                         if node is None and (not pid or pid == prompt_id):
-                            await _emit(99, "tamamlanıyor", meta={"source": "ws"})
+                            await _emit(99, "finishing", meta={"source": "ws"})
                         # ignore mid-graph node ticks — they used to look like stalls
                     elif mtype in ("execution_success", "executed"):
                         if not pid or pid == prompt_id:
-                            await _emit(99, "çıktı hazırlanıyor", meta={"source": "ws"})
+                            await _emit(99, "preparing output", meta={"source": "ws"})
                     elif mtype == "execution_error":
-                        await _emit(99, "comfy hata", meta={"source": "ws"})
+                        await _emit(99, "comfy error", meta={"source": "ws"})
                         return
         except asyncio.CancelledError:
             return
@@ -335,16 +337,16 @@ class ComfyClient:
                             em = str(em)
                             if "tensor(" in em.lower() or len(em) > 280:
                                 if "out of memory" in em.lower() or "oom" in em.lower():
-                                    return "VRAM yetersiz (CUDA OOM) — kaliteyi düşür veya Comfy'yi boşalt"
+                                    return "Out of VRAM (CUDA OOM) — lower the quality or free Comfy memory"
                                 if "shape" in em.lower():
-                                    return f"{et}: tensor/shape uyumsuzluğu (first_frame boyutu?)".strip(": ")
+                                    return f"{et}: tensor/shape mismatch (first_frame size?)".strip(": ")
                                 # CUDA errors append a long debugging boilerplate; the cause is the first line.
                                 head = next((line.strip() for line in em.splitlines() if line.strip()), "")
                                 if head and "tensor(" not in head.lower():
                                     head = head if len(head) <= 200 else head[:200] + "…"
                                     return f"{et}: {head}".strip(": ")
-                                return (f"{et}: Comfy node hatası (ayrıntı kısaltıldı)".strip(": ")
-                                        or "Comfy node hatası")
+                                return (f"{et}: Comfy node error (details shortened)".strip(": ")
+                                        or "Comfy node error")
                             return f"{et}: {em}".strip(": ")
         except Exception:
             pass
@@ -385,7 +387,7 @@ class ComfyClient:
             except Exception as e:
                 last_err = e
                 await asyncio.sleep(1.2 * (attempt + 1))
-        raise RuntimeError(f"Comfy upload başarısız: {last_err}")
+        raise RuntimeError(f"Comfy upload failed: {last_err}")
 
     async def upload_video(self, path: Path, name: Optional[str] = None) -> str:
         """Upload a video into Comfy input/ (same endpoint as images; LoadVideo reads it)."""
@@ -412,7 +414,7 @@ class ComfyClient:
             except Exception as e:
                 last_err = e
                 await asyncio.sleep(1.2 * (attempt + 1))
-        raise RuntimeError(f"Comfy video upload başarısız: {last_err}")
+        raise RuntimeError(f"Comfy video upload failed: {last_err}")
 
     async def upload_audio(self, path: Path, name: Optional[str] = None) -> str:
         """Upload audio into Comfy input/ (same endpoint as images; LoadAudio reads it)."""
@@ -445,7 +447,7 @@ class ComfyClient:
             except Exception as e:
                 last_err = e
                 await asyncio.sleep(1.2 * (attempt + 1))
-        raise RuntimeError(f"Comfy audio upload başarısız: {last_err}")
+        raise RuntimeError(f"Comfy audio upload failed: {last_err}")
 
     async def download_view(
         self, filename: str, subfolder: str = "", type_: str = "output", dest: Path = None
@@ -788,13 +790,13 @@ def build_ref2va_prompt(
     ref_video_names = list(ref_video_names or [])
     ref_audio_names = list(ref_audio_names or [])
     if not ref_image_names and not ref_video_names and not ref_audio_names:
-        raise ValueError("Ref2VA için en az 1 referans görsel veya video gerekir")
+        raise ValueError("Ref2VA needs at least 1 reference image or video")
     if len(ref_image_names) > 9:
-        raise ValueError("En fazla 9 referans görsel")
+        raise ValueError("At most 9 reference images")
     if len(ref_video_names) > 3:
-        raise ValueError("En fazla 3 referans video")
+        raise ValueError("At most 3 reference videos")
     if len(ref_audio_names) > 3:
-        raise ValueError("En fazla 3 referans ses")
+        raise ValueError("At most 3 reference audio files")
     size_mode = "max" if str(ref_image_size).lower() == "max" else "match"
     m = {**REF2VA_MODELS, **(models or {})}
     g: dict[str, Any] = {
@@ -940,9 +942,9 @@ def build_ref2va_prompt(
 def add_h3_first_frame_guide(graph: dict[str, Any], first_frame_name: str) -> dict[str, Any]:
     """Anchor frame zero on a Ref2VA graph while retaining its identity references."""
     if not first_frame_name:
-        raise ValueError("Devam için başlangıç karesi gerekli")
+        raise ValueError("Continue needs a start frame")
     if graph.get("104", {}).get("class_type") != "MiniMaxH3ReferenceToVideo":
-        raise ValueError("İlk kare kılavuzu Ref2VA grafiği gerektirir")
+        raise ValueError("The first-frame guide requires the Ref2VA graph")
     graph["450"] = {"class_type": "LoadImage", "inputs": {"image": first_frame_name}}
     graph["451"] = {
         "class_type": "MiniMaxH3AddGuide",
@@ -1094,8 +1096,70 @@ def detect_sage_mode(comfy_root: Optional[Path] = None) -> Optional[str]:
         if (sp / "sageattn3").exists() or any(sp.glob("sageattn3*.dist-info")):
             return "sageattn3"
         if (sp / "sageattention").exists() or any(sp.glob("sageattention*.dist-info")):
-            return "auto"
+            return "auto" if sage_supports_gpu(sp / "sageattention") else None
     return None
+
+
+_CUDA_SM = (50, 52, 53, 60, 61, 62, 70, 72, 75, 80, 86, 87, 89, 90, 100, 101, 103, 110, 120, 121)
+_sage_arch_cache: dict[tuple, frozenset] = {}
+_gpu_sm_cache: list[Optional[int]] = []
+
+
+def cuda_binary_archs(blob: bytes) -> set[int]:
+    """SM versions of the cubins embedded in a CUDA extension (.so / .pyd).
+
+    Compressed fatbins hide their cubins, so an empty set means "unknown".
+    """
+    found: set[int] = set()
+    i = blob.find(b"\x7fELF")
+    while i != -1:
+        hdr = blob[i:i + 52]
+        if len(hdr) == 52 and hdr[4] == 2 and struct.unpack_from("<H", hdr, 18)[0] == 190:
+            flags = struct.unpack_from("<I", hdr, 48)[0]
+            for sm in ((flags >> 8) & 0xFF, flags & 0xFF):
+                if sm in _CUDA_SM:
+                    found.add(sm)
+                    break
+        i = blob.find(b"\x7fELF", i + 4)
+    return found
+
+
+def _gpu_sm() -> Optional[int]:
+    if not _gpu_sm_cache:
+        sm = None
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip().splitlines()
+            major, minor = out[0].strip().split(".")
+            sm = int(major) * 10 + int(minor)
+        except Exception:
+            sm = None
+        _gpu_sm_cache.append(sm)
+    return _gpu_sm_cache[0]
+
+
+def sage_supports_gpu(pkg: Path, gpu_sm: Optional[int] = None) -> bool:
+    """False only when the installed SageAttention build provably lacks kernels
+    for this GPU (cubins run on the same major arch with an equal or newer minor)."""
+    gpu_sm = _gpu_sm() if gpu_sm is None else gpu_sm
+    if gpu_sm is None:
+        return True
+    try:
+        libs = sorted(p for p in Path(pkg).glob("*") if p.suffix in (".so", ".pyd"))
+        key = tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in libs)
+        if key not in _sage_arch_cache:
+            archs: set[int] = set()
+            for p in libs:
+                archs |= cuda_binary_archs(p.read_bytes())
+            _sage_arch_cache[key] = frozenset(archs)
+        archs = _sage_arch_cache[key]
+    except OSError:
+        return True
+    if not archs:
+        return True
+    return any(a // 10 == gpu_sm // 10 and a % 10 <= gpu_sm % 10 for a in archs)
 
 
 _SAGE_MODES = (

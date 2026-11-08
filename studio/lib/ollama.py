@@ -145,7 +145,7 @@ class OllamaClient:
                 await asyncio.sleep(0.35 * (attempt + 1))
 
         if last_err and not content:
-            raise RuntimeError(f"Ollama chat başarısız: {last_err}")
+            raise RuntimeError(f"Ollama chat failed: {last_err}")
         return content
 
     _THINKING_MODELS = {

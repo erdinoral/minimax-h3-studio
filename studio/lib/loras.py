@@ -101,14 +101,14 @@ CATALOG: list[dict[str, Any]] = [{
   'experimental': True}] + [
     {
         "id": "",
-        "label": "Yok (varsayılan)",
+        "label": "None (default)",
         "file": "",
         "steps": 20,
         "sampler": "res_multistep",
         "scheduler": "simple",
         "strength": 1.0,
         "graphs": ["fl2va", "ref2va"],
-        "hint": "20 step · res_multistep",
+        "hint": "20 steps · res_multistep",
         "url": "",
         "preset": True,
     },
@@ -121,7 +121,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": "simple",
         "strength": 0.75,
         "graphs": ["fl2va"],
-        "hint": "Yeni video / first-last · 4 step · strength 0.75 · Ref/V2V’de kullanılmaz",
+        "hint": "New video / first-last · 4 steps · strength 0.75 · not used for Ref/V2V",
         "size_hint": "~1.8 GB",
         "url": (
             "https://huggingface.co/Kijai/MiniMax-H3_comfy/resolve/main/"
@@ -139,7 +139,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": "simple",
         "strength": 0.8,
         "graphs": ["fl2va"],
-        "hint": "6 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz",
+        "hint": "6-step turbo · FL2VA · not used for Ref/face/V2V",
         "size_hint": "~0.8 GB",
         "url": (
             "https://huggingface.co/SanDiegoDude/H3-Turbo-6-Step-LoRA-Comfy/resolve/main/"
@@ -156,7 +156,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 0.8,
         "graphs": ["fl2va"],
-        "hint": "Turbo · step600 eğitim adımı (4 step değil) · FL2VA · step sen ayarla",
+        "hint": "Turbo · trained for 600 steps (not 4 steps) · FL2VA · set steps yourself",
         "size_hint": "~0.7 GB",
         "url": (
             "https://huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora/resolve/main/"
@@ -173,7 +173,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 0.8,
         "graphs": ["fl2va", "ref2va"],
-        "hint": "Gerçekçi insan · T2V / I2V / Ref · step/sampler aynı kalır",
+        "hint": "Realistic people · T2V / I2V / Ref · steps/sampler unchanged",
         "size_hint": "~125 MB",
         "url": (
             "https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA/resolve/main/"
@@ -183,7 +183,7 @@ CATALOG: list[dict[str, Any]] = [{
     },
     {
         "id": "pinkfluffybunny",
-        "label": "PinkFluffyBunny (karakter)",
+        "label": "PinkFluffyBunny (character)",
         "file": "PinkFluffyBunny-pruned-fl2va-v1-rank128.safetensors",
         "aliases": ["PinkFluffyBunny-pruned-v1-rank128.safetensors"],
         "steps": None,
@@ -191,7 +191,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 0.75,
         "graphs": ["fl2va", "ref2va"],
-        "hint": "Karakter LoRA · Yeni video + Ref/yüz · step aynı",
+        "hint": "Character LoRA · New video + Ref/face · same steps",
         "size_hint": "~2.3 GB",
         "url": (
             "https://huggingface.co/SexGod1979/PinkFluffyBunny-MiniMax-H3/resolve/main/"
@@ -211,7 +211,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 0.7,
         "graphs": ["fl2va", "ref2va"],
-        "hint": "Film dokusu · trigger DY · strength 0.7 (harekette 0.5)",
+        "hint": "Film texture · trigger DY · strength 0.7 (0.5 in motion)",
         "size_hint": "~148 MB",
         "trigger": "DY",
         "url": (
@@ -232,7 +232,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 0.6,
         "graphs": ["fl2va", "ref2va"],
-        "hint": "Hareket kalitesi · strength 0.4–0.8",
+        "hint": "Motion quality · strength 0.4–0.8",
         "size_hint": "~296 MB",
         "url": (
             "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/"
@@ -249,7 +249,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 0.85,
         "graphs": ["fl2va", "ref2va"],
-        "hint": "Çarpışma / yerçekimi / cisim · strength 0.8–1.0 · turbo ile üst üste",
+        "hint": "Collision / gravity / objects · strength 0.8–1.0 · stacks with turbo",
         "size_hint": "~148 MB",
         "url": (
             "https://huggingface.co/Jojocodex/minimax-h3-spatial-physics-lora/resolve/main/"
@@ -266,7 +266,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": "simple",
         "strength": 0.8,
         "graphs": ["ref2va"],
-        "hint": "Ref/yüz 8 step turbo · T2V’de kullanılmaz · er_sde",
+        "hint": "Ref/face 8-step turbo · not used for T2V · er_sde",
         "size_hint": "~933 MB",
         "url": (
             "https://huggingface.co/Alex995647/loras-minimax-h3/resolve/main/"
@@ -285,7 +285,7 @@ CATALOG: list[dict[str, Any]] = [{
         "scheduler": None,
         "strength": 1.0,
         "graphs": ["still"],
-        "hint": "Karakter/mekan stilli · video kuyruğuna uygulanmaz · trigger ph0t0r34l",
+        "hint": "Character/location stills · not applied to the video queue · trigger ph0t0r34l",
         "size_hint": "~148 MB",
         "trigger": "ph0t0r34l",
         "url": (
@@ -358,15 +358,15 @@ def disk_spec(filename: str, bytes_n: int = 0) -> dict[str, Any]:
     scheduler = None
     preset = False
     graphs = ["fl2va", "ref2va"]
-    hint = "Klasörden eklendi · step/sampler aynı kalır · sadece MiniMax H3 LoRA"
+    hint = "Added from folder · steps/sampler unchanged · MiniMax H3 LoRAs only"
     if re.search(r"4[\-_]?step", low):
         steps, sampler, scheduler, preset = 4, "er_sde", "simple", True
         graphs = ["fl2va"]
-        hint = "4 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz"
+        hint = "4-step turbo · FL2VA · not used for Ref/face/V2V"
     elif re.search(r"6[\-_]?step", low):
         steps, sampler, scheduler, preset = 6, "er_sde", "simple", True
         graphs = ["fl2va"]
-        hint = "6 step turbo · FL2VA · Ref/yüz/V2V’de kullanılmaz"
+        hint = "6-step turbo · FL2VA · not used for Ref/face/V2V"
     elif "fl2v" in low or "fl2va" in low:
         graphs = ["fl2va"]
         hint = "FL2VA LoRA · Yeni video / first-last"

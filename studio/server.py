@@ -278,7 +278,7 @@ async def _rewrite_scene_text(
         model = await llm.resolve_model(None)
     except Exception as e:
         if require:
-            raise HTTPException(503, "Yönetmen LLM hazır değil — Ayarlar’dan model/key aç") from e
+            raise HTTPException(503, "The Director LLM is not ready — set a model/key in Settings") from e
         return text
     seed = _seed_scene_structured(text)
     sys = (
@@ -330,14 +330,14 @@ async def _rewrite_scene_text(
             if recovered:
                 return recovered
         if require:
-            raise HTTPException(502, "Rewrite H3 yapısına oturmadı — tekrar dene")
+            raise HTTPException(502, "The rewrite did not fit the H3 structure — try again")
         return text
     except HTTPException:
         raise
     except Exception as e:
         slog.warn("prompt rewrite skipped", err=e)
         if require:
-            raise HTTPException(502, f"Rewrite hata: {e}") from e
+            raise HTTPException(502, f"Rewrite error: {e}") from e
         return text
 
 def _normalize_http_url(raw: str, default: str) -> str:
@@ -413,8 +413,8 @@ def _acquire_single_instance() -> None:
     except OSError:
         sock.close()
         print(
-            f"H3 Studio zaten açık (lock :{lock_port} / port {PORT}). "
-            "İkinci örnek çıkıyor — çift kuyruk continue zincirini bozuyordu.",
+            f"H3 Studio is already running (lock :{lock_port} / port {PORT}). "
+            "Exiting this second instance — two queues used to break continue chains.",
             flush=True,
         )
         sys.exit(0)
@@ -425,7 +425,7 @@ def _acquire_single_instance() -> None:
         _lock_fh.flush()
     except Exception:
         pass
-    print(f"Studio tek örnek kilit: pid={os.getpid()} lock_port={lock_port}", flush=True)
+    print(f"Studio single-instance lock: pid={os.getpid()} lock_port={lock_port}", flush=True)
 
 # Base sizes at ~1080p short-edge reference; quality scales short edge.
 # H3 requires width/height multiples of 32 (see workflow Resolution Selector).
@@ -772,7 +772,7 @@ def _lora_for_graph(job: dict) -> tuple[Optional[str], float | dict[str, float]]
     graph = "ref2va" if mode in ("ref", "face", "v2v", "face_continue", "audio_continue") else "fl2va"
     if job.get("scene_audio_file") and job.get("scene_audio_mode") == "reference":
         graph = "ref2va"
-    if mode == "continuum" and job.get("ref_images"):
+    if mode == "continuum" and (job.get("ref_images") or job.get("continuum_ref_video")):
         graph = "ref2va"
     usable = []
     for item in name.split("|")[:5]:
@@ -1106,7 +1106,7 @@ async def _recover_saved_comfy_video(job: dict, source: Path) -> None:
     job["download_name"] = video_download_name(job, item_id=job["id"])
     job["status"] = "done"
     job["progress"] = 100
-    job["progress_label"] = "bitti (Comfy çıktısı kurtarıldı)"
+    job["progress_label"] = "done (Comfy output recovered)"
     job["error"] = None
     job["done_at"] = job.get("done_at") or time.time()
     job.pop("_reattach", None)
@@ -1138,14 +1138,14 @@ async def _reattach_completed_legacy_cancel(job: dict) -> bool:
         slog.warn_job(job, 'legacy cancelled output verification failed', err=exc)
         return False
     job.update(status='queued', error=None, _reattach=True,
-               progress_label='Comfy çıktısı doğrulandı — galeriye alınıyor',
+               progress_label='Comfy output verified — adding to gallery',
                recovered_from_status='cancelled')
     return True
 
 
 def _mark_user_cancelled(job: dict, source: str) -> None:
     job.update(cancel_stage=job.get('status'), cancel_progress=job.get('progress'))
-    job.update(status='cancelled', error='iptal', progress_label='iptal',
+    job.update(status='cancelled', error='cancelled', progress_label='cancelled',
                cancel_requested_at=time.time(), cancel_source=source,
                render_pause_requested=False, render_paused=False, render_control_ready=False)
 
@@ -1191,7 +1191,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
         **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "effective_spectrum", "character_manifest")},
-        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size","continuum_resume","continuity_method","native_context_chunks")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size","continuum_resume","continuity_method","native_context_chunks","continuum_ref_video")},
         **{k:job.get(k) for k in ('continuation_state_key','continuation_state_frames',
                                   'continuation_source_key','continuation_context_frames')},
         "batch_index": job.get("batch_index"),
@@ -1236,8 +1236,8 @@ def _ensure_queue_loop() -> None:
     reason = "ilk start"
     if _queue_task is not None and _queue_task.done():
         exc = _queue_task.exception() if not _queue_task.cancelled() else "cancelled"
-        reason = f"ölü worker ({exc})"
-    slog.info("queue loop başlatılıyor", reason=reason)
+        reason = f"dead worker ({exc})"
+    slog.info("starting queue loop", reason=reason)
     _queue_task = asyncio.create_task(_queue_loop(), name="h3-queue-loop")
 
 
@@ -1247,7 +1247,7 @@ async def _queue_supervisor_loop() -> None:
         try:
             _ensure_queue_loop()
         except Exception as e:
-            slog.exception("queue supervisor hata", e)
+            slog.exception("queue supervisor error", e)
         await asyncio.sleep(3)
 
 
@@ -1277,7 +1277,7 @@ def _wipe_production_files() -> dict[str, int]:
                 slog.warn("wipe silinemedi", path=str(p), err=e)
     _jobs = []
     _save_jobs()
-    slog.warn("production sıfırlandı (galeri korundu)", **removed)
+    slog.warn("production reset (gallery kept)", **removed)
     return removed
 
 
@@ -1370,6 +1370,8 @@ class GenerateBody(BaseModel):
     continuum_segment_prompts: list[str] | None = None
     continuum_context: str = Field("", max_length=8000)
     continuum_continuity: str = "balanced"
+    # Motion Transfer through Continuum: the single reference video guides each chunk in turn.
+    continuum_video_follow: bool = False
     prepare_refine: bool = False
     scene_audio_file: Optional[str] = None
     scene_audio_mode: str = "reference"
@@ -1455,6 +1457,8 @@ class MotionTransferLongBody(GenerateBody):
     segment_seconds: float = Field(motion_long.SEGMENT_SECONDS, ge=4.0, le=5.0)
     # Timed actions [{start, end?, text}] in reference-video seconds; each part gets its own.
     beats: list[dict[str, Any]] = Field(default_factory=list, max_length=64)
+    # "parts": separate jobs joined by ffmpeg; "continuum": one native run that carries motion context across chunks.
+    join_method: str = "parts"
 
 
 class SketchVideoBody(GenerateBody):
@@ -2180,7 +2184,7 @@ async def startup():
         elif pid and pid in live_pids and not j.get('cancel_requested_at'):
             # Orphaned watch — Studio died/false-error while Comfy still generating
             j["status"] = "queued"
-            j["progress_label"] = "Comfy’de sürüyor — yeniden bağlanılacak"
+            j["progress_label"] = "Still running in Comfy — reconnecting"
             j["error"] = None
             j["_reattach"] = True
             slog.info_job(j, "startup reattach", prompt=str(pid)[:8])
@@ -2198,7 +2202,7 @@ async def startup():
                 video_meta = comfy.extract_video_meta(entry.get("outputs") or {})
                 if video_meta:
                     j["status"] = "queued"
-                    j["progress_label"] = "Comfy çıktısı bulundu — galeriye alınıyor"
+                    j["progress_label"] = "Comfy output found — adding to gallery"
                     j["error"] = None
                     j["_reattach"] = True
                     slog.info_job(j, "startup recover completed timeout", prompt=str(pid)[:8])
@@ -2216,7 +2220,7 @@ async def startup():
                         slog.warn_job(j, "startup saved video recovery skipped", err=e)
         elif j.get("status") in ("queued", "running"):
             j["status"] = "queued"
-            j["progress_label"] = "sırada (yeniden)"
+            j["progress_label"] = "queued (again)"
             j.pop("prompt_id", None)
             j.pop("_reattach", None)
             slog.info_job(j, "startup requeue")
@@ -2301,7 +2305,7 @@ async def set_h3_acceleration(body: H3AccelerationBody):
         except Exception:
             loaded = False
         if not loaded:
-            raise HTTPException(409, f"{label} düğümü yüklenmedi; ComfyUI'yi yeniden başlatın.")
+            raise HTTPException(409, f"{label} node is not loaded; restart ComfyUI.")
     h3_acceleration.save_settings(settings, path)
     return await get_h3_acceleration()
 
@@ -2351,7 +2355,7 @@ async def clear_logs():
             p.write_text("", encoding="utf-8")
         except Exception:
             pass
-    slog.info("log dosyaları temizlendi")
+    slog.info("log files cleared")
     return {"ok": True}
 
 
@@ -2367,7 +2371,7 @@ async def reset_production(body: ResetBody = ResetBody()):
     Permanent Galeri archive is kept. Director chat is kept.
     """
     if _running:
-        raise HTTPException(400, "üretim sürerken sıfırlanamaz — önce Durdur")
+        raise HTTPException(400, "cannot reset while rendering — Stop first")
     async with _lock:
         if any(j.get("status") in ("running", "queued") for j in _jobs):
             # Allow wipe anyway if user wants clean restart — cancel first
@@ -2507,14 +2511,14 @@ async def pause_render(job_id: str, body: QueuePauseBody):
     async with _lock:
         job = next((row for row in _jobs if row['id'] == job_id), None)
         if not job:
-            raise HTTPException(404, 'job yok')
+            raise HTTPException(404, 'no job')
         token = job.get('render_control_token')
         if job.get('status') != 'running' or not token or not job.get('render_control_ready'):
-            raise HTTPException(409, 'Bu üretim henüz duraklatılamıyor / render is not ready to pause')
+            raise HTTPException(409, 'This render is not ready to pause yet')
         try:
             result = await render_control.command(COMFY_URL, token, body.paused)
         except httpx.HTTPError as exc:
-            raise HTTPException(409, 'Render durumu değişti; yenileyip tekrar deneyin / refresh render status') from exc
+            raise HTTPException(409, 'The render status changed; refresh and try again') from exc
         if job.get('status') != 'running':
             return job
         job.update(render_pause_requested=result['requested'], render_paused=result['paused'])
@@ -2587,7 +2591,7 @@ async def gallery_video(item_id: str, dl: int = Query(0)):
         if entry and entry.get("local_path") and Path(entry["local_path"]).exists():
             path = Path(entry["local_path"])
         else:
-            raise HTTPException(404, "galeri videosu yok")
+            raise HTTPException(404, "no gallery video")
     meta = entry or {"id": item_id}
     return _video_file_response(path, meta=meta, item_id=item_id, download=bool(dl))
 
@@ -2598,7 +2602,7 @@ async def delete_gallery_item(item_id: str):
     global _gallery
     entry = next((g for g in _gallery if g.get("id") == item_id), None)
     if not entry:
-        raise HTTPException(404, "galeri kaydı yok")
+        raise HTTPException(404, "no gallery record")
     extra = []
     lp = entry.get("local_path")
     if lp:
@@ -2615,14 +2619,14 @@ async def get_job(job_id: str):
     for j in _jobs:
         if j["id"] == job_id:
             return j
-    raise HTTPException(404, "job yok")
+    raise HTTPException(404, "no job")
 
 
 @app.get('/api/jobs/{job_id}/diagnostics')
 async def job_diagnostics(job_id: str):
     job = _clip_record(job_id)
     if not job:
-        raise HTTPException(404, 'job yok')
+        raise HTTPException(404, 'no job')
     entry = None
     if job.get('prompt_id'):
         try:
@@ -2650,7 +2654,7 @@ async def move_queued_job(job_id: str, body: QueueMoveBody):
         job = next((j for j in queued if j["id"] == job_id), None)
         target = next((j for j in queued if j["id"] == body.target_id), None)
         if not job or not target:
-            raise HTTPException(409, "Yalnızca sıradaki işler taşınabilir")
+            raise HTTPException(409, "Only queued jobs can be moved")
         if job is target:
             return {"ok": True}
         order = [j for j in queued if j is not job]
@@ -2661,7 +2665,7 @@ async def move_queued_job(job_id: str, body: QueueMoveBody):
         for j in order:
             parent_id = j.get("continue_from")
             if parent_id in position and position[parent_id] > position[j["id"]]:
-                raise HTTPException(409, "Devam klibi, bağlı olduğu klibin önüne taşınamaz")
+                raise HTTPException(409, "A continue clip cannot be moved before the clip it continues")
         slots = iter(order)
         _jobs[:] = [next(slots) if j.get("status") == "queued" else j for j in _jobs]
         _save_jobs()
@@ -2675,10 +2679,10 @@ async def cancel_job(job_id: str):
     async with _lock:
         job = next((j for j in _jobs if j["id"] == job_id), None)
         if not job:
-            raise HTTPException(404, "job yok")
+            raise HTTPException(404, "no job")
         status = job.get("status")
         if status not in ("queued", "running"):
-            raise HTTPException(400, "yalnızca sıradaki veya üretilen iş durdurulabilir")
+            raise HTTPException(400, "only queued or rendering jobs can be stopped")
         # A queued job has not reached ComfyUI yet, so it can be cancelled alone.
         if status == "queued":
             _mark_user_cancelled(job, 'job_stop')
@@ -2744,7 +2748,7 @@ async def _free_comfy_if_idle(*, reason: str) -> None:
 
 def _asset_plan(text, bindings, lib, existing=(), continuation=False, film_id=None):
     if film_id and str(lib.get("film_id") or "") != film_id:
-        raise HTTPException(409, "Asset seçimi başka filme ait; referansları yenileyin")
+        raise HTTPException(409, "The asset selection belongs to another film; refresh the references")
     try:
         return asset_references.resolve(text, bindings, lib,
             lambda f: (REFS / f).is_file() or (COMFY_INPUT / f).is_file(),
@@ -2794,13 +2798,13 @@ async def generate(body: GenerateBody):
     if str(body.quality) not in QUALITY_SHORT_EDGE:
         raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
+        raise HTTPException(503, "ComfyUI is not running — start it with Start in Pinokio")
 
     lora_bits = _lora_fields(body)
 
     if body.prompt_rewriter_enabled:
         if not await llm.healthy():
-            raise HTTPException(503, "Prompt düzenleme kapalı — Ayarlar’dan Yönetmen LLM aç")
+            raise HTTPException(503, "Prompt rewriting is off — turn on the Director LLM in Settings")
         rewritten = await _rewrite_scene_text(
             body.prompt,
             enabled=True,
@@ -2822,7 +2826,7 @@ async def generate(body: GenerateBody):
     continue_from = body.continue_from_job_id
     first_frame = body.first_frame_name
     if first_frame and (Path(first_frame).name != first_frame or not ((REFS / first_frame).is_file() or (COMFY_INPUT / first_frame).is_file())):
-        raise HTTPException(400, "Başlangıç karesi bulunamadı")
+        raise HTTPException(400, "Start frame not found")
     last_frame = body.last_frame_name
     ref_images = list(reference_plan["ref_images"] if reference_plan else (body.ref_images or []))
     ref_videos = list(body.ref_videos or [])
@@ -2846,7 +2850,7 @@ async def generate(body: GenerateBody):
         ref_images = []
         ref_videos = []
         if mode in ("i2v", "image_to_video") and not first_frame:
-            raise HTTPException(400, "I2V için başlangıç görseli seç")
+            raise HTTPException(400, "Select a start image for I2V")
         mode = "t2v"
     elif mode in ("v2v", "video", "video_ref", "motion"):
         mode = "v2v"
@@ -2854,11 +2858,11 @@ async def generate(body: GenerateBody):
         first_frame = None
         last_frame = None
         if not ref_videos:
-            raise HTTPException(400, "Motion Transfer için en az 1 hareket referans videosu yükle")
+            raise HTTPException(400, "Upload at least 1 motion reference video for Motion Transfer")
         if len(ref_videos) > 3:
-            raise HTTPException(400, "En fazla 3 referans video")
+            raise HTTPException(400, "At most 3 reference videos")
         if len(ref_images) > 9:
-            raise HTTPException(400, "En fazla 9 referans görsel")
+            raise HTTPException(400, "At most 9 reference images")
         # In V2V a supplied picture is the target look/identity, not a loose
         # style hint.  Keep its full reference resolution so motion video does
         # not overpower the requested character replacement.
@@ -2870,9 +2874,9 @@ async def generate(body: GenerateBody):
         last_frame = None
         ref_videos = []
         if not ref_images:
-            raise HTTPException(400, "Yüz referansı için en az 1 portre / yüz fotoğrafı yükle")
+            raise HTTPException(400, "Upload at least 1 portrait / face photo for the face reference")
         if len(ref_images) > 9:
-            raise HTTPException(400, "En fazla 9 referans görsel")
+            raise HTTPException(400, "At most 9 reference images")
         ref_image_size = ref_image_size or "max"
     elif mode in ("ref", "reference", "ref2va", "referans"):
         mode = "ref"
@@ -2880,11 +2884,11 @@ async def generate(body: GenerateBody):
         first_frame = None
         last_frame = None
         if not ref_images and not ref_videos and not (body.scene_audio_file and body.scene_audio_mode == "reference"):
-            raise HTTPException(400, "Referans için en az 1 görsel veya video yükle")
+            raise HTTPException(400, "Upload at least 1 image or video as a reference")
         if len(ref_images) > 9:
-            raise HTTPException(400, "En fazla 9 referans görsel")
+            raise HTTPException(400, "At most 9 reference images")
         if len(ref_videos) > 3:
-            raise HTTPException(400, "En fazla 3 referans video")
+            raise HTTPException(400, "At most 3 reference videos")
         ref_image_size = ref_image_size or "match"
     elif mode in ("continue", "devam") or continue_from:
         mode = "continue"
@@ -2904,15 +2908,15 @@ async def generate(body: GenerateBody):
                 continue_from = tip["id"]
             else:
                 raise HTTPException(
-                    400, "Devam için kaynak yok — bitmiş/sıradaki bir video seç veya önce üret"
+                    400, "Nothing to continue from — select a finished/queued video or render one first"
                 )
         if continue_from:
             parent = _clip_record(continue_from)
             if not parent:
-                raise HTTPException(400, "Devam kaynağı bulunamadı")
+                raise HTTPException(400, "Source clip for continue not found")
             st = parent.get("status")
             if st in ("error", "cancelled"):
-                raise HTTPException(400, "Devam kaynağı başarısız — başka video seç")
+                raise HTTPException(400, "The source clip failed — select another video")
             # Continuations must use the source canvas.  Do this server-side too:
             # a stale browser or an API caller must not turn a portrait chain into
             # a landscape one.  Legacy records can be recovered from dimensions.
@@ -2967,6 +2971,8 @@ async def generate(body: GenerateBody):
         ref_image_size = "max" if ref_image_size == "max" else "match"
         if mode == "v2v" and (body.v2v_role or "").strip().lower() == "face_swap":
             ref_images = [await _face_swap_reference(name) for name in ref_images]
+            # A head crop downscaled to the output size loses the facial detail the swap copies.
+            ref_image_size = "max"
     elif mode == "continue" and ref_images:
         ref_role = "face"
         ref_image_size = ref_image_size or "max"
@@ -2979,7 +2985,7 @@ async def generate(body: GenerateBody):
     if body.fast_preview and not detect_h3_tae(COMFY_ROOT):
         raise HTTPException(
             400,
-            "H3 TAE modeli bulunamadı: app/models/vae_approx/taeh3.safetensors",
+            "H3 TAE model not found: app/models/vae_approx/taeh3.safetensors",
         )
     if continue_aspect:
         body.aspect = continue_aspect
@@ -3037,7 +3043,11 @@ async def generate(body: GenerateBody):
     if body.continuation_method not in ('standard','continuum'):
         raise HTTPException(400, 'Unknown continuation method')
     if body.continuation_method == 'continuum':
-        if body.duration < 4 or body.duration > 15 or body.scene_audio_file or body.ref_videos:
+        follow_video = bool(body.continuum_video_follow and mode == "v2v" and len(ref_videos) == 1
+                            and not continue_from)
+        if follow_video and ref_images:
+            prompt_txt = continuum.align_reference_labels(prompt_txt, ref_images, ref_images)
+        if body.duration < 4 or body.duration > 15 or body.scene_audio_file or (ref_videos and not follow_video):
             raise HTTPException(400, 'Continuum supports 4–15 second chunks; external media is not supported in this first integration')
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.get(f"{COMFY_URL}/object_info")
@@ -3066,6 +3076,8 @@ async def generate(body: GenerateBody):
                           'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration,
                           'continuum_resume':bool(parent and not native_parent),
                           'continuum_context':context, 'continuum_continuity':continuity_mode}
+        if follow_video:
+            continuum_data['continuum_ref_video'] = ref_videos[0]
         if parent:
             continuum_data.update({key:parent[key] for key in (
                 'continuum_base_graph','continuum_model_link','continuum_sigma_link') if key in parent})
@@ -3116,8 +3128,9 @@ async def generate(body: GenerateBody):
         "audio_continuity": bool(body.audio_continuity),
         "ref_image_size": ref_image_size,
         "ref_role": ref_role,
+        "v2v_role": ((body.v2v_role or "").strip().lower() or None) if mode == "v2v" or ref_videos and mode == "continuum" else None,
         "progress": 0,
-        "progress_label": "sırada",
+        "progress_label": "queued",
         "error": None,
         "output": None,
         "created_at": time.time(),
@@ -3129,7 +3142,7 @@ async def generate(body: GenerateBody):
             "game" if (body.lane or "").strip().lower() == "game" else (
                 "motion" if mode in MOTION_MODES or (body.lane or "").strip().lower() == "motion" else "scene")),
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
-        "h3_models": h3_models.resolve("ref2va" if audio_reference or (mode == 'continuum' and ref_images) else h3_models.graph_for_mode(mode)),
+        "h3_models": h3_models.resolve("ref2va" if audio_reference or (mode == 'continuum' and (ref_images or ref_videos)) else h3_models.graph_for_mode(mode)),
         "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
         "fast_preview": bool(body.fast_preview),
         "sheet_job": bool(getattr(body, "sheet_job", False)),
@@ -3176,7 +3189,7 @@ def _ref_video_path(name: str) -> Path:
     for folder in (COMFY_INPUT, REF_VIDEOS):
         if safe and (folder / safe).is_file():
             return folder / safe
-    raise HTTPException(400, "Hareket referans videosu bulunamadı; videoyu yeniden yükle")
+    raise HTTPException(400, "Motion reference video not found; upload the video again")
 
 
 @app.post("/api/motion-transfer/long")
@@ -3187,13 +3200,17 @@ async def motion_transfer_long(body: MotionTransferLongBody):
     frame; when the last part finishes the parts are joined into one clip.
     """
     if not body.ref_videos:
-        raise HTTPException(400, "Motion Transfer için hareket referans videosu yükle")
+        raise HTTPException(400, "Upload a motion reference video for Motion Transfer")
     if len(body.ref_videos) > 1:
-        raise HTTPException(400, "Tam uzunlukta Motion Transfer tek hareket videosuyla çalışır")
+        raise HTTPException(400, "Full-length Motion Transfer works with a single motion video")
     source = _ref_video_path(body.ref_videos[0])
     seconds = await asyncio.to_thread(motion_long.probe_seconds, source)
     if not motion_long.MIN_SECONDS - 0.05 <= seconds <= motion_long.MAX_SECONDS + 0.5:
-        raise HTTPException(400, f"Hareket videosu {seconds:.1f} sn — 4–30 sn olmalı")
+        raise HTTPException(400, f"Motion video is {seconds:.1f} s — it must be 4–30 s")
+    if body.join_method == "continuum":
+        return await _motion_transfer_continuum(body, source, seconds)
+    if body.join_method != "parts":
+        raise HTTPException(400, "Unknown Motion Transfer join method")
     windows = motion_long.plan_windows(min(seconds, motion_long.MAX_SECONDS), body.segment_seconds)
     long_id = f"mlong-{uuid.uuid4().hex[:10]}"
     slices = []
@@ -3238,6 +3255,40 @@ async def motion_transfer_long(body: MotionTransferLongBody):
             "motion_long_id": long_id, "seconds": seconds}
 
 
+async def _motion_transfer_continuum(body: MotionTransferLongBody, source: Path, seconds: float) -> dict:
+    """Experimental: one Continuum run follows the reference video chunk by chunk.
+
+    Each chunk sees its own interval of the source and the previous chunk's last
+    frames as context, instead of a single boundary still.
+    """
+    chunk = int(motion_long.SEGMENT_SECONDS)
+    # Chunks are all the same length: a remainder is either cut from the source or rendered unguided.
+    chunks = max(1, int(min(seconds, motion_long.MAX_SECONDS) / chunk + 0.5))
+    local = REF_VIDEOS / f"mcont-{uuid.uuid4().hex[:10]}.mp4"
+    try:
+        await asyncio.to_thread(motion_long.slice_reference, source, local, 0.0, min(seconds, chunks * chunk))
+        name = await comfy.upload_video(local, local.name)
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    run = body.model_copy(deep=True)
+    if body.beats:
+        # One native run reads one prompt list; keep the timed actions in order inside it.
+        run.prompt = motion_long.part_prompts(
+            body.prompt, body.beats, [{"start_frame": 0, "frames": chunks * chunk * motion_long.FPS}])[0]
+    run.mode = "v2v"
+    run.ref_videos = [name]
+    run.duration = chunk
+    run.continuation_method = "continuum"
+    run.continuum_chunks = chunks
+    run.continuum_segment_prompts = None
+    run.continuum_video_follow = True
+    run.continue_from_job_id = None
+    run.lane = "motion"
+    job = await generate(run)
+    slog.info("motion continuum queued", id=job["id"], seconds=round(seconds, 2), chunks=chunks)
+    return {**job, "jobs": [job], "count": 1, "seconds": seconds, "join_method": "continuum"}
+
+
 _motion_long_locks: dict[str, asyncio.Lock] = {}
 
 
@@ -3265,7 +3316,7 @@ def _recover_motion_flags(jobs: list[dict]) -> None:
         job.pop("sketch_animating", None)
         if job.get("motion_long_merge") == "running":
             job["motion_long_merge"] = "error"
-            job["motion_long_error"] = "Studio yeniden başladı; birleştirmeyi tekrar dene"
+            job["motion_long_error"] = "Studio restarted; try joining again"
 
 
 async def _assemble_motion_long(long_id: str) -> Optional[dict]:
@@ -3309,7 +3360,7 @@ async def _assemble_motion_long_locked(long_id: str) -> Optional[dict]:
         "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength",
         "effective_spectrum", "h3_models", "ref_images", "silent_audio", "purpose", "lane", "v2v_role")}
     final.update(
-        id=final_id, mode="motion_long", status="done", progress=100, progress_label="bitti",
+        id=final_id, mode="motion_long", status="done", progress=100, progress_label="done",
         duration=max(1, round(frames / motion_long.FPS)), video_seconds=frames / motion_long.FPS,
         created_at=first.get("created_at"), started_at=first.get("started_at"), done_at=time.time(),
         local_path=str(out),
@@ -3354,7 +3405,7 @@ async def motion_transfer_long_assemble(long_id: str):
     except Exception as e:
         raise HTTPException(500, str(e)[-400:]) from e
     if not final:
-        raise HTTPException(409, "Tüm parçalar bitmeden birleştirilemez")
+        raise HTTPException(409, "Cannot join before all parts finish")
     return final
 
 
@@ -3362,16 +3413,16 @@ async def motion_transfer_long_assemble(long_id: str):
 async def motion_transfer_long_resume(long_id: str):
     """Re-queue the failed part and the parts after it; finished parts are never rendered again."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     async with _lock:
         parts = _motion_long_parts(long_id)
         if not parts:
-            raise HTTPException(404, "Uzun Motion işi bulunamadı")
+            raise HTTPException(404, "Long Motion job not found")
         if any(j.get("status") in ("queued", "running") for j in parts):
-            raise HTTPException(409, "Parçalar zaten sırada veya üretiliyor")
+            raise HTTPException(409, "The parts are already queued or rendering")
         failed = [j for j in parts if j.get("status") in ("error", "cancelled")]
         if not failed:
-            raise HTTPException(409, "Devam ettirilecek başarısız parça yok")
+            raise HTTPException(409, "There is no failed part to resume")
         for job in failed:
             _reset_job_for_retry(job)
         _set_motion_long_merge(long_id, None)
@@ -3411,14 +3462,14 @@ async def batch(body: BatchBody):
     if str(body.quality) not in QUALITY_SHORT_EDGE:
         raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     await _free_llm_for_production()
     purpose = (body.purpose or "").strip() or None
     lora_bits = _lora_fields(body)
     silent = bool(body.silent_audio) or bool(body.music_id)
     prompts = [p.strip() for p in body.prompts if p.strip()]
     if not prompts:
-        raise HTTPException(400, "prompt yok")
+        raise HTTPException(400, "no prompt")
     if body.prompt_rewriter_enabled:
         rewritten_prompts = []
         for i, p in enumerate(prompts):
@@ -3441,26 +3492,26 @@ async def batch(body: BatchBody):
     if body.continue_from_job_id:
         tip = _clip_record(body.continue_from_job_id)
         if not tip or tip.get("status") not in ("queued", "running", "done"):
-            raise HTTPException(400, "Seçilen önceki sahne klibi bulunamadı")
+            raise HTTPException(400, "The selected previous scene clip was not found")
         first_mode = shot_modes[0] if shot_modes else ""
         # Single-shot continue OR multi-shot batch whose first scene is Continue
         # (e.g. chapter produce chaining from the previous chapter's last frame).
         if use_per_shot and first_mode in ("continue", "devam", "i2v", "last_frame"):
             pass
         elif len(prompts) != 1 or not use_per_shot or first_mode != "continue":
-            raise HTTPException(400, "Önceki klip yalnızca devam sahnesinde kullanılabilir")
+            raise HTTPException(400, "A previous clip can only be used in a continue scene")
     elif use_per_shot:
         # Mixed New Video / Continue: do not auto-continue from the global chain tip
         tip = None
         append_global = False
         chain_next = True
     if body.parent_job_ids is not None and len(body.parent_job_ids) != len(prompts):
-        raise HTTPException(400, "Önceki klip listesi çekim sayısıyla eşleşmiyor")
+        raise HTTPException(400, "The previous clip list does not match the number of shots")
     for parent_id in body.parent_job_ids or []:
         if parent_id:
             source = _clip_record(parent_id)
             if not source or source.get("status") not in ("queued", "running", "done"):
-                raise HTTPException(400, "Seçilen önceki klip bulunamadı veya başarısız")
+                raise HTTPException(400, "The selected previous clip was not found or failed")
     policy = {
         "purpose": purpose or ("music_video" if silent else "short_film"),
         "silentAudio": silent,
@@ -3490,13 +3541,13 @@ async def batch(body: BatchBody):
     start_from_tip = bool(parent)
     lib = cinema.load()
     if body.shot_bindings is not None and len(body.shot_bindings) != len(prompts):
-        raise HTTPException(400, "Asset seçim listesi çekim sayısıyla eşleşmiyor")
+        raise HTTPException(400, "The asset selection list does not match the number of shots")
     if body.first_frame_names is not None and len(body.first_frame_names) != len(prompts):
-        raise HTTPException(400, "Başlangıç karesi listesi çekim sayısıyla eşleşmiyor")
+        raise HTTPException(400, "The start frame list does not match the number of shots")
     frame_names = list(body.first_frame_names or [None] * len(prompts))
     for frame in frame_names:
         if frame and (Path(frame).name != frame or not ((REFS / frame).is_file() or (COMFY_INPUT / frame).is_file())):
-            raise HTTPException(400, "Başlangıç karesi bulunamadı: " + frame)
+            raise HTTPException(400, "Start frame not found: " + frame)
     plans = [_asset_plan(text,
         body.shot_bindings[i] if body.shot_bindings is not None else _scene_asset_bindings(body),
         lib, body.ref_images or [],
@@ -3521,7 +3572,7 @@ async def batch(body: BatchBody):
             if explicit_parent and want_continue:
                 parent = explicit_parent
             if want_continue and not parent:
-                raise HTTPException(400, "Devam için önceki klip seçilmeli; yeni videoya dönüştürülmedi")
+                raise HTTPException(400, "Continue needs a previous clip; it was not converted into a new video")
             if want_continue:
                 if parent:
                     cont_from = parent
@@ -3569,7 +3620,7 @@ async def batch(body: BatchBody):
                 "sampler": shot_sampler,
                 "scheduler": shot_scheduler,
                 "refmod_enabled": h3_enhancements.settings()["refmod_enabled"],
-                "progress_label": "sırada",
+                "progress_label": "queued",
                 "continue_from": cont_from,
                 "first_frame_name": frame_names[i] if not cont_from else None,
                 "ref_images": shot_refs,
@@ -3665,20 +3716,20 @@ async def continue_job(job_id: str, body: GenerateBody):
 async def retry_job(job_id: str):
     """Re-queue a failed/cancelled job with the same settings."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     async with _lock:
         job = next((j for j in _jobs if j["id"] == job_id), None)
         if not job:
-            raise HTTPException(404, "job yok")
+            raise HTTPException(404, "no job")
         if job["status"] not in ("error", "cancelled"):
-            raise HTTPException(400, "sadece error / cancelled tekrar denenir")
+            raise HTTPException(400, "only error / cancelled jobs can be retried")
         parent_id = job.get("continue_from")
         if parent_id:
             parent = next((j for j in _jobs if j["id"] == parent_id), None)
             if not parent or parent.get("status") != "done":
                 raise HTTPException(
                     400,
-                    "önce önceki klip done olmalı — önce onu tekrar dene",
+                    "the previous clip must be done first — retry it first",
                 )
         _reset_job_for_retry(job)
         _save_jobs()
@@ -3689,7 +3740,7 @@ async def retry_job(job_id: str):
 def _reset_job_for_retry(job: dict) -> None:
     job["status"] = "queued"
     job["progress"] = 0
-    job["progress_label"] = "tekrar sırada"
+    job["progress_label"] = "queued again"
     job["error"] = None
     job["output"] = None
     job["prompt_id"] = None
@@ -3711,7 +3762,7 @@ def _reset_job_for_retry(job: dict) -> None:
 async def retry_all_errors():
     """Re-queue every error/cancelled job (parents before children)."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     queued = []
     async with _lock:
         failed = [j for j in _jobs if j["status"] in ("error", "cancelled")]
@@ -3757,16 +3808,16 @@ async def delete_job(job_id: str, delete_files: bool = True):
     async with _lock:
         job = next((j for j in _jobs if j["id"] == job_id), None)
         if not job:
-            raise HTTPException(404, "job yok")
+            raise HTTPException(404, "no job")
         if job.get("status") in ("running", "queued"):
-            raise HTTPException(400, "çalışan / sıradaki iş silinmez — önce Durdur")
+            raise HTTPException(400, "running / queued jobs cannot be deleted — Stop first")
         long_id = job.get("motion_long_id")
         if long_id and job.get("mode") != "motion_long" and job.get("status") == "done":
             siblings = [j for j in _jobs if j.get("motion_long_id") == long_id]
             joined = any(j.get("mode") == "motion_long" for j in siblings)
             pending = any(j.get("status") in ("running", "queued") for j in siblings)
             if pending and not joined:
-                raise HTTPException(400, "Bu, tam uzunluk Motion Transfer parçası — tüm parçalar birleşince silebilirsin")
+                raise HTTPException(400, "This is a full-length Motion Transfer part — you can delete it after all parts are joined")
         if job.get("status") == "done":
             try:
                 _archive_job_to_gallery(job)
@@ -3894,7 +3945,7 @@ def _queue_save_entry(job: dict) -> dict:
 
 def _queue_save_path(save_id: str) -> Path:
     if not re.fullmatch(r"[a-f0-9]{12}", save_id or ""):
-        raise HTTPException(404, "kayıt yok")
+        raise HTTPException(404, "no record")
     return QUEUE_SAVES / f"{save_id}.json"
 
 
@@ -3928,7 +3979,7 @@ async def save_queue(body: QueueSaveBody):
         picked = [j for j in _jobs if j.get("status") in ("running", "queued")
                   and (not lane or _job_lane(j) == lane)]
         if not picked:
-            raise HTTPException(400, "Kaydedilecek iş yok")
+            raise HTTPException(400, "No job to save")
         running = [j for j in picked if j.get("status") == "running"]
         if running:
             try:
@@ -3941,7 +3992,7 @@ async def save_queue(body: QueueSaveBody):
                 _mark_user_cancelled(j, "queue_save")
         queued = [j for j in picked if j.get("status") == "queued"]
         save_id = uuid.uuid4().hex[:12]
-        name = body.name.strip()[:80] or time.strftime("Kuyruk %d.%m %H:%M")
+        name = body.name.strip()[:80] or time.strftime("Queue %d.%m %H:%M")
         payload = {"id": save_id, "name": name, "created_at": time.time(),
                    "jobs": [_queue_save_entry(j) for j in running + queued]}
         QUEUE_SAVES.mkdir(parents=True, exist_ok=True)
@@ -3960,11 +4011,11 @@ async def load_queue_save(save_id: str):
     """Append a saved queue behind the current one, in its saved order, then drop the save."""
     path = _queue_save_path(save_id)
     if not path.exists():
-        raise HTTPException(404, "kayıt yok")
+        raise HTTPException(404, "no record")
     data = json.loads(path.read_text(encoding="utf-8"))
     entries = [e for e in data.get("jobs") or [] if isinstance(e, dict)]
     if not entries:
-        raise HTTPException(400, "Kayıt boş")
+        raise HTTPException(400, "The record is empty")
     async with _lock:
         new_ids = {e["id"]: str(uuid.uuid4()) for e in entries if e.get("id")}
         now = time.time()
@@ -3975,7 +4026,7 @@ async def load_queue_save(save_id: str):
             for key in _QUEUE_SAVE_LINK_KEYS:
                 if job.get(key) in new_ids:
                     job[key] = new_ids[job[key]]
-            job.update(status="queued", progress=0, progress_label="kayıttan sırada",
+            job.update(status="queued", progress=0, progress_label="queued from record",
                        created_at=now + n / 1000, restored_from_save=save_id)
             restored.append(job)
         _jobs.extend(restored)
@@ -3990,7 +4041,7 @@ async def load_queue_save(save_id: str):
 async def delete_queue_save(save_id: str):
     path = _queue_save_path(save_id)
     if not path.exists():
-        raise HTTPException(404, "kayıt yok")
+        raise HTTPException(404, "no record")
     path.unlink()
     return {"ok": True, "id": save_id}
 
@@ -4009,17 +4060,17 @@ async def clip_video(job_id: str, dl: int = Query(0)):
         return _video_file_response(
             gal, meta=entry or {"id": job_id}, item_id=job_id, download=bool(dl)
         )
-    raise HTTPException(404, "video yok")
+    raise HTTPException(404, "no video")
 
 
 async def _import_reference_bytes(raw: bytes, filename: str = "ref.png") -> dict:
     """Put a trusted image into H3's reference store and Comfy input folder."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı — referans yüklenemez")
+        raise HTTPException(503, "ComfyUI is not running — references cannot be uploaded")
     if not raw:
-        raise HTTPException(400, "boş dosya")
+        raise HTTPException(400, "empty file")
     if len(raw) > 40 * 1024 * 1024:
-        raise HTTPException(400, "dosya çok büyük (max 40MB)")
+        raise HTTPException(400, "file is too large (max 40 MB)")
     orig = Path(filename or "ref.png").name
     ext = orig.rsplit(".", 1)[-1].lower() if "." in orig else "png"
     if ext not in ("png", "jpg", "jpeg", "webp", "bmp"):
@@ -4032,7 +4083,7 @@ async def _import_reference_bytes(raw: bytes, filename: str = "ref.png") -> dict
     try:
         comfy_name = await comfy.upload_image(dest, local_name)
     except Exception as e:
-        raise HTTPException(502, f"Comfy upload hata: {e}") from e
+        raise HTTPException(502, f"Comfy upload error: {e}") from e
     return {
         "id": rid,
         "name": comfy_name,
@@ -4079,7 +4130,7 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
     risking a VRAM crash on a single-GPU installation.
     """
     if _running or any(j.get("status") in ("queued", "running") for j in _jobs):
-        raise HTTPException(409, "H3 üretimi/kuyruğu boş olmalı — Image Studio ayrı ComfyUI ve aynı VRAM'i kullanır")
+        raise HTTPException(409, "The H3 render queue must be empty — Image Studio uses a separate ComfyUI on the same VRAM")
     if await comfy.healthy():
         await comfy.free_memory()
     prompt = body.prompt.strip()
@@ -4096,28 +4147,28 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
             health_response = await client.get(f"{IMAGE_STUDIO_URL}/api/status")
             health_payload = health_response.json() if health_response.content else {}
             if health_response.is_error or not health_payload.get("ok"):
-                raise HTTPException(503, "Image Studio veya kendi ComfyUI'si açık değil")
+                raise HTTPException(503, "Image Studio or its own ComfyUI is not running")
             image_comfy_url = str(health_payload.get("comfy_url") or "").rstrip("/")
             if body.source_image:
                 source_name = Path(body.source_image).name
                 source_path = next((p for p in (REFS / source_name, COMFY_INPUT / source_name) if p.is_file()), None)
                 if not source_path:
-                    raise HTTPException(400, "Kaynak referans görseli bulunamadı")
+                    raise HTTPException(400, "Source reference image not found")
                 upload_response = await client.post(
                     f"{IMAGE_STUDIO_URL}/api/upload",
                     files={"file": (source_path.name, source_path.read_bytes(), "image/png")},
                 )
                 upload_payload = upload_response.json() if upload_response.content else {}
                 if upload_response.is_error:
-                    raise HTTPException(upload_response.status_code, str(upload_payload.get("detail") or "Image Studio referansı yükleyemedi"))
+                    raise HTTPException(upload_response.status_code, str(upload_payload.get("detail") or "Image Studio could not upload the reference"))
                 request_body.update({"mode": "vary", "image": upload_payload.get("name") or "", "denoise": 0.55})
             response = await client.post(f"{IMAGE_STUDIO_URL}/api/generate", json=request_body)
             payload = response.json() if response.content else {}
             if response.is_error:
-                raise HTTPException(response.status_code, str(payload.get("detail") or "Image Studio üretimi başlatılamadı"))
+                raise HTTPException(response.status_code, str(payload.get("detail") or "The Image Studio render could not be started"))
             image_job_id = str(payload.get("id") or "")
             if not image_job_id:
-                raise HTTPException(502, "Image Studio geçerli iş kimliği döndürmedi")
+                raise HTTPException(502, "Image Studio did not return a valid job id")
 
             # Image Studio exposes its own job progress, but the bridge returns
             # only once there is a durable image that H3 can safely import.
@@ -4127,12 +4178,12 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
                 status_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs/{image_job_id}")
                 status_payload = status_response.json() if status_response.content else {}
                 if status_response.is_error:
-                    raise HTTPException(502, "Image Studio işi okunamadı")
+                    raise HTTPException(502, "The Image Studio job could not be read")
                 status = str(status_payload.get("status") or "").lower()
                 if status == "done" and status_payload.get("has_image"):
                     image_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs/{image_job_id}/image")
                     if image_response.is_error or not image_response.content:
-                        raise HTTPException(502, "Image Studio görseli indirilemedi")
+                        raise HTTPException(502, "The Image Studio image could not be downloaded")
                     # Qwen stays resident in Image Studio's separate ComfyUI by
                     # default. Free it before the next H3 render needs the GPU.
                     if image_comfy_url:
@@ -4151,12 +4202,12 @@ async def create_image_studio_reference(body: ImageStudioReferenceBody):
                     result.update({"source": "image-studio", "image_studio_job_id": image_job_id})
                     return result
                 if status in ("error", "cancelled", "canceled"):
-                    raise HTTPException(502, str(status_payload.get("error") or "Image Studio üretimi durdu"))
+                    raise HTTPException(502, str(status_payload.get("error") or "The Image Studio render stopped"))
     except HTTPException:
         raise
     except httpx.HTTPError as exc:
-        raise HTTPException(503, f"Image Studio ulaşılamıyor ({IMAGE_STUDIO_URL})") from exc
-    raise HTTPException(504, "Image Studio görseli 45 dakika içinde tamamlanmadı")
+        raise HTTPException(503, f"Image Studio is unreachable ({IMAGE_STUDIO_URL})") from exc
+    raise HTTPException(504, "The Image Studio image did not finish within 45 minutes")
 
 
 @app.post("/api/refs/upload-video")
@@ -4164,7 +4215,7 @@ async def upload_ref_video(file: UploadFile = File(...), start: Optional[float] 
                            end: Optional[float] = Form(None)):
     """Upload a reference video to Studio + Comfy input/ for LoadVideo."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı — video yüklenemez")
+        raise HTTPException(503, "ComfyUI is not running — video cannot be uploaded")
     trimming = start is not None or end is not None
     # A selection is cut down to ≤30 s on the server, so long source files are fine.
     limit_mb = 4096 if trimming else 200
@@ -4183,12 +4234,12 @@ async def upload_ref_video(file: UploadFile = File(...), start: Optional[float] 
             if size > limit_mb * 1024 * 1024:
                 out.close()
                 dest.unlink(missing_ok=True)
-                raise HTTPException(400, f"video çok büyük (max {limit_mb} MB)"
-                                    + ("" if trimming else " — uzun videolarda bir bölüm seç"))
+                raise HTTPException(400, f"video is too large (max {limit_mb} MB)"
+                                    + ("" if trimming else " — select a section of long videos"))
             out.write(chunk)
     if not size:
         dest.unlink(missing_ok=True)
-        raise HTTPException(400, "boş dosya")
+        raise HTTPException(400, "empty file")
     source_name = local_name
     if trimming:
         from lib.media_trim import trim_reference
@@ -4207,7 +4258,7 @@ async def upload_ref_video(file: UploadFile = File(...), start: Optional[float] 
     try:
         comfy_name = await comfy.upload_video(dest, local_name)
     except Exception as e:
-        raise HTTPException(502, f"Comfy video upload hata: {e}") from e
+        raise HTTPException(502, f"Comfy video upload error: {e}") from e
     return {
         "id": rid,
         "name": comfy_name,
@@ -4228,7 +4279,7 @@ async def motionbricks_file(path: str):
     except FileNotFoundError:
         raise HTTPException(404, "not found") from None
     except httpx.HTTPError as exc:
-        raise HTTPException(502, f"MotionBricks indirilemedi: {exc}") from exc
+        raise HTTPException(502, f"MotionBricks could not be downloaded: {exc}") from exc
     return FileResponse(cached, media_type=motionbricks.media_type(path))
 
 
@@ -4250,10 +4301,10 @@ async def motionbricks_take(file: UploadFile = File(...)):
             while chunk := await file.read(8 * 1024 * 1024):
                 size += len(chunk)
                 if size > 600 * 1024 * 1024:
-                    raise HTTPException(400, "robot kaydı çok büyük (max 600 MB)")
+                    raise HTTPException(400, "robot recording is too large (max 600 MB)")
                 out.write(chunk)
         if not size:
-            raise HTTPException(400, "boş kayıt")
+            raise HTTPException(400, "empty record")
         try:
             seconds = await asyncio.to_thread(motionbricks.encode_take, frames, dest)
         except RuntimeError as exc:
@@ -4262,7 +4313,7 @@ async def motionbricks_take(file: UploadFile = File(...)):
         frames.unlink(missing_ok=True)
     if not motionbricks.MIN_SECONDS - 0.05 <= seconds <= motionbricks.MAX_SECONDS + 0.05:
         dest.unlink(missing_ok=True)
-        raise HTTPException(400, f"Robot kaydı {seconds:.1f} sn; 4–30 sn arası olmalı")
+        raise HTTPException(400, f"Robot recording is {seconds:.1f} s; it must be 4–30 s")
     comfy_name = local_name
     if await comfy.healthy():
         try:
@@ -4276,7 +4327,7 @@ async def motionbricks_take(file: UploadFile = File(...)):
             shutil.copy2(dest, COMFY_INPUT / local_name)
             comfy_name = local_name
         except OSError as e:
-            raise HTTPException(500, f"Robot kaydı Comfy giriş klasörüne kopyalanamadı: {e}") from e
+            raise HTTPException(500, f"The robot recording could not be copied to the Comfy input folder: {e}") from e
     return {
         "id": rid,
         "name": comfy_name,
@@ -4294,12 +4345,12 @@ async def upload_ref_audio(file: UploadFile = File(...), start: Optional[float] 
                            end: Optional[float] = Form(None)):
     """Upload a voice clip to Studio + Comfy input/ for LoadAudio / Multishot voice_ref."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı — ses yüklenemez")
+        raise HTTPException(503, "ComfyUI is not running — audio cannot be uploaded")
     raw = await file.read()
     if not raw:
-        raise HTTPException(400, "boş dosya")
+        raise HTTPException(400, "empty file")
     if len(raw) > 40 * 1024 * 1024:
-        raise HTTPException(400, "ses çok büyük (max 40MB)")
+        raise HTTPException(400, "audio is too large (max 40 MB)")
     orig = Path(file.filename or "voice.wav").name
     ext = orig.rsplit(".", 1)[-1].lower() if "." in orig else "wav"
     if ext not in ("wav", "mp3", "flac", "ogg", "m4a", "aac"):
@@ -4322,7 +4373,7 @@ async def upload_ref_audio(file: UploadFile = File(...), start: Optional[float] 
     try:
         comfy_name = await comfy.upload_audio(dest, local_name)
     except Exception as e:
-        raise HTTPException(502, f"Comfy audio upload hata: {e}") from e
+        raise HTTPException(502, f"Comfy audio upload error: {e}") from e
     return {
         "id": rid,
         "name": comfy_name,
@@ -4340,7 +4391,7 @@ async def get_ref_audio(filename: str):
     name = Path(filename).name
     path = REF_AUDIOS / name
     if not path.exists():
-        raise HTTPException(404, "ses yok")
+        raise HTTPException(404, "no audio")
     return FileResponse(path)
 
 
@@ -4349,7 +4400,7 @@ async def get_ref_video(filename: str):
     name = Path(filename).name
     path = REF_VIDEOS / name
     if not path.exists():
-        raise HTTPException(404, "video yok")
+        raise HTTPException(404, "no video")
     return FileResponse(path, media_type="video/mp4")
 
 
@@ -4387,7 +4438,7 @@ async def delete_ref(filename: str):
         if path.exists():
             removed = _unlink_retry(path) or removed
     if not removed:
-        raise HTTPException(404, "görsel yok")
+        raise HTTPException(404, "no image")
     match = re.fullmatch(r"(h3_sheet_[a-f0-9]{12})_(?:portrait|front|back)\.png", name)
     if match:
         source_name = match.group(1) + ".png"
@@ -4419,7 +4470,7 @@ async def delete_ref_video(filename: str):
         if path.exists():
             removed = _unlink_retry(path) or removed
     if not removed:
-        raise HTTPException(404, "video yok")
+        raise HTTPException(404, "no video")
     slog.info("reference video deleted", filename=name)
     return {"ok": True, "filename": name}
 
@@ -4460,11 +4511,11 @@ async def prompt_rewrite(body: PromptRewriteBody):
     """Rewrite a Sahne prompt without queueing (LLM instruction polish)."""
     raw = (body.prompt or "").strip()
     if not raw:
-        raise HTTPException(400, "prompt yok")
+        raise HTTPException(400, "no prompt")
     if not body.prompt_rewriter_enabled:
         return {"prompt": raw, "rewritten": False}
     if not await llm.healthy():
-        raise HTTPException(503, "Yönetmen LLM hazır değil — Ayarlar’dan model/key aç")
+        raise HTTPException(503, "The Director LLM is not ready — set a model/key in Settings")
     out = await _rewrite_scene_text(
         raw, enabled=True, context=(body.context or "") + guidance_block(body.lora_names), require=True
     )
@@ -4476,9 +4527,9 @@ async def cinema_ingest(body: CinemaIngestBody):
     """Paste a role/screenplay → LLM fills cinema characters, locations, shots."""
     raw = (body.text or "").strip()
     if len(raw) < 40:
-        raise HTTPException(400, "Rol metni çok kısa — sahne / karakter içeren senaryo yapıştır")
+        raise HTTPException(400, "The role text is too short — paste a script with scenes / characters")
     if not await llm.healthy():
-        raise HTTPException(503, "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan key ekle")
+        raise HTTPException(503, "The Director LLM is not ready — add a key in Settings (top right)")
     model = await llm.resolve_model(body.model or _director_model)
     clip = int(body.duration or cinema.load().get("duration") or 5)
     if clip not in (4, 5, 6, 8, 10, 15):
@@ -4509,7 +4560,7 @@ async def cinema_ingest(body: CinemaIngestBody):
             num_predict=8192,
         )
     except Exception as e:
-        raise HTTPException(502, f"Yönetmen LLM hata ({llm.provider()}): {e}") from e
+        raise HTTPException(502, f"Director LLM error ({llm.provider()}): {e}") from e
     parsed = extract_json_object(reply) or {}
     brief = parsed.get("brief") if isinstance(parsed.get("brief"), dict) else parsed
     if not isinstance(brief, dict):
@@ -4634,10 +4685,10 @@ async def _cinema_director_run(body: CinemaDirectorBody, on_status=None) -> dict
     if not chars and not locs and len(role) < 40:
         raise HTTPException(
             400,
-            "Önce karakter/mekan kartı ekle veya rol metni yapıştır",
+            "Add a character/location card or paste a role text first",
         )
     if not await llm.healthy():
-        raise HTTPException(503, "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan key ekle")
+        raise HTTPException(503, "The Director LLM is not ready — add a key in Settings (top right)")
     model = await llm.resolve_model(body.model or _director_model)
     clip = int(body.duration or lib.get("duration") or 5)
     if clip not in ALLOWED_DURATIONS:
@@ -4682,7 +4733,7 @@ async def _cinema_director_run(body: CinemaDirectorBody, on_status=None) -> dict
             _director_progress.reset(token)
 
     if not brief.get("shots"):
-        raise HTTPException(502, "Yönetmen shot üretemedi")
+        raise HTTPException(502, "The Director could not produce shots")
 
     thin = int(brief.get("thinShotCount") or 0)
     shots = brief.get("shots") or []
@@ -4700,8 +4751,8 @@ async def _cinema_director_run(body: CinemaDirectorBody, on_status=None) -> dict
     if thin_real > max(1, len(shots) // 3):
         raise HTTPException(
             502,
-            f"Yönetmen kalite kapısı: {thin_real}/{len(shots)} shot şablon/zayıf kaldı. "
-            "LLM’i güçlendirip tekrar dene (Ayarlar → model) — ince filler üretime alınmaz.",
+            f"Director quality gate: {thin_real}/{len(shots)} shots stayed generic/weak. "
+            "Use a stronger LLM and try again (Settings → model) — thin filler is not queued.",
         )
 
     out = cinema.ingest_from_director_brief(brief, role_script=role)
@@ -4803,9 +4854,9 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
     chars = [c for c in (lib.get("characters") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
     locs = [c for c in (lib.get("locations") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
     if not chars and not locs:
-        raise HTTPException(400, "Önce karakter veya mekan kartı ekle")
+        raise HTTPException(400, "Add a character or location card first")
     if not await llm.healthy():
-        raise HTTPException(503, "Yönetmen LLM hazır değil — sağ üst Ayarlar’dan key ekle")
+        raise HTTPException(503, "The Director LLM is not ready — add a key in Settings (top right)")
     model = await llm.resolve_model(body.model or _director_model)
     clip = int(body.duration or lib.get("duration") or 5)
     if clip not in (4, 5, 6, 8, 10, 15):
@@ -4857,11 +4908,11 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
             num_predict=8192,
         )
     except Exception as e:
-        raise HTTPException(502, f"Yönetmen LLM hata ({llm.provider()}): {e}") from e
+        raise HTTPException(502, f"Director LLM error ({llm.provider()}): {e}") from e
     parsed = extract_json_object(reply) or {}
     raw_shots = parsed.get("shots") if isinstance(parsed, dict) else None
     if not isinstance(raw_shots, list) or not raw_shots:
-        raise HTTPException(502, "LLM shot listesi döndürmedi")
+        raise HTTPException(502, "The LLM did not return a shot list")
     new_shots: list[dict[str, Any]] = []
     for i, item in enumerate(raw_shots[:n]):
         if isinstance(item, dict):
@@ -4881,7 +4932,7 @@ async def cinema_generate_shots(body: CinemaGenerateShotsBody):
         section_id = str(item.get("sectionId") or item.get("section_id") or "").strip() if isinstance(item, dict) else ""
         new_shots.append({"id": str(uuid.uuid4())[:8], "text": text, "mode": mode, "section_id": section_id})
     if not new_shots:
-        raise HTTPException(502, "Geçerli shot yok")
+        raise HTTPException(502, "No valid shot")
     # Normalize the model output into explicit section chains. A new section never
     # inherits the prior section's last frame, even if the same cast is present.
     previous_section = ""
@@ -4916,7 +4967,7 @@ async def cinema_add_character(body: dict[str, Any]):
 async def cinema_patch_character(asset_id: str, body: dict[str, Any]):
     updated = cinema.update_asset("character", asset_id, body or {})
     if not updated:
-        raise HTTPException(404, "karakter yok")
+        raise HTTPException(404, "no character")
     return updated
 
 
@@ -4926,7 +4977,7 @@ async def cinema_del_character(asset_id: str):
     found = next((x for x in (data.get("characters") or []) if str(x.get("id") or "") == str(asset_id)), None)
     name = str((found or {}).get("name") or "").strip()
     if not cinema.delete_asset("character", asset_id):
-        raise HTTPException(404, "karakter yok")
+        raise HTTPException(404, "no character")
     _remember_removed_asset("character", name, asset_id)
     return {"ok": True, "id": asset_id}
 
@@ -4940,7 +4991,7 @@ async def cinema_add_location(body: dict[str, Any]):
 async def cinema_patch_location(asset_id: str, body: dict[str, Any]):
     updated = cinema.update_asset("location", asset_id, body or {})
     if not updated:
-        raise HTTPException(404, "mekan yok")
+        raise HTTPException(404, "no location")
     return updated
 
 
@@ -4950,7 +5001,7 @@ async def cinema_del_location(asset_id: str):
     found = next((x for x in (data.get("locations") or []) if str(x.get("id") or "") == str(asset_id)), None)
     name = str((found or {}).get("name") or "").strip()
     if not cinema.delete_asset("location", asset_id):
-        raise HTTPException(404, "mekan yok")
+        raise HTTPException(404, "no location")
     _remember_removed_asset("location", name, asset_id)
     return {"ok": True, "id": asset_id}
 
@@ -4999,23 +5050,23 @@ def _job_record(job_id: str) -> Optional[dict]:
 async def _paths_for_job_ids(job_ids: list[str]) -> list[Path]:
     ids = [str(x).strip() for x in (job_ids or []) if str(x).strip()]
     if len(ids) < 2:
-        raise HTTPException(400, "en az 2 klip seç")
+        raise HTTPException(400, "select at least 2 clips")
     paths: list[Path] = []
     for jid in ids:
         rec = _job_record(jid)
         if not rec:
-            raise HTTPException(404, f"klip bulunamadı: {jid[:8]}")
+            raise HTTPException(404, f"clip not found: {jid[:8]}")
         st = str(rec.get("status") or "done").lower()
         if st in ("queued", "running"):
-            raise HTTPException(400, f"klip hâlâ üretiliyor: {jid[:8]}")
+            raise HTTPException(400, f"clip is still rendering: {jid[:8]}")
         if st in ("error", "cancelled"):
-            raise HTTPException(400, f"klip başarısız: {jid[:8]}")
+            raise HTTPException(400, f"clip failed: {jid[:8]}")
         try:
             paths.append(await _ensure_job_video(rec))
         except Exception:
             gal = GALLERY / f"{jid}.mp4"
             if not gal.exists():
-                raise HTTPException(400, f"klip videosu yok: {jid[:8]}")
+                raise HTTPException(400, f"clip video missing: {jid[:8]}")
             paths.append(gal)
     return paths
 
@@ -5047,11 +5098,11 @@ def _cinema_batch_items(batch_id: str) -> list[dict]:
 async def _cinema_clip_paths(batch_id: str) -> list[Path]:
     items = _cinema_batch_items(batch_id)
     if not items:
-        raise HTTPException(404, "bu filme ait klip yok")
+        raise HTTPException(404, "no clips belong to this film")
     pending = [j for j in items if j.get("status") in ("queued", "running")]
     if pending:
         raise HTTPException(
-            400, f"{len(pending)} shot hâlâ üretiliyor — bitince birleştir"
+            400, f"{len(pending)} shots are still rendering — join when they finish"
         )
     paths: list[Path] = []
     for j in items:
@@ -5065,10 +5116,10 @@ async def _cinema_clip_paths(batch_id: str) -> list[Path]:
         except Exception:
             gal = GALLERY / f"{jid}.mp4"
             if not gal.exists():
-                raise HTTPException(400, f"klip videosu yok: {jid[:8]}")
+                raise HTTPException(400, f"clip video missing: {jid[:8]}")
             paths.append(gal)
     if not paths:
-        raise HTTPException(400, "birleştirilecek bitmiş klip yok")
+        raise HTTPException(400, "no finished clips to join")
     return paths
 
 
@@ -5083,10 +5134,10 @@ async def _mix_cinema_batch(
     try:
         meta = load_meta(MUSIC, score_id)
     except FileNotFoundError:
-        raise HTTPException(404, "film müziği dosyası yok — yeniden yükle")
+        raise HTTPException(404, "film music file is missing — upload it again")
     audio_path = Path(meta.get("path") or "")
     if not audio_path.exists():
-        raise HTTPException(404, "film müziği dosyası yok — yeniden yükle")
+        raise HTTPException(404, "film music file is missing — upload it again")
     paths = await _cinema_clip_paths(batch_id)
     CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
     out = CINEMA_FINALS / f"{batch_id}_final.mp4"
@@ -5158,10 +5209,10 @@ async def _queue_cinema_seamless(
     if not use_continuum and not detect_multishot_pack(COMFY_ROOT):
         raise HTTPException(
             400,
-            "H3 Multishot paketi yok — Pinokio: Download Models → H3 Multishot, sonra Stop → Start",
+            "H3 Multishot package is missing — Pinokio: Download Models → H3 Multishot, then Stop → Start",
         )
     if not parsed:
-        raise HTTPException(400, "Senaryo / shot yok")
+        raise HTTPException(400, "No script / shots")
     pack = body.continuum_max_chunks if use_continuum else max(1, int(MULTISHOT_MAX_SHOTS))
     grouping = getattr(body, 'continuum_grouping', 'cuts')
     chunks = (continuum.director_takes(parsed, prompts, pack=pack, grouping=grouping) if use_continuum
@@ -5222,10 +5273,10 @@ async def _queue_cinema_seamless(
         seed = (base_seed + take_i - 1) if body.seed >= 0 else (base_seed + take_i - 1) % (2**53)
         take_title = str((chunk_parsed[0] or {}).get("take_title") or "").strip()
         if take_total == 1:
-            label = f"sırada · kesintisiz · {take_title}" if take_title else "sırada · kesintisiz zincir"
+            label = f"queued · seamless · {take_title}" if take_title else "queued · seamless chain"
         else:
             core = f"{take_title} · " if take_title else ""
-            label = f"sırada · {core}take {take_i}/{take_total}"
+            label = f"queued · {core}take {take_i}/{take_total}"
         job = {
             "id": str(uuid.uuid4()),
             "status": "queued",
@@ -5327,7 +5378,7 @@ async def _queue_director_chains(*, body, parsed, prompts, lib, audio, cinema_ba
         initial_parent = _clip_record(parent_job_ids[0]) if parent_job_ids and parent_job_ids[0] else None
         if not capabilities.get('native_tail_ready') and (
                 any(g['kind'] == 'new' for g in groups) or (initial_parent or {}).get('continuation_state_key')):
-            raise HTTPException(409, 'Native devam köprüsü yüklenmedi. Optional Film Tools kurulumunu çalıştırıp Studio/ComfyUI yeniden başlatın.')
+            raise HTTPException(409, 'The native continuation bridge is not loaded. Run the optional Film Tools install and restart Studio/ComfyUI.')
         if not 4 <= body.duration <= 15:
             raise HTTPException(400, 'Continuum requires 4–15 second sections')
         if not capabilities['continuum_ready']:
@@ -5447,7 +5498,7 @@ async def cinema_add_creature(body: dict[str, Any]):
 async def cinema_patch_creature(asset_id: str, body: dict[str, Any]):
     updated = cinema.update_asset("creature", asset_id, body or {})
     if not updated:
-        raise HTTPException(404, "yaratık yok")
+        raise HTTPException(404, "no creature")
     return updated
 
 
@@ -5460,7 +5511,7 @@ async def cinema_add_vehicle(body: dict[str, Any]):
 async def cinema_patch_vehicle(asset_id: str, body: dict[str, Any]):
     updated = cinema.update_asset("vehicle", asset_id, body or {})
     if not updated:
-        raise HTTPException(404, "araç yok")
+        raise HTTPException(404, "no vehicle")
     return updated
 
 
@@ -5470,7 +5521,7 @@ async def cinema_del_vehicle(asset_id: str):
     found = next((x for x in (data.get("vehicles") or []) if str(x.get("id") or "") == str(asset_id)), None)
     name = str((found or {}).get("name") or "")
     if not cinema.delete_asset("vehicle", asset_id):
-        raise HTTPException(404, "araç yok")
+        raise HTTPException(404, "no vehicle")
     _remember_removed_asset("vehicle", name, asset_id)
     return {"ok": True}
 
@@ -5484,15 +5535,15 @@ async def cinema_delete_asset_image(kind: str, asset_id: str, filename: str):
         raise HTTPException(400, str(exc)) from exc
     name = Path(filename).name
     if not name or name != filename:
-        raise HTTPException(400, "Geçersiz görsel adı")
+        raise HTTPException(400, "Invalid image name")
     film = cinema.load()
     card = next((x for x in film.get(key) or [] if str(x.get("id") or "") == asset_id), None)
     if not card:
-        raise HTTPException(404, "Kart bulunamadı")
+        raise HTTPException(404, "Card not found")
     old_images = list(card.get("images") or [])
     images = [x for x in old_images if not (isinstance(x, dict) and str(x.get("file") or "") == name)]
     if len(images) == len(old_images) and str(card.get("image") or "") != name:
-        raise HTTPException(404, "Görsel bu kartta yok")
+        raise HTTPException(404, "The image is not on this card")
     updated = cinema.update_asset(kind, asset_id, {
         "images": images, "image": str((images[0] or {}).get("file") or "") if images else "",
         "url": str((images[0] or {}).get("url") or "") if images else "",
@@ -5534,7 +5585,7 @@ async def cinema_del_creature(asset_id: str):
     found = next((x for x in (data.get("creatures") or []) if str(x.get("id") or "") == str(asset_id)), None)
     name = str((found or {}).get("name") or "").strip()
     if not cinema.delete_asset("creature", asset_id):
-        raise HTTPException(404, "yaratık yok")
+        raise HTTPException(404, "no creature")
     _remember_removed_asset("creature", name, asset_id)
     return {"ok": True, "id": asset_id}
 
@@ -5588,7 +5639,7 @@ async def cinema_library_pull(body: CinemaLibraryPullBody):
 async def cinema_library_delete(kind: str, asset_id: str):
     k, _ = cinema.asset_kind_key(kind)
     if not cinema.delete_library_asset(k, asset_id):
-        raise HTTPException(404, "kütüphanede yok")
+        raise HTTPException(404, "not in library")
     return {"ok": True, "id": asset_id, "kind": k}
 
 
@@ -5764,7 +5815,7 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
         job["local_path"] = None
         job["download_name"] = None
         job["discarded_video"] = True
-        job["progress_label"] = "still hazır · video silindi"
+        job["progress_label"] = "still ready · video deleted"
     _save_jobs()
     slog.info_job(job, "sheet still attached", kind=kind, asset=aid[:8])
 
@@ -5773,7 +5824,7 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
 async def cinema_generate_sheet(body: CinemaSheetBody):
     """Queue a silent H3 clip that renders a 3-panel character/location reference sheet."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     try:
         sheet_method = body.sheet_method
         provider = body.image_provider
@@ -5788,7 +5839,7 @@ async def cinema_generate_sheet(body: CinemaSheetBody):
                             if body.kind == "character" and body.asset_id and x.get("id") == body.asset_id), None)
         # H3 character weights cannot be applied to a Qwen image model.
         if sheet_asset and cinema.uses_lora(sheet_asset):
-            raise ValueError("LoRA kullan açıkken karakter görseli üretilmez")
+            raise ValueError("Character images are not rendered while Use LoRA is on")
         if sheet_method == "standard" and provider == "image_studio":
             return await _queue_cinema_qwen_sheet_job(
                 kind=body.kind or "character", name=body.name, notes=body.notes or "",
@@ -5821,7 +5872,7 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
     actor = next((a for a in cinema.load().get(key, [])
                   if kwargs.get("asset_id") and a.get("id") == kwargs["asset_id"]), None)
     if kind == "character" and actor and cinema.uses_lora(actor):
-        raise HTTPException(400, "LoRA kullan açıkken karakter görseli üretilmez")
+        raise HTTPException(400, "Character images are not rendered while Use LoRA is on")
     if kwargs.get("ref_image") and actor:
         images = actor.get("images") or []
         auto_only = not images or all(str(im.get("file") or "").startswith("h3_sheet_") for im in images)
@@ -5829,7 +5880,7 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
             raise HTTPException(400, "Not enough image slots for reference views; remove existing card images first")
     name = str(kwargs.get("name") or "").strip()
     if not name:
-        raise HTTPException(400, "Kart adı gerekli")
+        raise HTTPException(400, "Card name is required")
     available = []
     if kwargs.get("ref_image"):
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -5837,7 +5888,7 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
     missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(kwargs.get("ref_image")), available_models=available)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
     job = {
         "id": uuid.uuid4().hex,
         "mode": "qwen_sheet",
@@ -5845,8 +5896,8 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
         "film_id": str(cinema.load().get("film_id") or ""),
         "status": "queued",
         "progress": 0,
-        "progress_label": "Qwen görseli sırada",
-        "prompt": f"Qwen görsel · {name}",
+        "progress_label": "Qwen image queued",
+        "prompt": f"Qwen image · {name}",
         "created_at": time.time(),
         "image_provider": "image_studio",
         "sheet_kind": kind,
@@ -5877,7 +5928,7 @@ async def cinema_shot_frame(body: CinemaShotFrameBody):
     shot = {**stored, **({"text": body.text} if body.text is not None else {}),
             **({"structured": body.structured} if body.structured is not None else {})}
     if not str(shot.get("text") or "").strip():
-        raise HTTPException(400, "Sahne metni boş")
+        raise HTTPException(400, "The scene text is empty")
     refs = cinema.storyboard_frame_refs(str(shot.get("text") or ""), lib)
     available = []
     if refs:
@@ -5886,7 +5937,7 @@ async def cinema_shot_frame(body: CinemaShotFrameBody):
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
     missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(refs), available_models=available)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
     setup = lib.get("setup") or {}
     style = setup.get("style") if setup.get("style") not in (None, "", "auto") else "realistic"
     prompt = cinema.storyboard_frame_prompt(shot, refs, style_craft_line(normalize_style(style)))
@@ -5898,9 +5949,9 @@ async def cinema_shot_frame(body: CinemaShotFrameBody):
         "film_id": str(lib.get("film_id") or ""),
         "status": "queued",
         "progress": 0,
-        "progress_label": "Kare sırada",
+        "progress_label": "Frame queued",
         "prompt": prompt,
-        "scene_title": "Kare · " + (title or body.shot_id[:8]),
+        "scene_title": "Frame · " + (title or body.shot_id[:8]),
         "created_at": time.time(),
         "frame_shot_id": body.shot_id,
         "frame_args": {"prompt": prompt, "refs": [r["file"] for r in refs], "aspect": body.aspect},
@@ -5938,13 +5989,13 @@ async def _run_shot_frame(job: dict) -> None:
     job["frame_url"] = f"/api/refs/{comfy_name}"
     job["status"] = "done"
     job["progress"] = 100
-    job["progress_label"] = "kare hazır"
+    job["progress_label"] = "frame ready"
     job["done_at"] = time.time()
     _save_jobs()
     slog.info_job(job, "shot frame ready", shot=str(job.get("frame_shot_id") or "")[:8])
 
 
-async def _run_qwen_still(job: dict, graph: dict, *, label: str = "Qwen kare çiziyor",
+async def _run_qwen_still(job: dict, graph: dict, *, label: str = "Qwen is drawing the frame",
                           span: tuple[int, int] = (0, 100)) -> Optional[Path]:
     """Queue (or reattach to) a one-image Qwen graph; return its output file, None if cancelled."""
     prompt_id = str(job.get("prompt_id") or "") if job.get("_reattach") else ""
@@ -5975,20 +6026,20 @@ async def _run_qwen_still(job: dict, graph: dict, *, label: str = "Qwen kare çi
             await asyncio.sleep(1.5)
             history = (await comfy.history(prompt_id)).get(prompt_id) or {}
             if (history.get("status") or {}).get("status_str") == "error":
-                raise RuntimeError("Qwen kare üretimi ComfyUI'de hata verdi")
+                raise RuntimeError("The Qwen frame render failed in ComfyUI")
             images = ((history.get("outputs") or {}).get("70") or {}).get("images") or []
             if images:
                 info = images[0]
                 candidate = (COMFY_OUTPUT / Path(str(info.get("subfolder") or "")) /
                              Path(str(info.get("filename") or "")).name).resolve()
                 if not candidate.is_relative_to(COMFY_OUTPUT.resolve()) or not candidate.is_file():
-                    raise RuntimeError("Qwen kare çıktısı bulunamadı")
+                    raise RuntimeError("Qwen frame output not found")
                 source = candidate
     finally:
         stop_ws.set()
         ws_task.cancel()
     if source is None:
-        raise RuntimeError("Qwen kare üretimi 30 dakika içinde tamamlanmadı")
+        raise RuntimeError("The Qwen frame render did not finish within 30 minutes")
     return source
 
 
@@ -6020,14 +6071,14 @@ async def _require_sketch_models(method_name: str) -> None:
         if missing:
             raise HTTPException(503, {
                 "code": "sketch.editMissing", "missing": missing,
-                "message": ("Görsel referansla yorum için Qwen Edit modeli gerekli, bulunamadı: " + ", ".join(missing)
-                            + ". Modeli ComfyUI models klasörüne ekle ya da 'Çizgiden başlat (img2img)' yöntemini seç; "
-                              "o yöntem çöp adamı düzgün insana dönüştürmeyi garanti etmez."),
+                "message": ("Interpreting with an image reference needs the Qwen Edit model, which was not found: " + ", ".join(missing)
+                            + ". Add the model to the ComfyUI models folder or choose 'Start from lines (img2img)'; "
+                              "that method does not guarantee turning a stick figure into a proper person."),
             })
         return
     missing = qwen_still.missing_models(COMFY_ROOT)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
 
 
 def _sketch_args(*, source: str, text: str, style: str, fidelity: str, method_name: str, aspect: str) -> dict:
@@ -6040,7 +6091,7 @@ def _sketch_args(*, source: str, text: str, style: str, fidelity: str, method_na
 
 
 def _sketch_title(text: str) -> str:
-    return "Çizim · " + (text[:40] or "kare")
+    return "Drawing · " + (text[:40] or "kare")
 
 
 @app.post("/api/sketch/frame")
@@ -6049,7 +6100,7 @@ async def sketch_frame(body: SketchVideoBody):
     """Queue a drawing → Qwen still. The still waits for approval; only then H3 animates it."""
     name = Path(body.sketch_name).name
     if name != body.sketch_name or not any((d / name).is_file() for d in (REFS, COMFY_INPUT)):
-        raise HTTPException(400, "Çizim bulunamadı; yeniden gönder")
+        raise HTTPException(400, "Drawing not found; send it again")
     if body.duration not in ALLOWED_DURATIONS:
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
@@ -6057,7 +6108,7 @@ async def sketch_frame(body: SketchVideoBody):
     method_name = sketch.method(body.sketch_method)
     await _require_sketch_models(method_name)
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
+        raise HTTPException(503, "ComfyUI is not running — start it with Start in Pinokio")
     style = (body.sketch_style or "").strip()
     text = body.sketch_text.strip()
     video = body.model_dump(exclude={"sketch_name", "sketch_text", "sketch_style", "sketch_fidelity", "sketch_method"})
@@ -6069,7 +6120,7 @@ async def sketch_frame(body: SketchVideoBody):
         "lane": "motion",
         "status": "queued",
         "progress": 0,
-        "progress_label": "Çizim sırada",
+        "progress_label": "Drawing queued",
         "prompt": body.prompt,
         "scene_title": _sketch_title(text),
         "created_at": time.time(),
@@ -6101,7 +6152,7 @@ class SketchRegenerateBody(BaseModel):
 def _sketch_job(job_id: str) -> dict:
     job = next((j for j in _jobs if j.get("id") == job_id and j.get("mode") == "sketch_frame"), None)
     if not job:
-        raise HTTPException(404, "Çizim karesi bulunamadı")
+        raise HTTPException(404, "Drawing frame not found")
     return job
 
 
@@ -6115,9 +6166,9 @@ async def sketch_animate(job_id: str, body: SketchAnimateBody):
             child = next((j for j in _jobs if j.get("id") == child_id), None)
             return {"duplicate": True, "sketch": job, "job": child or {"id": child_id}}
         if job.get("status") != "done" or not job.get("frame_name"):
-            raise HTTPException(409, "Kare henüz hazır değil")
+            raise HTTPException(409, "The frame is not ready yet")
         if job.get("sketch_animating"):
-            raise HTTPException(409, "Bu kare zaten canlandırılıyor")
+            raise HTTPException(409, "This frame is already being animated")
         job["sketch_animating"] = True
         video = dict(job.get("video_body") or {})
         if body.prompt and body.prompt.strip():
@@ -6129,12 +6180,12 @@ async def sketch_animate(job_id: str, body: SketchAnimateBody):
         raise
     except Exception as exc:
         job.pop("sketch_animating", None)
-        raise HTTPException(500, f"Video kuyruğa eklenemedi: {exc}") from exc
+        raise HTTPException(500, f"The video could not be queued: {exc}") from exc
     async with _lock:
         job.pop("sketch_animating", None)
         job["video_job_id"] = child["id"]
         job["sketch_state"] = "approved"
-        job["progress_label"] = "kare onaylandı · video sırada"
+        job["progress_label"] = "frame approved · video queued"
         if video.get("prompt"):
             job["prompt"] = video["prompt"]
         _save_jobs()
@@ -6148,14 +6199,14 @@ async def sketch_regenerate(job_id: str, body: SketchRegenerateBody):
     async with _lock:
         job = _sketch_job(job_id)
         if job.get("status") in ("queued", "running"):
-            raise HTTPException(409, "Kare zaten üretiliyor")
+            raise HTTPException(409, "The frame is already rendering")
         args = dict(job.get("sketch_args") or {})
     text = (body.sketch_text if body.sketch_text is not None else args.get("text") or "").strip()
     method_name = sketch.method(body.sketch_method or args.get("method") or "img2img")
     fidelity = body.sketch_fidelity or args.get("fidelity") or "balanced"
     await _require_sketch_models(method_name)
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı — Pinokio'dan Start ile Comfy'yi aç")
+        raise HTTPException(503, "ComfyUI is not running — start it with Start in Pinokio")
     new_args = _sketch_args(source=str(args.get("source") or ""), text=text, style=str(args.get("style") or ""),
                             fidelity=fidelity, method_name=method_name,
                             aspect=str(args.get("aspect") or job.get("aspect") or "16:9"))
@@ -6173,7 +6224,7 @@ async def sketch_regenerate(job_id: str, body: SketchRegenerateBody):
             for key in ("frame_name", "frame_url", "error", "prompt_id", "sketch_stage", "sketch_layout_name",
                         "done_at", "started_at"):
                 target.pop(key, None)
-        target.update(status="queued", progress=0, progress_label="kare yeniden sırada", sketch_state="framing",
+        target.update(status="queued", progress=0, progress_label="frame queued again", sketch_state="framing",
                       sketch_args=new_args, scene_title=_sketch_title(text))
         if body.prompt and body.prompt.strip():
             target["prompt"] = body.prompt.strip()
@@ -6202,12 +6253,12 @@ async def _run_sketch_frame(job: dict) -> None:
         else:
             missing = await _sketch_edit_missing()
             if missing:
-                raise RuntimeError("Qwen Edit modeli bulunamadı: " + ", ".join(missing)
-                                   + " — 'Çizgiden başlat (img2img)' ile yeniden oluştur")
+                raise RuntimeError("Qwen Edit model not found: " + ", ".join(missing)
+                                   + " — recreate it with 'Start from lines (img2img)'")
             name = Path(str(args.get("source") or "")).name
             source = next((d / name for d in (REFS, COMFY_INPUT) if name and (d / name).is_file()), None)
             if source is None:
-                raise RuntimeError("Çizim dosyası bulunamadı")
+                raise RuntimeError("Drawing file not found")
             prepared = REFS / f"h3_sketchref_{job['id'][:12]}.png"
             await asyncio.to_thread(sketch.prepare_reference, source, prepared, width, height)
             reference = await comfy.upload_image(prepared, prepared.name)
@@ -6215,7 +6266,7 @@ async def _run_sketch_frame(job: dict) -> None:
         still = await _run_qwen_still(
             job, qwen_still.build_sketch_edit(prompt=prompt, negative=sketch.NEGATIVE, reference=reference,
                                               aspect=aspect, steps=sketch.EDIT_STEPS, seed=seed),
-            label="Qwen çizimi yorumluyor", span=(0, 100))
+            label="Qwen is interpreting the drawing", span=(0, 100))
         if still is None:
             return
         await _finish_sketch_frame(job, still)
@@ -6226,7 +6277,7 @@ async def _run_sketch_frame(job: dict) -> None:
             name = Path(str(args.get("source") or "")).name
             source = next((d / name for d in (REFS, COMFY_INPUT) if name and (d / name).is_file()), None)
             if source is None:
-                raise RuntimeError("Çizim dosyası bulunamadı")
+                raise RuntimeError("Drawing file not found")
             prepared = REFS / f"h3_sketchprep_{job['id'][:12]}.png"
             await asyncio.to_thread(sketch.prepare, source, prepared, width, height, seed)
             comfy_source = await comfy.upload_image(prepared, prepared.name)
@@ -6235,7 +6286,7 @@ async def _run_sketch_frame(job: dict) -> None:
         job["sketch_stage"] = "layout"
         layout = await _run_qwen_still(
             job, _graph(comfy_source, float(args.get("denoise") or sketch.denoise("")), "H3_Studio_SketchLayout"),
-            label="Qwen yerleşimi çiziyor", span=(0, 50))
+            label="Qwen is drawing the layout", span=(0, 50))
         if layout is None:
             return
         job["sketch_layout_name"] = Path(await comfy.upload_image(layout, f"h3_sketchlayout_{job['id'][:12]}.png")).name
@@ -6243,7 +6294,7 @@ async def _run_sketch_frame(job: dict) -> None:
         _save_jobs()
     still = await _run_qwen_still(
         job, _graph(str(job.get("sketch_layout_name") or ""), sketch.REFINE, "H3_Studio_Sketch"),
-        label="Qwen kareyi işliyor", span=(50, 100))
+        label="Qwen is processing the frame", span=(50, 100))
     if still is None:
         return
     await _finish_sketch_frame(job, still)
@@ -6259,7 +6310,7 @@ async def _finish_sketch_frame(job: dict, still: Path) -> None:
     job["frame_url"] = f"/api/refs/{frame}"
     job["status"] = "done"
     job["progress"] = 100
-    job["progress_label"] = "kare hazır · onay bekliyor"
+    job["progress_label"] = "frame ready · awaiting approval"
     job["sketch_state"] = "awaiting_approval"
     job["done_at"] = time.time()
     _save_jobs()
@@ -6276,7 +6327,7 @@ async def _generate_cinema_image_studio_sheet(
     kind, key = cinema.asset_kind_key(kind)
     name = (name or "").strip()
     if not name:
-        raise HTTPException(400, "Kart adı gerekli")
+        raise HTTPException(400, "Card name is required")
     lib = cinema.load()
     previous = next((x for x in lib.get(key) or [] if asset_id and str(x.get("id") or "") == str(asset_id)), None)
     setup = lib.get("setup") or {}
@@ -6294,15 +6345,15 @@ async def _generate_cinema_image_studio_sheet(
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
     missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(ref_image), available_models=available)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen görsel modelleri eksik: " + ", ".join(missing))
+        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
     if not await comfy.healthy():
-        raise HTTPException(503, "H3 ComfyUI kapalı")
+        raise HTTPException(503, "H3 ComfyUI is not running")
     source_name = ""
     if ref_image:
         ref_name = Path(ref_image).name
         ref_path = next((p for p in (REFS / ref_name, COMFY_INPUT / ref_name) if p.is_file()), None)
         if not ref_path:
-            raise HTTPException(400, "Kaynak referans görseli bulunamadı")
+            raise HTTPException(400, "Source reference image not found")
         source_name = await comfy.upload_image(ref_path, f"h3_qwen_source_{uuid.uuid4().hex[:12]}.png")
     if source_name:
         w, h = resolve_size("9:16" if kind in ("character", "creature") else aspect, normalize_quality(quality))
@@ -6319,7 +6370,7 @@ async def _generate_cinema_image_studio_sheet(
         if job:
             job["prompt_id"] = prompt_id
             job["progress"] = 1
-            job["progress_label"] = "Qwen ComfyUI'de çalışıyor"
+            job["progress_label"] = "Qwen is running in ComfyUI"
             _save_jobs()
         deadline = time.monotonic() + 45 * 60
         source = None
@@ -6349,12 +6400,12 @@ async def _generate_cinema_image_studio_sheet(
         try:
             while time.monotonic() < deadline:
                 if job and job.get("status") == "cancelled":
-                    raise HTTPException(409, "Qwen görsel üretimi durduruldu")
+                    raise HTTPException(409, "The Qwen image render was stopped")
                 await asyncio.sleep(1.5)
                 history = (await comfy.history(prompt_id)).get(prompt_id) or {}
                 status = history.get("status") or {}
                 if status.get("status_str") == "error":
-                    raise HTTPException(502, "Qwen görsel üretimi ComfyUI'de hata verdi")
+                    raise HTTPException(502, "The Qwen image render failed in ComfyUI")
                 outputs = history.get("outputs") or {}
                 images = (outputs.get("70") or {}).get("images") or []
                 if source_name:
@@ -6367,7 +6418,7 @@ async def _generate_cinema_image_studio_sheet(
                     subfolder = Path(str(info.get("subfolder") or ""))
                     candidate = (COMFY_OUTPUT / subfolder / filename).resolve()
                     if not candidate.is_relative_to(COMFY_OUTPUT.resolve()) or not candidate.is_file():
-                        raise HTTPException(502, "Qwen görsel çıktısı bulunamadı")
+                        raise HTTPException(502, "Qwen image output not found")
                     source = candidate
                     break
         finally:
@@ -6375,11 +6426,11 @@ async def _generate_cinema_image_studio_sheet(
             if ws_task is not None:
                 ws_task.cancel()
         if source is None:
-            raise HTTPException(504, "Qwen görsel üretimi 45 dakika içinde tamamlanmadı")
+            raise HTTPException(504, "The Qwen image render did not finish within 45 minutes")
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(502, f"H3 ComfyUI Qwen üretimi başarısız: {exc}") from exc
+        raise HTTPException(502, f"H3 ComfyUI Qwen render failed: {exc}") from exc
     REFS.mkdir(parents=True, exist_ok=True)
     sheet_source = REFS / f"h3_sheet_{uuid.uuid4().hex[:12]}.png"
     shutil.copy2(source, sheet_source)
@@ -6444,10 +6495,10 @@ async def _queue_cinema_sheet_job(
     kind, _ = cinema.asset_kind_key(kind_raw)
     name = (name or "").strip()
     if not name:
-        raise ValueError("ad gerekli")
+        raise ValueError("name is required")
     selected_actor = next((a for a in cinema.load().get("characters", []) if asset_id and a.get("id") == asset_id), None)
     if kind == "character" and selected_actor and cinema.uses_lora(selected_actor):
-        raise ValueError("LoRA kullan açıkken karakter görseli üretilmez")
+        raise ValueError("Character images are not rendered while Use LoRA is on")
     notes = (notes or "").strip()
     style_key = normalize_style(style) if style else "realistic"
     if not style:
@@ -6497,10 +6548,10 @@ async def _queue_cinema_sheet_job(
     if kind == "character" and previous_asset and cinema.uses_lora(previous_asset):
         character_lora = find_spec(lora_id=previous_asset["lora_id"])
         if not character_lora or not spec_ready(character_lora):
-            raise ValueError("Karakter LoRA dosyası hazır değil")
+            raise ValueError("The character LoRA file is not ready")
         graph = "ref2va" if has_ref else "fl2va"
         if graph not in (character_lora.get("graphs") or ["fl2va", "ref2va"]):
-            raise ValueError("Karakter LoRA bu görsel üretim biçimiyle uyumlu değil")
+            raise ValueError("The character LoRA is not compatible with this image render type")
         trigger = str(previous_asset.get("trigger") or "").strip()
         if trigger:
             prompt = trigger + ", " + prompt
@@ -6573,7 +6624,7 @@ async def _queue_cinema_sheet_job(
             j["lane"] = "director"
             j["film_id"] = str(cinema.load().get("film_id") or "")
             ref_bit = (
-                " +yüz" if has_ref and kind == "character" else (" +mekân" if has_ref else "")
+                " +face" if has_ref and kind == "character" else (" +location" if has_ref else "")
             )
             j["progress_label"] = f"sheet{ref_bit} · {quality_n}p/{steps_n} → still"
             job = j
@@ -6808,7 +6859,7 @@ def _cinema_previous_clip(shots: list[dict], shot_id: str) -> Optional[str]:
     if candidates:
         sections = candidates[-1].get('continuum_scene_ids') or []
         if sections and sections[-1] != previous.get('id'):
-            raise HTTPException(409, 'Önceki sahne bir Continuum sekansının ortasında. Bu devam grubunu birlikte yeniden üretin; ara sahnenin yerine sekansın son karesi kullanılamaz.')
+            raise HTTPException(409, 'The previous scene is in the middle of a Continuum sequence. Render this continue group again together; the last frame of the sequence cannot stand in for a middle scene.')
     return str(candidates[-1]["id"]) if candidates else None
 
 
@@ -6819,14 +6870,14 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
     shots = lib.get("shots") or []
     index = next((i for i, s in enumerate(shots) if str(s.get("id") or "") == body.shot_id), -1)
     if index < 0:
-        raise HTTPException(404, "Sahne bulunamadı")
+        raise HTTPException(404, "Scene not found")
     shot = shots[index]
     try:
         shot = director_identity.prepare_shot(shot, lib)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not str(shot.get("text") or "").strip():
-        raise HTTPException(400, "Önce sahne metnini doldurun")
+        raise HTTPException(400, "Fill in the scene text first")
     if body.image_provider == "image_studio":
         setup = lib.get("setup") or {}
         style = setup.get("style") if setup.get("style") not in (None, "", "auto") else None
@@ -6839,7 +6890,7 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
                     await _queue_cinema_sheet_job(kind=kind, name=asset.get("name") or "", notes=asset.get("notes") or "",
                                                   asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
                                                   aspect=body.aspect, style=style)
-                raise HTTPException(409, "LoRA karakter görseli hazırlanıyor; tamamlanınca sahneyi tekrar üretin")
+                raise HTTPException(409, "The LoRA character image is being prepared; render the scene again when it is done")
             await _generate_cinema_image_studio_sheet(
                 kind=kind, name=str(asset.get("name") or ""), notes=str(asset.get("notes") or ""),
                 asset_id=asset.get("id"), quality=body.quality, steps=body.steps,
@@ -6851,7 +6902,7 @@ async def cinema_produce_one(body: CinemaSingleProduceBody):
     if mode == "continue":
         parent_id = _cinema_previous_clip(shots, body.shot_id)
         if not parent_id:
-            raise HTTPException(400, "Önceki sahnenin klibi yok; önce onu üretin")
+            raise HTTPException(400, "The previous scene has no clip; render that first")
     audio = cinema._clean_audio(lib.get("audio"))
     silent = audio.get("mode") == "silent" or body.silent_audio
     head = "\n\n".join(x for x in (
@@ -6904,20 +6955,20 @@ class CinemaReproduceBody(BaseModel):
 async def cinema_reproduce_one(body: CinemaReproduceBody):
     """Clone exactly one stored render; current card/model/ref selections are ignored."""
     if not await comfy.healthy():
-        raise HTTPException(503, 'ComfyUI kapalı')
+        raise HTTPException(503, 'ComfyUI is not running')
     async with _lock:
         lib = cinema.load()
         if lib.get('film_id') != body.expected_film_id:
-            raise HTTPException(409, 'Film değişti; sayfayı yenileyin.')
+            raise HTTPException(409, 'The film changed; refresh the page.')
         if not any(s.get('id') == body.shot_id for s in lib.get('shots') or []):
-            raise HTTPException(404, 'Sahne bulunamadı')
+            raise HTTPException(404, 'Scene not found')
         candidates = {j['id']: j for j in [*_gallery, *_jobs]
                       if j.get('film_id') == body.expected_film_id
                       and (j.get('shot_id') == body.shot_id or body.shot_id in (j.get('continuum_scene_ids') or []))}
         source = (candidates.get(body.source_job_id) if body.source_job_id else
                   max(candidates.values(), key=lambda j: float(j.get('created_at') or 0), default=None))
         if not source:
-            raise HTTPException(404, 'Bu sahnenin önceki üretim kaydı yok. Önce Sahneyi üret ile üretin.')
+            raise HTTPException(404, 'This scene has no previous render record. Render it first with Render scene.')
         duplicate = next((j for j in _jobs if j.get('reproduce_of') == source['id']
                           and j.get('status') in ('queued', 'running')), None)
         if duplicate:
@@ -6938,10 +6989,10 @@ async def cinema_reproduce_one(body: CinemaReproduceBody):
         if job.get('continue_from'):
             parent = _clip_record(job['continue_from'])
             if not parent or parent.get('status') != 'done':
-                raise HTTPException(409, 'Kayıtlı önceki klip hazır değil; devam bağlantısı değiştirilmeyecek.')
+                raise HTTPException(409, 'The saved previous clip is not ready; the continue link will not be changed.')
         files = [*(job.get('ref_images') or []), job.get('first_frame_name'), job.get('last_frame_name')]
         if any(f and not ((REFS / f).is_file() or (COMFY_INPUT / f).is_file()) for f in files):
-            raise HTTPException(409, 'Kayıtlı referans görseli bulunamadı; farklı referansla üretim yapılmadı.')
+            raise HTTPException(409, 'The saved reference image was not found; nothing was rendered with a different reference.')
         _jobs.append(job)
         _save_jobs()
     return {'job': job, 'already_queued': False}
@@ -7127,7 +7178,7 @@ def _film_failed_jobs(lib: dict) -> tuple[list[dict], int]:
 async def cinema_redo_failed():
     """Re-queue failed/cancelled clips of the active film with their original settings."""
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     lib = cinema.load()
     queued: list[str] = []
     skipped: list[str] = []
@@ -7157,7 +7208,7 @@ async def cinema_produce(body: CinemaProduceBody):
     # Reject invalid scene requests before creating assets or deferred production.
     parsed = cinema.normalize_produce_shots(body.shots, body.script or "", body.shot_modes)
     if not parsed:
-        raise HTTPException(400, "Senaryo / shot yok")
+        raise HTTPException(400, "No script / shots")
     if len(parsed) > 80:
         raise HTTPException(400, "En fazla 80 shot")
     if body.prepare_sheets and (not body.seamless or body.seamless_backend == 'continuum'):
@@ -7170,7 +7221,7 @@ async def cinema_produce(body: CinemaProduceBody):
                 "pending_scenes": True,
                 "count": 0,
                 "sheets_queued": [],
-                "message": "Görseller zaten kuyrukta — bitince sahneler başlar",
+                "message": "The images are already queued — scenes start when they finish",
             }
         if body.setup:
             lib0["setup"] = cinema._clean_setup(body.setup)
@@ -7289,7 +7340,7 @@ async def cinema_produce(body: CinemaProduceBody):
             "count": 0,
             "skipped_done": len(skipped_done),
             "cinema_batch": last_batch,
-            "message": "Tüm sahneler zaten üretilmiş — yalnızca eksikler kuyruğa alınır",
+            "message": "All scenes are already rendered — only missing ones are queued",
             "jobs": [],
         }
 
@@ -7311,7 +7362,7 @@ async def cinema_produce(body: CinemaProduceBody):
             if not within_batch:
                 parent_id = _cinema_previous_clip(full_shots, str(shot.get("id") or ""))
                 if not parent_id:
-                    raise HTTPException(400, "Devam sahnesinin önceki klibi yok; önce onu üretin")
+                    raise HTTPException(400, "The continue scene has no previous clip; render that first")
         parent_job_ids.append(parent_id)
 
     # Face-lock refs: only character portraits named in the shots.
@@ -7541,11 +7592,11 @@ async def cinema_produce_film(body: CinemaProduceFilmBody):
             [dict(s) for s in cinema.normalize_produce_shots(None, lib.get("script") or "")]
         )
     if not shots_clean:
-        raise HTTPException(400, "Shot yok — önce senaryo / yönetmen planı ekle")
+        raise HTTPException(400, "No shots — add a script / Director plan first")
     plan = lib.get("film_plan")
     if body.advance:
         if not isinstance(plan, dict) or not plan.get("segments"):
-            raise HTTPException(400, "Film planı yok — önce Film modu ile başlat")
+            raise HTTPException(400, "No film plan — start with Film mode first")
         plan = cinema._clean_film_plan(plan)
     elif body.reset_plan or not isinstance(plan, dict) or not plan.get("segments"):
         plan = cinema.build_film_plan(
@@ -7559,7 +7610,7 @@ async def cinema_produce_film(body: CinemaProduceFilmBody):
         plan = cinema._clean_film_plan(plan)
     seg_count = int(plan.get("segment_count") or 0)
     if seg_count < 1:
-        raise HTTPException(400, "Segment yok")
+        raise HTTPException(400, "No segment")
     seg_idx = (
         int(body.segment_index)
         if body.segment_index is not None
@@ -7569,7 +7620,7 @@ async def cinema_produce_film(body: CinemaProduceFilmBody):
         cur = int(plan.get("current_segment") or 0)
         jobs = _film_plan_segment_jobs(plan, cur)
         if jobs and not _segment_jobs_complete(jobs):
-            raise HTTPException(400, "Mevcut segment henüz bitmedi")
+            raise HTTPException(400, "The current segment has not finished yet")
         if cur < seg_count - 1:
             seg_idx = cur + 1
         else:
@@ -7577,7 +7628,7 @@ async def cinema_produce_film(body: CinemaProduceFilmBody):
     seg_idx = max(0, min(seg_idx, seg_count - 1))
     segment = list((plan.get("segments") or [])[seg_idx])
     if not segment:
-        raise HTTPException(400, f"Segment {seg_idx + 1} boş")
+        raise HTTPException(400, f"Segment {seg_idx + 1} is empty")
     append_chain = seg_idx > 0
     if append_chain and segment and str(segment[0].get("mode") or "") == "continue":
         first = dict(segment[0])
@@ -7647,14 +7698,14 @@ async def cinema_film_plan_concat():
     lib = cinema.load()
     plan = lib.get("film_plan")
     if not isinstance(plan, dict):
-        raise HTTPException(400, "Film planı yok")
+        raise HTTPException(400, "No film plan")
     plan = cinema._clean_film_plan(plan)
     ids: list[str] = []
     for row in plan.get("segment_job_ids") or []:
         if isinstance(row, list):
             ids.extend([str(x) for x in row if str(x).strip()])
     if len(ids) < 2:
-        raise HTTPException(400, "Birleştirmek için en az 2 klip gerekli")
+        raise HTTPException(400, "At least 2 clips are needed to join")
     batch_id = str(uuid.uuid4())[:8]
     result = await clips_concat(ClipsConcatBody(job_ids=ids, batch_id=batch_id))
     plan["concat_done"] = True
@@ -7675,10 +7726,10 @@ async def cinema_mux(body: CinemaMuxBody):
     audio = cinema._clean_audio(lib.get("audio"))
     batch_id = (body.batch_id or audio.get("last_batch") or "").strip()
     if not batch_id:
-        raise HTTPException(400, "film serisi yok — önce kuyruğa al")
+        raise HTTPException(400, "no film series — queue it first")
     score_id = (body.score_id or audio.get("score_id") or "").strip()
     if not score_id:
-        raise HTTPException(400, "film müziği yok — bir kez yükle")
+        raise HTTPException(400, "no film music — upload it once")
     vol = 0.16 if body.score_volume is None else float(body.score_volume)
     try:
         result = await _mix_cinema_batch(
@@ -7716,7 +7767,7 @@ async def cinema_concat(body: CinemaMuxBody):
     audio = cinema._clean_audio(lib.get("audio"))
     batch_id = (body.batch_id or audio.get("last_batch") or "").strip()
     if not batch_id:
-        raise HTTPException(400, "film serisi yok — önce kuyruğa al")
+        raise HTTPException(400, "no film series — queue it first")
     paths = await _cinema_clip_paths(batch_id)
     CINEMA_FINALS.mkdir(parents=True, exist_ok=True)
     out = CINEMA_FINALS / f"{batch_id}_final.mp4"
@@ -7751,7 +7802,7 @@ async def clips_concat(body: ClipsConcatBody):
     """Join user-selected finished clips (keeps each clip's audio)."""
     ids = [str(x).strip() for x in (body.job_ids or []) if str(x).strip()]
     if len(ids) < 2:
-        raise HTTPException(400, "en az 2 klip seç")
+        raise HTTPException(400, "select at least 2 clips")
     paths = await _paths_for_job_ids(ids)
     batch_id = (body.batch_id or "").strip()
     if not batch_id:
@@ -7814,7 +7865,7 @@ async def cinema_films_post(body: CinemaFilmBody):
         try:
             return cinema.switch_film(body.id or "")
         except FileNotFoundError:
-            raise HTTPException(404, "film yok")
+            raise HTTPException(404, "no film")
     if act == "delete":
         return cinema.delete_film(body.id or "")
     raise HTTPException(400, "action: new | switch | delete")
@@ -7865,9 +7916,9 @@ async def cinema_import_json(body: CinemaImportJsonBody):
         try:
             raw = json.loads(body.text)
         except Exception as e:
-            raise HTTPException(400, f"JSON parse hata: {e}") from e
+            raise HTTPException(400, f"JSON parse error: {e}") from e
     if raw is None:
-        raise HTTPException(400, "payload veya text gerekli")
+        raise HTTPException(400, "payload or text is required")
     try:
         out = cinema.import_project_json(
             raw,
@@ -7974,14 +8025,14 @@ async def cinema_ai_plan(body: CinemaAIPlanBody):
 async def cinema_import(file: UploadFile = File(...)):
     raw = await file.read()
     if not raw:
-        raise HTTPException(400, "boş dosya")
+        raise HTTPException(400, "empty file")
     name = (file.filename or "").lower()
     # JSON package (.json) — text cast + sections
     if name.endswith(".json") or (raw[:1] in (b"{", b"[") and b"PK" != raw[:2]):
         try:
             payload = json.loads(raw.decode("utf-8-sig"))
         except Exception as e:
-            raise HTTPException(400, f"JSON okunamadı: {e}") from e
+            raise HTTPException(400, f"Could not read JSON: {e}") from e
         try:
             out = cinema.import_project_json(payload, mode="replace", new_film=True)
         except Exception as e:
@@ -8012,23 +8063,23 @@ async def cinema_still_from_clip(body: CinemaStillBody):
         (j for j in _gallery if str(j.get("id")) == body.job_id), None
     )
     if not job:
-        raise HTTPException(404, "klip yok")
+        raise HTTPException(404, "no clip")
     try:
         await _prepare_last_frame(job, upload=True)
     except Exception as e:
-        raise HTTPException(400, f"son kare yok: {e}")
+        raise HTTPException(400, f"no last frame: {e}")
     src = Path(job.get("last_frame_path") or "")
     if not src.is_file():
-        raise HTTPException(400, "son kare dosyası yok")
+        raise HTTPException(400, "last frame file is missing")
     kind = "character" if (body.kind or "character") != "location" else "location"
     lib = cinema.load()
     key = "characters" if kind == "character" else "locations"
     found = next((x for x in lib.get(key) or [] if x.get("id") == body.asset_id), None)
     if not found:
-        raise HTTPException(404, "kart yok")
+        raise HTTPException(404, "no card")
     images = list(found.get("images") or [])
     if len(images) >= cinema.MAX_ASSET_IMAGES:
-        raise HTTPException(400, "Bu kartta en fazla 5 görsel")
+        raise HTTPException(400, "At most 5 images per card")
     rid = str(uuid.uuid4())[:12]
     dest = REFS / f"h3_ref_{rid}.png"
     REFS.mkdir(parents=True, exist_ok=True)
@@ -8036,7 +8087,7 @@ async def cinema_still_from_clip(body: CinemaStillBody):
     try:
         comfy_name = await comfy.upload_image(dest, dest.name)
     except Exception as e:
-        raise HTTPException(502, f"Comfy upload hata: {e}") from e
+        raise HTTPException(502, f"Comfy upload error: {e}") from e
     images.append({"file": comfy_name, "url": f"/api/refs/{comfy_name}"})
     found["images"] = images
     return cinema.upsert_asset(kind, found)
@@ -8047,7 +8098,7 @@ async def cinema_final(batch_id: str):
     bid = Path(batch_id).name
     path = CINEMA_FINALS / f"{bid}_final.mp4"
     if not path.exists():
-        raise HTTPException(404, "final yok — önce filme karıştır")
+        raise HTTPException(404, "no final — mix it into the film first")
     return FileResponse(path, media_type="video/mp4", filename=f"h3_film_{bid}.mp4")
 
 
@@ -8059,10 +8110,10 @@ async def storyboard(body: StoryboardBody):
     if str(body.quality) not in QUALITY_SHORT_EDGE:
         raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
     if not await comfy.healthy():
-        raise HTTPException(503, "ComfyUI kapalı")
+        raise HTTPException(503, "ComfyUI is not running")
     images = [str(x) for x in (body.image_names or []) if x]
     if len(images) < 2:
-        raise HTTPException(400, "En az 2 keyframe görsel gerekir")
+        raise HTTPException(400, "At least 2 keyframe images are needed")
     if len(images) > 40:
         raise HTTPException(400, "En fazla 40 keyframe")
     await _free_llm_for_production()
@@ -8121,7 +8172,7 @@ async def storyboard(body: StoryboardBody):
             "ref_images": [],
             "ref_videos": [],
             "progress": 0,
-            "progress_label": "sırada",
+            "progress_label": "queued",
             "error": None,
             "output": None,
             "created_at": time.time(),
@@ -8154,7 +8205,7 @@ async def get_ref(filename: str):
     name = Path(filename).name
     path = REFS / name
     if not path.exists():
-        raise HTTPException(404, "ref yok")
+        raise HTTPException(404, "no ref")
     media = "image/png"
     low = name.lower()
     if low.endswith((".jpg", ".jpeg")):
@@ -8168,7 +8219,7 @@ async def get_ref(filename: str):
 async def clip_last_frame(job_id: str):
     job = _clip_record(job_id)
     if not job:
-        raise HTTPException(404, "job yok")
+        raise HTTPException(404, "no job")
     p = job.get("last_frame_path")
     if p and Path(p).exists():
         return FileResponse(p, media_type="image/png")
@@ -8176,20 +8227,20 @@ async def clip_last_frame(job_id: str):
     try:
         await _prepare_last_frame(job, upload=False)
     except Exception as e:
-        raise HTTPException(404, f"last frame yok: {e}")
+        raise HTTPException(404, f"no last frame: {e}")
     p2 = job.get("last_frame_path")
     if p2 and Path(p2).exists():
         return FileResponse(p2, media_type="image/png")
-    raise HTTPException(404, "last frame yok")
+    raise HTTPException(404, "no last frame")
 
 
 @app.post("/api/jobs/{job_id}/prepare-last-frame")
 async def prepare_last_frame_api(job_id: str):
     job = _clip_record(job_id)
     if not job:
-        raise HTTPException(404, "job yok")
+        raise HTTPException(404, "no job")
     if job.get("status") != "done":
-        raise HTTPException(400, "job done değil")
+        raise HTTPException(400, "job is not done")
     try:
         await _prepare_last_frame(job, upload=True)
     except Exception as e:
@@ -8248,14 +8299,14 @@ async def production_get():
             return {"ok": True, "saved": False, "production": None}
         return {"ok": True, "saved": True, "production": raw}
     except Exception as e:
-        raise HTTPException(500, f"production okunamadı: {e}")
+        raise HTTPException(500, f"could not read production: {e}")
 
 
 @app.post("/api/production")
 async def production_save(body: dict[str, Any]):
     """Persist production-tab UI state. Never touches Comfy jobs / gallery."""
     if not isinstance(body, dict):
-        raise HTTPException(400, "geçersiz gövde")
+        raise HTTPException(400, "invalid body")
     snap = dict(body)
     snap["version"] = int(snap.get("version") or 1)
     snap["saved_at"] = time.time()
@@ -8396,7 +8447,7 @@ async def refine_clip(clip_id: str, body: RefineBody):
     meta = None
     if method == 'video':
         if source.get('status') != 'done':
-            raise HTTPException(409, 'Önce video üretimi tamamlanmalı')
+            raise HTTPException(409, 'The video render must finish first')
         path = await _ensure_job_video(source)
         try:
             meta = await asyncio.to_thread(video_refine.probe, path)
@@ -8418,7 +8469,7 @@ async def refine_clip(clip_id: str, body: RefineBody):
     job = {key:value for key,value in source.items() if key in (
         'prompt','duration','aspect','seed','steps','sampler','scheduler','h3_models',
         'lora_name','lora_strength','lora_strengths','silent_audio','purpose','ref_images','first_frame_name')}
-    job.update(id=str(uuid.uuid4()), status='queued', progress=0, progress_label='sırada · H3 Refine',
+    job.update(id=str(uuid.uuid4()), status='queued', progress=0, progress_label='queued · H3 Refine',
                mode='video_refine' if method == 'video' else 'flow_refine', lane='scene', quality=quality, width=width, height=height,
                created_at=time.time(), output=None, error=None, refine_source_id=clip_id,
                continue_from=None, prepare_refine=False)
@@ -8613,7 +8664,7 @@ async def set_lora_guidance(body: LoraGuidanceBody):
 async def loras_download(body: LoraDownloadBody):
     spec = find_spec(lora_id=body.id or "")
     if not spec or not spec.get("file") or not spec.get("url"):
-        raise HTTPException(400, "bilinmeyen LoRA")
+        raise HTTPException(400, "unknown LoRA")
     if spec_ready(spec):
         return {"ok": True, "ready": True, "id": spec["id"], "file": spec["file"]}
     if _lora_dl_status.get("busy"):
@@ -8634,7 +8685,7 @@ async def loras_upload(file: UploadFile = File(...)):
         raise HTTPException(400, "sadece .safetensors")
     if not is_h3_lora_name(orig):
         raise HTTPException(
-            400, "SDXL / Pony / Wan / Flux / ClipProj dosyası H3 video LoRA değil"
+            400, "SDXL / Pony / Wan / Flux / ClipProj files are not H3 video LoRAs"
         )
     LORAS_DIR.mkdir(parents=True, exist_ok=True)
     dest = LORAS_DIR / orig
@@ -8648,10 +8699,10 @@ async def loras_upload(file: UploadFile = File(...)):
                     break
                 size += len(chunk)
                 if size > 4 * 1024 * 1024 * 1024:
-                    raise HTTPException(400, "LoRA çok büyük (max 4GB)")
+                    raise HTTPException(400, "LoRA is too large (max 4 GB)")
                 f.write(chunk)
         if not valid_safetensors(tmp):
-            raise HTTPException(400, "dosya çok küçük / boş")
+            raise HTTPException(400, "file is too small / empty")
         tmp.replace(dest)
     except HTTPException:
         try:
@@ -8674,16 +8725,16 @@ async def loras_import(body: LoraImportBody):
     """Download an H3 .safetensors LoRA from a direct HTTP(S) URL (HF resolve works)."""
     url = (body.url or "").strip()
     if not url.startswith(("http://", "https://")):
-        raise HTTPException(400, "http(s) URL gerekli")
+        raise HTTPException(400, "an http(s) URL is required")
     name = filename_from_url(url, body.filename or "")
     if not name:
         raise HTTPException(
             400,
-            "Dosya adı .safetensors olmalı — Hugging Face resolve linki veya filename yaz",
+            "The file name must end in .safetensors — enter a Hugging Face resolve link or file name",
         )
     if not is_h3_lora_name(name):
         raise HTTPException(
-            400, "SDXL / Pony / Wan / Flux / ClipProj dosyası H3 video LoRA değil"
+            400, "SDXL / Pony / Wan / Flux / ClipProj files are not H3 video LoRAs"
         )
     if file_ready(name):
         return {"ok": True, "ready": True, "id": f"file:{name}", "file": name, "loras": public_list()}
@@ -8765,17 +8816,17 @@ async def notify_test():
     if prov == "telegram" and not pub.get("telegram_configured"):
         raise HTTPException(
             400,
-            "Telegram ayarlı değil — AkiFactory’den aktar veya bot token + chat id kaydet",
+            "Telegram is not set up — import from AkiFactory or save a bot token + chat id",
         )
     r = await notifier.send(
         "H3 Studio · test",
-        "Telegram bildirimi çalışıyor. Üretim bitince böyle mesaj gelecek.",
+        "Telegram notifications work. You will get a message like this when a render finishes.",
         priority=4,
         tags="bell,white_check_mark",
         force=True,
     )
     if not r.get("ok"):
-        raise HTTPException(502, r.get("detail") or "bildirim gönderilemedi")
+        raise HTTPException(502, r.get("detail") or "notification could not be sent")
     return {"ok": True, **pub, "detail": r.get("detail") or "test sent"}
 
 
@@ -8865,7 +8916,7 @@ async def director_delete_session(session_id: str):
     global _sessions
     async with _lock:
         if session_id not in _sessions:
-            raise HTTPException(404, "Oturum yok")
+            raise HTTPException(404, "No session")
         # Best-effort: remove session and persist
         _sessions.pop(session_id, None)
         _save_sessions()
@@ -8890,7 +8941,7 @@ async def director_save_plan(body: DirectorPlanBody):
     """Save edited shot board (Plan mode). Optionally copy prompts into cinema.json."""
     sess = _sessions.get(body.session_id)
     if not sess:
-        raise HTTPException(400, "Oturum yok")
+        raise HTTPException(400, "No session")
     brief = dict(sess.get("brief") or {})
     if isinstance(body.brief, dict):
         brief.update(body.brief)
@@ -9095,14 +9146,14 @@ async def _director_chat_impl(body: DirectorChatBody):
     if not await llm.healthy():
         prov = llm.provider()
         hints = {
-            "openai": "OpenAI API key yok/geçersiz — Ayarlar’dan sk-… key ekle.",
-            "nvidia": "NVIDIA chat reddedildi — build.nvidia.com’da yeni nvapi-… key oluştur; model (ör. minimaxai/minimax-m3) için erişim açık olmalı.",
-            "gemini": "Gemini API key yok/geçersiz — aistudio.google.com/apikey",
-            "grok": "Grok (xAI) API key yok/geçersiz — console.x.ai",
-            "claude": "Claude API key yok/geçersiz — console.anthropic.com",
-            "ollama": "Ollama kapalı — `ollama serve` veya Ayarlar’dan bulut LLM seç.",
+            "openai": "OpenAI API key missing/invalid — add an sk-… key in Settings.",
+            "nvidia": "NVIDIA chat was refused — create a new nvapi-… key at build.nvidia.com; the model (e.g. minimaxai/minimax-m3) must be enabled for it.",
+            "gemini": "Gemini API key missing/invalid — aistudio.google.com/apikey",
+            "grok": "Grok (xAI) API key missing/invalid — console.x.ai",
+            "claude": "Claude API key missing/invalid — console.anthropic.com",
+            "ollama": "Ollama is not running — run `ollama serve` or choose a cloud LLM in Settings.",
         }
-        raise HTTPException(503, hints.get(prov, "Yönetmen LLM hazır değil — Ayarlar’ı kontrol et."))
+        raise HTTPException(503, hints.get(prov, "The Director LLM is not ready — check Settings."))
     sid = body.session_id
     if not sid or sid not in _sessions:
         created = await director_new_session(body.model, lang=body.ui_lang)
@@ -9278,7 +9329,7 @@ async def _director_chat_impl(body: DirectorChatBody):
                 on_progress=progress,
             )
         except Exception:
-            raise HTTPException(502, f"Yönetmen LLM hata ({llm.provider()}): {e}")
+            raise HTTPException(502, f"Director LLM error ({llm.provider()}): {e}")
 
     content = (content or "").strip()
     if not content:
@@ -9445,7 +9496,7 @@ async def director_recover(body: DirectorRecoverBody):
     """Parse brief from pasted/raw text or last model message — force ready for queue."""
     sess = _sessions.get(body.session_id)
     if not sess:
-        raise HTTPException(400, "Oturum yok")
+        raise HTTPException(400, "No session")
     raw = (body.text or "").strip() or (sess.get("last_raw") or "")
     if not raw:
         # fall back: stitch recent assistant messages (truncated JSON often spans one long reply)
@@ -9457,7 +9508,7 @@ async def director_recover(body: DirectorRecoverBody):
                     break
         raw = "\n\n".join(reversed(parts))
     if not raw:
-        raise HTTPException(400, "Ayrıştırılacak metin yok")
+        raise HTTPException(400, "No text to parse")
     parsed = extract_json_object(raw)
     brief_src = None
     if parsed:
@@ -9472,7 +9523,7 @@ async def director_recover(body: DirectorRecoverBody):
     if not isinstance(brief_src, dict):
         raise HTTPException(
             400,
-            "JSON brief bulunamadı — yönetmen yanıtını veya JSON’u yapıştırıp tekrar dene",
+            "No JSON brief found — paste the Director reply or the JSON and try again",
         )
     if sess.get("clip_duration") in ALLOWED_DURATIONS:
         brief_src["clipDurationSec"] = int(sess["clip_duration"])
@@ -9499,7 +9550,7 @@ async def director_recover(body: DirectorRecoverBody):
             if total <= 0:
                 raise HTTPException(
                     400,
-                    "Shot sayısı / süre yok — yönetmene toplam sn veya ‘N shot’ söyleyip tekrar dene",
+                    "No shot count / length — tell the Director the total seconds or ‘N shots’ and try again",
                 )
             brief["clipDurationSec"] = clip
             brief["totalDurationSec"] = total
@@ -9511,8 +9562,8 @@ async def director_recover(body: DirectorRecoverBody):
     if not brief.get("shots"):
         raise HTTPException(
             400,
-            "Shot listesi boş — Ollama shot üretemedi. Yönetmene yaz: "
-            "toplam süre + klip sn ile ready brief (ör. 30sn / 5sn → 6 shot).",
+            "The shot list is empty — Ollama could not produce shots. Tell the Director: "
+            "a ready brief with total length + clip seconds (e.g. 30 s / 5 s → 6 shots).",
         )
     sess["brief"] = brief
     sess["ready"] = True
@@ -9546,11 +9597,11 @@ async def director_rewrite_shots(body: DirectorRewriteShotsBody):
     """Rewrite each brief h3Prompt with LLM prompt optimize."""
     sess = _sessions.get(body.session_id)
     if not sess or not sess.get("brief"):
-        raise HTTPException(400, "Brief yok — önce yönetmenle konuşmayı bitir")
+        raise HTTPException(400, "No brief — finish the conversation with the Director first")
     brief = _scrub_brief_removed(validate_brief(sess["brief"]), sess) or sess["brief"]
     shots = list(brief.get("shots") or [])
     if not shots:
-        raise HTTPException(400, "Shot listesi boş")
+        raise HTTPException(400, "The shot list is empty")
     changed = 0
     for i, shot in enumerate(shots):
         if not isinstance(shot, dict):
@@ -9587,7 +9638,7 @@ async def director_rewrite_shots(body: DirectorRewriteShotsBody):
 async def director_commit(body: DirectorCommitBody):
     sess = _sessions.get(body.session_id)
     if not sess or not sess.get("brief"):
-        raise HTTPException(400, "Brief yok — önce yönetmenle konuşmayı bitir veya ‘Son yanıttan brief çıkar’")
+        raise HTTPException(400, "No brief — finish the conversation with the Director first or use ‘Brief from last reply’")
     model = sess.get("model") or _director_model or "qwen3:8b"
     if body.clip_duration in ALLOWED_DURATIONS:
         sess["clip_duration"] = int(body.clip_duration)
@@ -9602,7 +9653,7 @@ async def director_commit(body: DirectorCommitBody):
     _save_sessions()
     shots = brief.get("shots") or []
     if not shots:
-        raise HTTPException(400, "Shot listesi boş")
+        raise HTTPException(400, "The shot list is empty")
 
     # Narrative default: decide whether to link continue chain when queueing a film package
     link = body.link_continue
@@ -9767,7 +9818,7 @@ async def music_status(music_id: Optional[str] = None):
     try:
         meta = load_meta(MUSIC, music_id)
     except FileNotFoundError:
-        raise HTTPException(404, "şarkı yok")
+        raise HTTPException(404, "no song")
     final = MUSIC / f"{music_id}_final.mp4"
     clip_sec = int(meta.get("clipDurationSec") or 5)
     linked = [j for j in _jobs if j.get("music_id") == music_id]
@@ -9797,15 +9848,15 @@ async def music_upload(file: UploadFile = File(...)):
     MUSIC.mkdir(parents=True, exist_ok=True)
     raw = await file.read()
     if not raw or len(raw) < 64:
-        raise HTTPException(400, "boş dosya")
+        raise HTTPException(400, "empty file")
     if len(raw) > 80 * 1024 * 1024:
-        raise HTTPException(400, "şarkı 80MB üstü olamaz")
+        raise HTTPException(400, "the song cannot exceed 80 MB")
     try:
         meta = save_upload(MUSIC, filename=file.filename or "track.mp3", data=raw)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
-        raise HTTPException(500, f"upload/probe hata: {e}")
+        raise HTTPException(500, f"upload/probe error: {e}")
     dur = float(meta["durationSec"])
     slog.info("music uploaded", id=meta["id"], dur=dur, name=meta.get("filename"))
     return {
@@ -9823,11 +9874,11 @@ async def music_upload(file: UploadFile = File(...)):
 @app.delete("/api/music/{music_id}")
 async def music_delete(music_id: str):
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", music_id):
-        raise HTTPException(400, "geçersiz şarkı kimliği")
+        raise HTTPException(400, "invalid song id")
     MUSIC.mkdir(parents=True, exist_ok=True)
     meta_path = MUSIC / f"{music_id}.json"
     if not meta_path.exists():
-        raise HTTPException(404, "şarkı yok")
+        raise HTTPException(404, "no song")
     removed = False
     paths = set(MUSIC.glob(f"{music_id}.*"))
     paths.add(MUSIC / f"{music_id}_final.mp4")
@@ -9835,7 +9886,7 @@ async def music_delete(music_id: str):
         if path.is_file():
             removed = _unlink_retry(path) or removed
     if not removed:
-        raise HTTPException(404, "şarkı dosyası yok")
+        raise HTTPException(404, "song file is missing")
     slog.info("music deleted", id=music_id)
     return {"ok": True, "id": music_id}
 
@@ -9846,12 +9897,12 @@ async def music_analyze(body: MusicAnalyzeBody):
     if not await llm.healthy():
         raise HTTPException(
             503,
-            "Yönetmen LLM hazır değil — Ayarlar’dan Gemini key veya Ollama kur.",
+            "The Director LLM is not ready — set a Gemini key or install Ollama in Settings.",
         )
     try:
         meta = load_meta(MUSIC, body.music_id)
     except FileNotFoundError:
-        raise HTTPException(404, "şarkı yok — önce yükle")
+        raise HTTPException(404, "no song — upload it first")
 
     clip = body.clip_duration if body.clip_duration in ALLOWED_DURATIONS else 5
     lyrics = (body.lyrics or "").strip()
@@ -9931,7 +9982,7 @@ async def music_analyze(body: MusicAnalyzeBody):
             num_predict=4096,
         )
     except Exception as e:
-        raise HTTPException(502, f"Yönetmen LLM hata ({llm.provider()}): {e}")
+        raise HTTPException(502, f"Director LLM error ({llm.provider()}): {e}")
 
     content = (content or "").strip()
     if not content:
@@ -9995,7 +10046,7 @@ async def music_analyze(body: MusicAnalyzeBody):
         _save_sessions()
         raise HTTPException(
             422,
-            "Şarkı analizi brief üretemedi — Yönetmen sohbetinden devam et veya ‘Son yanıttan brief çıkar’.",
+            "Song analysis could not produce a brief — continue in the Director chat or use ‘Brief from last reply’.",
         )
 
     n = len(brief["shots"])
@@ -10032,27 +10083,27 @@ async def music_mux(body: MusicMuxBody):
     try:
         meta = load_meta(MUSIC, body.music_id)
     except FileNotFoundError:
-        raise HTTPException(404, "şarkı yok")
+        raise HTTPException(404, "no song")
     audio = Path(meta["path"])
     if not audio.exists():
-        raise HTTPException(404, "şarkı dosyası yok")
+        raise HTTPException(404, "song file is missing")
 
     jobs: list[dict] = []
     if body.job_ids:
         for jid in body.job_ids:
             j = next((x for x in _jobs if x["id"] == jid), None)
             if not j:
-                raise HTTPException(400, f"job yok: {jid}")
+                raise HTTPException(400, f"no job: {jid}")
             # Explicit ids must still belong to this song (never mix old batches)
             if j.get("music_id") and j.get("music_id") != body.music_id:
                 raise HTTPException(
                     400,
-                    f"job {jid[:8]} başka şarkıya ait — eski kelip birleştirilmez",
+                    f"job {jid[:8]} belongs to another song — old clips are not joined",
                 )
             if not j.get("music_id"):
                 raise HTTPException(
                     400,
-                    f"job {jid[:8]} bu şarkıya bağlı değil — önce Şarkıdan brief → kuyruğa al",
+                    f"job {jid[:8]} is not linked to this song — first use Song brief → queue",
                 )
             jobs.append(j)
     else:
@@ -10070,38 +10121,38 @@ async def music_mux(body: MusicMuxBody):
         if pending:
             raise HTTPException(
                 400,
-                f"Bu şarkı için {len(pending)} klip hâlâ üretiliyor — bitince Şarkılı final’e bas. "
-                "Eski galeri klipleri birleştirilmez.",
+                f"For this song, {len(pending)} clips are still rendering — press Song final when they finish. "
+                "Old gallery clips are not joined.",
             )
         if linked_any:
             raise HTTPException(
                 400,
-                "Bu şarkıya bağlı bitmiş klip yok (hata/iptal olabilir). "
-                "Yeni senaryo → Üretime al ile yeniden üret.",
+                "No finished clips are linked to this song (they may have failed or been cancelled). "
+                "Render again with New script → Queue for production.",
             )
         raise HTTPException(
             400,
-            "Bu şarkı için henüz yeni sahne üretilmemiş. "
-            "Sıra: senaryo bitince Üretime al → bitince Şarkılı final. "
-            "Şarkılı final eski klipleri birleştirmez.",
+            "No new scenes have been rendered for this song yet. "
+            "Order: when the script is done, Queue for production → when it finishes, Song final. "
+            "Song final does not join old clips.",
         )
     not_done = [j["id"] for j in jobs if j.get("status") != "done"]
     if not_done:
-        raise HTTPException(400, f"henüz bitmemiş: {', '.join(not_done[:5])}")
+        raise HTTPException(400, f"not finished yet: {', '.join(not_done[:5])}")
 
     paths: list[Path] = []
     for j in jobs:
         try:
             paths.append(await _ensure_job_video(j))
         except Exception as e:
-            raise HTTPException(400, f"klip alınamadı ({j['id'][:8]}): {e}")
+            raise HTTPException(400, f"clip could not be fetched ({j['id'][:8]}): {e}")
 
     out = MUSIC / f"{body.music_id}_final.mp4"
     try:
         concat_and_mux(video_paths=paths, audio_path=audio, out_path=out)
     except Exception as e:
         slog.error("music mux failed", err=e, music_id=body.music_id)
-        raise HTTPException(500, f"mux hata: {e}")
+        raise HTTPException(500, f"mux error: {e}")
 
     update_meta(MUSIC, body.music_id, finalPath=str(out), finalAt=time.time())
     slog.info("music mux ok", music_id=body.music_id, clips=len(paths), out=str(out))
@@ -10118,7 +10169,7 @@ async def music_mux(body: MusicMuxBody):
 async def music_final(music_id: str):
     path = MUSIC / f"{music_id}_final.mp4"
     if not path.exists():
-        raise HTTPException(404, "final yok — önce mux")
+        raise HTTPException(404, "no final — mux first")
     return FileResponse(path, media_type="video/mp4", filename=f"h3_music_{music_id[:8]}.mp4")
 
 
@@ -10144,7 +10195,7 @@ async def _ensure_job_video(job: dict) -> Path:
     out = job.get("output") or {}
     filename = out.get("filename")
     if not filename:
-        raise RuntimeError("önceki klip videosu yok — continue edilemez")
+        raise RuntimeError("previous clip video is missing — cannot continue")
     await comfy.download_view(
         filename,
         out.get("subfolder") or "",
@@ -10199,6 +10250,43 @@ async def _motion_long_guide_frame(job: dict, parent: dict) -> str:
     return name
 
 
+async def _motion_long_identity_anchor(job: dict) -> Optional[str]:
+    """Head crop from part 1 of a long face swap, shared by every later part.
+
+    Each part starts on the previous part's boundary frame, so small face drift
+    compounds; a fixed reference from part 1 keeps all parts on the same face.
+    """
+    long_id = job.get("motion_long_id")
+    if (job.get("v2v_role") != "face_swap" or not long_id
+            or int(job.get("motion_long_index") or 0) < 2):
+        return None
+    if job.get("identity_anchor"):
+        return job["identity_anchor"]
+    first = next((j for j in _motion_long_parts(long_id) if int(j.get("motion_long_index") or 0) == 1), None)
+    if not first or first.get("status") != "done":
+        return None
+    out = REFS / f"{long_id}_anchor_face.png"
+    try:
+        if not out.is_file():
+            video = await _ensure_job_video(first)
+            window = first.get("motion_long_window") or {}
+            skip, frames = int(window.get("skip") or 0), int(window.get("frames") or 0)
+            if frames <= 0:
+                return None
+            for fraction in (0.5, 0.25, 0.75):
+                raw = FRAMES / f"{long_id}_anchor_{int(fraction * 100)}.png"
+                await asyncio.to_thread(motion_long.extract_frame, video, skip + int(frames * fraction), raw)
+                if await asyncio.to_thread(face_crop.crop_main_face, raw, out, DATA / "models"):
+                    break
+            if not out.is_file():
+                return None
+        job["identity_anchor"] = await comfy.upload_image(out, out.name)
+        return job["identity_anchor"]
+    except Exception as e:
+        slog.warn_job(job, "identity anchor skipped", err=e)
+        return None
+
+
 async def _resolve_first_frame(job: dict) -> Optional[str]:
     if job.get("first_frame_name"):
         return job["first_frame_name"]
@@ -10207,7 +10295,7 @@ async def _resolve_first_frame(job: dict) -> Optional[str]:
         return None
     parent = _clip_record(parent_id)
     if not parent or parent.get("status") != "done":
-        raise RuntimeError("önceki klip bitmeden continue edilemez")
+        raise RuntimeError("cannot continue before the previous clip finishes")
     if job.get("motion_long_guide_frame") is not None:
         return await _motion_long_guide_frame(job, parent)
 
@@ -10215,11 +10303,11 @@ async def _resolve_first_frame(job: dict) -> Optional[str]:
     try:
         await _prepare_last_frame(parent, upload=False)
     except Exception as e:
-        raise RuntimeError(f"önceki klipten last frame alınamadı: {e}")
+        raise RuntimeError(f"could not get the last frame of the previous clip: {e}")
 
     src = Path(parent.get("last_frame_path") or FRAMES / f"{parent['id']}_last.png")
     if not src.exists():
-        raise RuntimeError("önceki klip videosu yok — continue edilemez")
+        raise RuntimeError("previous clip video is missing — cannot continue")
 
     # CRITICAL: H3 first_frame must match target width/height exactly or Comfy
     # throws latent shape errors (e.g. invalid for input of size 86400).
@@ -10232,7 +10320,7 @@ async def _resolve_first_frame(job: dict) -> Optional[str]:
     try:
         resize_image(src, sized, tw, th)
     except Exception as e:
-        raise RuntimeError(f"first_frame {tw}x{th} ölçeklenemedi: {e}")
+        raise RuntimeError(f"first_frame {tw}x{th} could not be scaled: {e}")
 
     last_err = None
     for attempt in range(4):
@@ -10243,7 +10331,7 @@ async def _resolve_first_frame(job: dict) -> Optional[str]:
         except Exception as e:
             last_err = e
             await asyncio.sleep(1.5 * (attempt + 1))
-    raise RuntimeError(f"son kare Comfy'ye yüklenemedi: {last_err}")
+    raise RuntimeError(f"last frame could not be uploaded to Comfy: {last_err}")
 
 
 def _queue_has_prompt(pid: str, items: list) -> bool:
@@ -10271,7 +10359,7 @@ async def _run_job_impl(job: dict):
         job["status"] = "running"
         job["error"] = None
         job["started_at"] = time.time()
-        job["progress_label"] = "Kare hazırlanıyor"
+        job["progress_label"] = "Preparing frame"
         _save_jobs()
         await _free_llm_for_production()
         await _run_shot_frame(job)
@@ -10280,7 +10368,7 @@ async def _run_job_impl(job: dict):
         job["status"] = "running"
         job["error"] = None
         job["started_at"] = time.time()
-        job["progress_label"] = "Çizim hazırlanıyor"
+        job["progress_label"] = "Preparing drawing"
         _save_jobs()
         await _free_llm_for_production()
         await _run_sketch_frame(job)
@@ -10288,14 +10376,14 @@ async def _run_job_impl(job: dict):
     if job.get("mode") == "qwen_sheet":
         job["status"] = "running"
         job["started_at"] = time.time()
-        job["progress_label"] = "Qwen görseli hazırlanıyor"
+        job["progress_label"] = "Preparing Qwen image"
         _save_jobs()
         await _free_llm_for_production()
         result = await _generate_cinema_image_studio_sheet(**(job.get("qwen_sheet_args") or {}), job=job)
         if job.get("status") != "cancelled":
             job["status"] = "done"
             job["progress"] = 100
-            job["progress_label"] = "görsel karta eklendi"
+            job["progress_label"] = "image added to the card"
             job["done_at"] = time.time()
             job["sheet_asset_id"] = (result.get("asset") or {}).get("id")
             job["sheet_attached"] = True
@@ -10310,13 +10398,13 @@ async def _run_job_impl(job: dict):
     reattach = bool(job.pop("_reattach", None) and job.get("prompt_id"))
     if reattach:
         job["progress"] = max(int(job.get("progress") or 0), 50)
-        job["progress_label"] = "Comfy’ye yeniden bağlandı"
+        job["progress_label"] = "Reconnected to Comfy"
         _save_jobs()
         prompt_id = job["prompt_id"]
         slog.info_job(job, "reattach wait", prompt=str(prompt_id)[:8])
     else:
         job["progress"] = 2
-        job["progress_label"] = "hazırlanıyor"
+        job["progress_label"] = "preparing"
         _save_jobs()
         await _free_llm_for_production()
         job["progress"] = 5
@@ -10333,7 +10421,7 @@ async def _run_job_impl(job: dict):
             if job.get("mode") == "continue" or job.get("continue_from"):
                 if not first:
                     raise RuntimeError(
-                        "Devam için last frame yok — önce bitmiş videoda last frame hazırlanmalı"
+                        "No last frame to continue from — prepare the last frame of a finished video first"
                     )
                 job["first_frame_name"] = first
         # H3 first_frame path hard-fails on non-×32 sizes (e.g. 1280×720).
@@ -10425,14 +10513,14 @@ async def _run_job_impl(job: dict):
         elif mode == "video_refine":
             source = _clip_record(job['refine_source_id'])
             if not source:
-                raise RuntimeError('Kaynak video bulunamadı')
+                raise RuntimeError('Source video not found')
             path = await _ensure_job_video(source)
             uploaded = await comfy.upload_video(path, name='h3_refine_' + job['id'] + '.mp4')
             prompt = video_refine.build(job, uploaded)
         elif mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
-                raise RuntimeError("Kesintisiz zincir için script yok")
+                raise RuntimeError("No script for the seamless chain")
             prompt = build_multishot_prompt(
                 script=script,
                 width=w,
@@ -10457,7 +10545,14 @@ async def _run_job_impl(job: dict):
         elif mode in ("ref", "face", "v2v"):
             refs = [str(x) for x in (job.get("ref_images") or []) if x]
             if not refs and not ref_videos:
-                raise RuntimeError("Referans görsel/video eksik")
+                raise RuntimeError("Reference image/video is missing")
+            anchor = await _motion_long_identity_anchor(job) if mode == "v2v" else None
+            if anchor and anchor not in refs and len(refs) < 9:
+                refs.append(anchor)
+                prompt_text += (
+                    f"\n\n<Picture {len(refs)}> is this same person in the first part of this video; "
+                    "keep the face identical to it so every part matches."
+                )
             size_mode = job.get("ref_image_size") or ("max" if mode == "face" else "match")
             prompt = build_ref2va_prompt(
                 text=asset_references.prompt(prompt_text, job["reference_manifest"], new_scene=mode == "ref") if job.get("reference_manifest") else prompt_text,
@@ -10485,10 +10580,10 @@ async def _run_job_impl(job: dict):
                 prompt = add_h3_first_frame_guide(prompt, first)
         elif mode == "audio_continue":
             if not first or not job.get("continue_from"):
-                raise RuntimeError("Sesli devam için önceki klibin son karesi yok")
+                raise RuntimeError("The previous clip has no last frame for audio continue")
             parent = _clip_record(job.get("continue_from"))
             if not parent:
-                raise RuntimeError("Sesli devam kaynağı bulunamadı")
+                raise RuntimeError("Source for audio continue not found")
             source_video = await _ensure_job_video(parent)
             tail_path = REF_AUDIOS / f"h3_studio_{parent['id']}_tail.wav"
             extract_audio_tail(source_video, tail_path, seconds=5.0)
@@ -10528,9 +10623,9 @@ async def _run_job_impl(job: dict):
             # the frame-zero guide. A portrait alone can otherwise become the
             # generated scene despite the separate AddGuide conditioning.
             if not face_refs:
-                raise RuntimeError("Yüz kilidi portreleri eksik")
+                raise RuntimeError("Face lock portraits are missing")
             if not first:
-                raise RuntimeError("Devam için last frame yok")
+                raise RuntimeError("No last frame to continue from")
             refs = list(dict.fromkeys(x for x in face_refs if x != first))[:8]
             manifest = job.get("reference_manifest")
             manifest_rows = [{**next((r for r in (manifest or []) if r.get("file") == f), {}), "file": f} for f in refs]
@@ -10587,7 +10682,7 @@ async def _run_job_impl(job: dict):
                 fast_preview_tae=detect_h3_tae(COMFY_ROOT) if job.get("fast_preview") else None,
             )
         job["progress"] = 10
-        job["progress_label"] = "Comfy kuyruğa"
+        job["progress_label"] = "Queued in Comfy"
         _save_jobs()
         # Reference/continuation helpers can prepend text after queue creation.
         # Reapply the final stack's trigger ordering at the actual model input.
@@ -10609,7 +10704,7 @@ async def _run_job_impl(job: dict):
         prompt_id = await comfy.queue_prompt(prompt, render_control_token=job.get('render_control_token'))
         job["prompt_id"] = prompt_id
         job["progress"] = 12
-        job["progress_label"] = "Comfy çalışıyor"
+        job["progress_label"] = "Comfy is running"
         _save_jobs()
         slog.info_job(
             job,
@@ -10664,7 +10759,7 @@ async def _run_job_impl(job: dict):
                 hist = await comfy.history(prompt_id)
             except Exception as e:
                 if tick % 5 == 0:
-                    job["progress_label"] = f"history bekleniyor ({e})"[:80]
+                    job["progress_label"] = f"waiting for history ({e})"[:80]
                     _save_jobs_throttled(2.0)
                 await asyncio.sleep(1)
                 continue
@@ -10677,7 +10772,7 @@ async def _run_job_impl(job: dict):
                     msgs = status.get("messages") or []
                     job["status"] = "error"
                     job["error"] = comfy.format_execution_error(msgs)
-                    job["progress_label"] = "hata"
+                    job["progress_label"] = "error"
                     _save_jobs()
                     slog.error_job(job, "comfy execution error", err=job["error"])
                     await _notify_job(job, "error")
@@ -10687,8 +10782,8 @@ async def _run_job_impl(job: dict):
                 if not video_meta:
                     if status.get("completed") is True or status_str == "success":
                         job["status"] = "error"
-                        job["error"] = "çıktı videosu yok (SaveVideo boş)"
-                        job["progress_label"] = "hata"
+                        job["error"] = "no output video (SaveVideo is empty)"
+                        job["progress_label"] = "error"
                         _save_jobs()
                         slog.error_job(job, "no video output", status=status_str)
                         await _notify_job(job, "error")
@@ -10696,13 +10791,13 @@ async def _run_job_impl(job: dict):
                     # Completion was reported but the SaveVideo node has not
                     # produced its file yet. Keep the last real sampler %;
                     # never manufacture a near-complete progress value.
-                    job["progress_label"] = "çıktı hazırlanıyor"
+                    job["progress_label"] = "preparing output"
                     _save_jobs_throttled(2.0)
                     await asyncio.sleep(1)
                     continue
 
                 job["progress"] = 96
-                job["progress_label"] = "video indiriliyor"
+                job["progress_label"] = "downloading video"
                 _save_jobs()
                 dest = CLIPS / f"{job['id']}.mp4"
                 await comfy.download_view(
@@ -10744,7 +10839,7 @@ async def _run_job_impl(job: dict):
                     job["generation_duration"] = 4
                 job["download_name"] = video_download_name(job, item_id=job["id"])
                 job["progress"] = 98
-                job["progress_label"] = "last frame çıkarılıyor"
+                job["progress_label"] = "extracting last frame"
                 _save_jobs()
                 try:
                     await _prepare_last_frame(job, upload=True)
@@ -10753,7 +10848,7 @@ async def _run_job_impl(job: dict):
                     slog.exception("last frame prep failed", e, job=job["id"][:8])
                 job["status"] = "running" if job.get("sheet_method") == "look_sheets" else "done"
                 job["progress"] = 100
-                job["progress_label"] = "bitti"
+                job["progress_label"] = "done"
                 job["done_at"] = time.time()
                 job.pop("_reattach", None)
                 _save_jobs()
@@ -10802,8 +10897,8 @@ async def _run_job_impl(job: dict):
 
             ws_fresh = (time.time() - float(job.get("_ws_progress_at") or 0)) < 8.0
             if job.get('render_pause_requested'):
-                job['progress_label'] = ('Duraklatıldı — bellek korunuyor' if job.get('render_paused')
-                                         else 'Geçerli adım bitince duraklatılacak')
+                job['progress_label'] = ('Paused — memory is kept' if job.get('render_paused')
+                                         else 'Will pause when the current step finishes')
                 _save_jobs_throttled(2.0)
                 await asyncio.sleep(1)
                 tick += 1
@@ -10819,16 +10914,16 @@ async def _run_job_impl(job: dict):
                     step_max = job.get("comfy_step_max")
                     if step is not None and step_max:
                         job["progress_label"] = (
-                            f"örnekleme {int(step)}/{int(step_max)} · {clock}"
+                            f"sampling {int(step)}/{int(step_max)} · {clock}"
                         )
                     else:
-                        job["progress_label"] = f"Comfy örnekliyor · {clock}"
+                        job["progress_label"] = f"Comfy sampling · {clock}"
                     _save_jobs_throttled(2.0)
             elif in_pending:
                 absent_ticks = 0
                 if not ws_fresh:
                     job["progress"] = 8
-                    job["progress_label"] = f"Comfy kuyruğunda · {clock}"
+                    job["progress_label"] = f"In Comfy queue · {clock}"
                     job["progress_source"] = "queue"
                     _save_jobs_throttled(2.0)
             else:
@@ -10838,27 +10933,27 @@ async def _run_job_impl(job: dict):
                 if saw_running:
                     if not ws_fresh:
                         # Keep last real Comfy %; only refresh the clock in the label
-                        base = job.get("progress_label") or "çıktı bekleniyor"
+                        base = job.get("progress_label") or "waiting for output"
                         base = re.sub(r"\s·\s\d+m\d{2}s|\s·\s\d+s$", "", str(base))
-                        if "örnekleme" not in base and "çıktı" not in base:
-                            base = "çıktı bekleniyor"
+                        if not any(word in base for word in ("sampling", "output", "örnekleme", "çıktı")):
+                            base = "waiting for output"
                         job["progress_label"] = f"{base} · {clock}"
                         _save_jobs_throttled(2.0)
                     # ~3 min confirmed gone from queue with no history
                     if absent_ticks >= 180:
                         job["status"] = "error"
                         job["error"] = (
-                            "Comfy kuyruğundan düştü ama çıktı gelmedi — "
-                            "Comfy terminalini kontrol et / Tekrar dene"
+                            "Left the Comfy queue without output — "
+                            "check the Comfy terminal / Retry"
                         )
-                        job["progress_label"] = "hata"
+                        job["progress_label"] = "error"
                         _save_jobs()
                         slog.error_job(job, "dropped from comfy queue", clock=clock)
                         await _notify_job(job, "error")
                         return
                 else:
                     job["progress"] = 12
-                    job["progress_label"] = f"Comfy’nin işi alması bekleniyor · {clock}"
+                    job["progress_label"] = f"Waiting for Comfy to pick up the job · {clock}"
                     job["progress_source"] = "queue"
                     _save_jobs_throttled(2.0)
             await asyncio.sleep(1)
@@ -10955,16 +11050,16 @@ def _pick_next_job() -> Optional[dict]:
         parent = _clip_record(parent_id)
         if not parent:
             j["status"] = "error"
-            j["error"] = "önceki klip bulunamadı — continue iptal"
-            j["progress_label"] = "hata"
+            j["error"] = "previous clip not found — continue cancelled"
+            j["progress_label"] = "error"
             dirty = True
             continue
         if parent.get("status") == "done":
             return j
         if parent.get("status") in ("error", "cancelled"):
             j["status"] = "error"
-            j["error"] = "önceki klip başarısız — continue iptal"
-            j["progress_label"] = "hata"
+            j["error"] = "previous clip failed — continue cancelled"
+            j["progress_label"] = "error"
             dirty = True
             continue
         # Head of queue waits on parent — keep order, don't start later jobs
@@ -11002,14 +11097,14 @@ async def _queue_loop():
                 slog.warn_job(job, "queue ← cancelled-signal")
                 if job.get("status") == "running":
                     job["status"] = "queued"
-                    job["progress_label"] = "kesildi — yeniden sırada"
+                    job["progress_label"] = "interrupted — queued again"
                     _save_jobs()
             except Exception as e:
                 if job.get("status") not in ("cancelled", "done"):
                     job["status"] = "error"
                     err = str(e).strip() or repr(e)
                     job["error"] = err[-800:]
-                    job["progress_label"] = "hata"
+                    job["progress_label"] = "error"
                     _save_jobs()
                 slog.exception("queue ← error", e, job=job.get("id", "")[:8])
             finally:
@@ -11021,11 +11116,11 @@ async def _queue_loop():
             await asyncio.sleep(0.05)
         except asyncio.CancelledError:
             _running = False
-            slog.warn("queue loop iptal (shutdown)")
+            slog.warn("queue loop cancelled (shutdown)")
             raise
         except Exception as e:
             _running = False
-            slog.exception("queue loop hata", e)
+            slog.exception("queue loop error", e)
             await asyncio.sleep(2)
 
 

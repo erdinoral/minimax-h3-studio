@@ -64,7 +64,7 @@ def encode_take(frames: Path, dest: Path, fps: int = FPS) -> float:
     """Encode a concatenated JPEG stream (one frame per JPEG) into an H.264 MP4; return seconds."""
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
-        raise RuntimeError("ffmpeg bulunamadı (Pinokio PATH / conda)")
+        raise RuntimeError("ffmpeg not found (Pinokio PATH / conda)")
     dest.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([
         ffmpeg, "-hide_banner", "-v", "error", "-y", "-f", "mjpeg", "-framerate", str(fps), "-i", str(frames),
@@ -72,14 +72,14 @@ def encode_take(frames: Path, dest: Path, fps: int = FPS) -> float:
         "-crf", "18", "-r", str(fps), "-movflags", "+faststart", str(dest),
     ], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode or not dest.is_file() or not dest.stat().st_size:
-        raise RuntimeError(f"Robot kaydı videoya çevrilemedi: {(result.stderr or '')[-400:]}")
+        raise RuntimeError(f"The robot recording could not be converted to video: {(result.stderr or '')[-400:]}")
     return frame_count(dest) / fps
 
 
 def frame_count(video: Path) -> int:
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
-        raise RuntimeError("ffprobe bulunamadı (Pinokio PATH / conda)")
+        raise RuntimeError("ffprobe not found (Pinokio PATH / conda)")
     result = subprocess.run([
         ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets",
         "-show_entries", "stream=nb_read_packets", "-of", "default=nokey=1:noprint_wrappers=1", str(video),
@@ -87,4 +87,4 @@ def frame_count(video: Path) -> int:
     try:
         return int(result.stdout.strip())
     except ValueError as exc:
-        raise RuntimeError("Robot kaydının kare sayısı okunamadı") from exc
+        raise RuntimeError("Could not read the frame count of the robot recording") from exc

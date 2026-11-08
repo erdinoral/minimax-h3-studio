@@ -23,7 +23,7 @@ EMBEDDED_CATALOG: dict[str, dict[str, Any]] = {
     "qwen3-1.7b-q4_k_m": {
         "repo": "unsloth/Qwen3-1.7B-GGUF",
         "file": "Qwen3-1.7B-Q4_K_M.gguf",
-        "label": "Hafif · Qwen3 1.7B Q4 (≈2B, ~1.1 GB)",
+        "label": "Light · Qwen3 1.7B Q4 (≈2B, ~1.1 GB)",
         "tier": "light",
         "params_b": 1.7,
         "approx_gb": 1.1,
@@ -43,7 +43,7 @@ EMBEDDED_CATALOG: dict[str, dict[str, Any]] = {
     "qwen3-8b-q4_k_m": {
         "repo": "Qwen/Qwen3-8B-GGUF",
         "file": "Qwen3-8B-Q4_K_M.gguf",
-        "label": "Güçlü · Qwen3 8B Q4 (≈9B, ~5 GB)",
+        "label": "Strong · Qwen3 8B Q4 (≈9B, ~5 GB)",
         "tier": "high",
         "params_b": 8.0,
         "approx_gb": 5.0,
@@ -55,8 +55,8 @@ EMBEDDED_CATALOG: dict[str, dict[str, Any]] = {
 LOCAL_TIERS: dict[str, dict[str, Any]] = {
     "light": {
         "id": "light",
-        "label": "Hafif ≈2B",
-        "hint": "Qwen3 1.7B · CPU / düşük VRAM (≈4 GB)",
+        "label": "Light ≈2B",
+        "hint": "Qwen3 1.7B · CPU / low VRAM (≈4 GB)",
         "embedded": "qwen3-1.7b-q4_k_m",
         "min_chars": 600,
         "n_ctx": 4096,
@@ -75,7 +75,7 @@ LOCAL_TIERS: dict[str, dict[str, Any]] = {
     "mid": {
         "id": "mid",
         "label": "Orta ≈5B",
-        "hint": "Qwen3 4B · orta kart (≈6–8 GB VRAM)",
+        "hint": "Qwen3 4B · mid-range GPU (≈6–8 GB VRAM)",
         "embedded": "qwen3-4b-q4_k_m",
         "min_chars": 750,
         "n_ctx": 6144,
@@ -92,8 +92,8 @@ LOCAL_TIERS: dict[str, dict[str, Any]] = {
     },
     "high": {
         "id": "high",
-        "label": "Güçlü ≈9B",
-        "hint": "Qwen3 8B · daha iyi kalite (≈8 GB+ VRAM) — 9B üstü yok",
+        "label": "Strong ≈9B",
+        "hint": "Qwen3 8B · better quality (≈8 GB+ VRAM) — nothing above 9B",
         "embedded": "qwen3-8b-q4_k_m",
         "min_chars": 900,
         "n_ctx": 8192,
@@ -334,7 +334,7 @@ class EmbeddedLlm:
             import llama_cpp  # noqa: F401
         except ImportError as e:
             raise RuntimeError(
-                "llama-cpp-python yok — Pinokio: Update / Install "
+                "llama-cpp-python is missing — Pinokio: Update / Install "
                 "(studio/requirements.txt → llama-cpp-python)."
             ) from e
 
@@ -351,7 +351,7 @@ class EmbeddedLlm:
             from huggingface_hub import hf_hub_download
         except ImportError as e:
             raise RuntimeError(
-                "huggingface_hub yok — Pinokio Update / Install ile studio deps kur."
+                "huggingface_hub is missing — install the studio dependencies with Pinokio Update / Install."
             ) from e
         path = hf_hub_download(
             repo_id=meta["repo"],
@@ -458,7 +458,7 @@ class EmbeddedLlm:
                 continue
             cleaned.append({"role": role, "content": content})
         if not cleaned:
-            raise RuntimeError("Boş mesaj")
+            raise RuntimeError("Empty message")
         mid = (model_id or DEFAULT_EMBEDDED_MODEL).strip()
         meta = EMBEDDED_CATALOG.get(mid) or EMBEDDED_CATALOG[DEFAULT_EMBEDDED_MODEL]
         # Qwen3 hybrid models: force non-thinking for structured director JSON
@@ -497,7 +497,7 @@ class EmbeddedLlm:
         try:
             return (out["choices"][0]["message"]["content"] or "").strip()
         except Exception as e:
-            raise RuntimeError(f"gömülü LLM boş yanıt: {e}") from e
+            raise RuntimeError(f"embedded LLM empty reply: {e}") from e
 
     async def chat(
         self,

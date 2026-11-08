@@ -64,7 +64,7 @@ def setup(log_dir: Path, *, level: int = logging.INFO) -> Path:
     _logger.addHandler(err)
     _logger.addHandler(console)
     _READY = True
-    _logger.info("log sistemi hazır → %s", log_dir)
+    _logger.info("log system ready → %s", log_dir)
     return log_dir
 
 
@@ -139,7 +139,7 @@ def tail(path: Path, lines: int = 200) -> str:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
-        return f"(okunamadı: {e})"
+        return f"(unreadable: {e})"
     parts = text.splitlines()
     if lines > 0:
         parts = parts[-lines:]

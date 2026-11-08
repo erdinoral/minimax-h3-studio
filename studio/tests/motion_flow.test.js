@@ -77,6 +77,104 @@ test("a failed robot upload keeps the take for retry and download", () => {
   }
 });
 
+test("a sent robot take opens the review player and can be watched again", () => {
+  const upload = section(robot, "async function upload(take)", "function keepTake");
+  assert.match(upload, /\}\s*if \(ready\) \{ lastTake = ready; openReview\(\); \}/);
+  assert.match(robot, /\$\("mb-watch"\)\?\.addEventListener\("click", openReview\)/);
+  for (const id of ["mb-review", "mb-review-video", "mb-review-keep", "mb-review-retake", "mb-watch"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(app, /video\.onclick = \(\) => \{ if \(video\.paused\)/);
+});
+
+function presetRunner() {
+  const ui = { goal: null, run: false, goalRun: false };
+  const sm = { isInteracting: false };
+  const modes = [];
+  const context = {
+    script: null, running: false, gait: "linear_1d", GAITS: ["linear_1d"], renderGaits() {},
+    mb: () => ({ ui, character: { sm }, setMode: (name) => modes.push(name) }),
+  };
+  vm.runInNewContext(`${section(robot, "  function presetTick()", "  async function until(")}
+    this.presetTick = presetTick; this.endScript = endScript;
+    this.start = (steps) => { script = { steps, index: 0 }; };
+    this.state = () => ({ script, gait });`, context);
+  return { ...context, ui, sm, modes };
+}
+
+test("a preset gives the next goal only after the last one is reached and interactions end", () => {
+  const r = presetRunner();
+  r.start([{ goal: [21.5, 0], run: true }, { goal: [19.3, 11] }]);
+  r.presetTick();
+  assert.deepEqual([...r.ui.goal], [21.5, 0]);
+  assert.equal(r.ui.run, true);
+  assert.deepEqual(r.modes, ["linear_1d"]);
+  r.presetTick();
+  assert.deepEqual([...r.ui.goal], [21.5, 0]);
+  r.ui.goal = null;
+  r.sm.isInteracting = true;
+  r.presetTick();
+  assert.equal(r.ui.goal, null);
+  r.sm.isInteracting = false;
+  r.presetTick();
+  assert.deepEqual([...r.ui.goal], [19.3, 11]);
+  assert.equal(r.ui.run, false);
+  r.endScript();
+  assert.equal(r.state().script, null);
+  assert.equal(r.ui.goal, null);
+});
+
+test("a preset's walking style is applied and kept as the selected gait", () => {
+  const r = presetRunner();
+  r.start([{ mode: "zombie_1d", goal: [0, 0] }]);
+  r.presetTick();
+  assert.deepEqual(r.modes, ["zombie_1d"]);
+  assert.equal(r.state().gait, "zombie_1d");
+});
+
+test("presets run on a fresh course layout and every preset has a label in both languages", () => {
+  const run = section(robot, "async function runPreset(", "function setSeconds(");
+  assert.match(run, /setLayout\("course", true\);/);
+  assert.match(run, /if \(withRecording\) \{ setSeconds\(plan\.seconds\); await record\(\); \}/);
+  const keys = section(robot, "const PRESETS = {", "const OBJECTS").match(/^\s{4}(\w+): \{/gm).map((line) => line.trim().split(":")[0]);
+  assert.deepEqual(keys, ["vault", "parkour", "parkourSit", "zombie", "sneak", "vogue", "injured"]);
+  const cams = ["behind", "side", "front", "tripod", "wide"].map((c) => `motion.cam.${c}`);
+  const objects = ["MidJumpSP", "AvoidanceSP", "SmallJumpSP", "SitSP"].flatMap((o) =>
+    ["obj", "objPh", "objDefault", "verb"].map((group) => `motion.${group}.${o}`));
+  for (const key of [...keys.map((k) => `motion.preset.${k}`), ...cams, "motion.world.gym", "motion.world.course", ...objects,
+    "motion.presets", "motion.presetTry", "motion.presetRecord", "motion.presetHint", "motion.presetTimeout", "motion.camera",
+    "motion.worldLabel", "motion.objects", "motion.objectsHint", "motion.promptAdd", "motion.promptAdded", "motion.promptNone"]) {
+    assert.equal(i18n.split(`"${key}":`).length - 1, 2, `${key} should be defined once per language`);
+  }
+});
+
+test("a take records which object the robot used and when, and the prompt names them", () => {
+  const rec = section(robot, "async function record()", "async function upload(take)");
+  assert.match(rec, /events\.push\(\{ t: frames\.length \/ FPS, kind: active\.name \}\)/);
+  assert.match(rec, /savedAt: Date\.now\(\), events \}\)/);
+  const context = {
+    objectNames: () => ({ MidJumpSP: "stone wall" }),
+    t: (key, args = {}) => Object.entries(args).reduce((s, [k, v]) => s.replace(`{${k}}`, v), {
+      "motion.verb.MidJumpSP": "At {t} s vaults over {obj}.", "motion.verb.SitSP": "At {t} s sits on {obj}.",
+      "motion.objDefault.SitSP": "a bench",
+    }[key] || key),
+  };
+  vm.runInNewContext(`${section(robot, "  function promptTimeline(", "  function addTimelineToPrompt(")}
+    this.promptTimeline = promptTimeline;`, context);
+  assert.equal(context.promptTimeline([{ t: 7.25, kind: "MidJumpSP" }, { t: 15, kind: "SitSP" }]),
+    "At 7.3 s vaults over stone wall. At 15.0 s sits on a bench.");
+});
+
+test("the camera choice changes the framing and the tripod only pans", () => {
+  assert.match(robot, /const \[back, side, height\] = CAMERAS\[cameraMode\];/);
+  assert.match(section(robot, "function follow()", "function draw()"),
+    /if \(cameraMode === "tripod"\) \{ controls\.target\.set\(ch\.pose\[0\], 0\.85, -ch\.pose\[1\]\); return; \}/);
+  assert.match(robot, /`\/motionbricks\/index\.html\?capture=1\$\{layout === "course" \? "&scene=course" : ""\}`/);
+  for (const id of ["mb-presets", "mb-preset-try", "mb-preset-record", "mb-cameras", "mb-layouts", "mb-objects", "mb-prompt-add", "mb-review-prompt"]) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+});
+
 function part(index, status, extra = {}) {
   return { id: `p${index}`, motion_long_id: "L", motion_long_index: index, motion_long_total: 3, status, ...extra };
 }
@@ -180,6 +278,8 @@ test("new Motion strings exist in Turkish and English", () => {
     "motion.takeDiscardConfirm", "mlong.title", "mlong.partStatus", "mlong.partMissing", "mlong.running", "mlong.queued", "mlong.failed",
     "mlong.merging", "mlong.mergeError", "mlong.waitingMerge", "mlong.incomplete", "mlong.done", "mlong.resume", "mlong.resumeTitle",
     "mlong.retryMerge", "mlong.resumed", "mlong.merged", "mlong.stopConfirm", "mlong.deleteConfirm",
+    "motion.reviewTitle", "motion.reviewMsg", "motion.reviewKeep", "motion.reviewRetake", "motion.retakeHint",
+    "motion.robotKeys", "pick.playPause",
   ];
   for (const key of keys) {
     const count = i18n.split(`"${key}":`).length - 1;

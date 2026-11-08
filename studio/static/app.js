@@ -1548,6 +1548,12 @@
       card.innerHTML = `<span class="ref-ord">${label}</span>${media}<button type="button" title="${tt("pick.remove")}">×</button>`;
       const image = card.querySelector("img");
       if (image) image.onclick = () => openCinemaStill(item.url, item.name || label);
+      const video = card.querySelector("video");
+      if (video) {
+        video.loop = true;
+        video.title = tt("pick.playPause");
+        video.onclick = () => { if (video.paused) void video.play().catch(() => {}); else video.pause(); };
+      }
       card.querySelector("button").onclick = async () => {
         if (!(await deleteUploadedMedia(item))) return;
         list.splice(i, 1);

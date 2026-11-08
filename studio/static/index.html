@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=game5" />
+  <link rel="stylesheet" href="/static/app.css?v=mrev2" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -256,6 +256,22 @@
               <button type="button" class="chip" data-mb-seconds="20">20 sn</button>
               <button type="button" class="chip warn" data-mb-seconds="30">30 sn</button>
             </div>
+            <label data-i18n="motion.presets">Hazır komutlar</label>
+            <div class="chips" id="mb-presets" role="group" aria-label="Hazır komutlar" data-i18n-aria-label="motion.presets"></div>
+            <div class="mb-preset-actions">
+              <button type="button" class="btn-secondary" id="mb-preset-try" data-i18n="motion.presetTry" disabled>Dene</button>
+              <button type="button" class="cta" id="mb-preset-record" data-i18n="motion.presetRecord" disabled>Komutla kaydet</button>
+            </div>
+            <p class="muted motion-robot-note" data-i18n="motion.presetHint">Hazır komutlar robotu Parkur hattının başına alır ve kendisi yürütür; kayıt süresi otomatik ayarlanır.</p>
+            <label data-i18n="motion.camera">Kamera açısı</label>
+            <div class="chips" id="mb-cameras" role="group" aria-label="Kamera açısı" data-i18n-aria-label="motion.camera"></div>
+            <label data-i18n="motion.worldLabel">Dünya</label>
+            <div class="chips" id="mb-layouts" role="group" aria-label="Dünya" data-i18n-aria-label="motion.worldLabel"></div>
+            <label data-i18n="motion.objects">Nesneler videoda neye dönüşsün?</label>
+            <p class="muted motion-robot-note" data-i18n="motion.objectsHint">Robot videosundan sadece hareket ve kamera alınır. Buraya yazdıkların, kayıtta robotun yaptığı hareketlerle birlikte prompt'a eklenir.</p>
+            <div class="mb-objects" id="mb-objects"></div>
+            <button type="button" class="btn-secondary" id="mb-prompt-add" data-i18n="motion.promptAdd" disabled>Hareketleri prompt'a ekle</button>
+            <p class="muted motion-robot-keys" data-i18n="motion.robotKeys">WASD / oklar: yürü · Shift: koş · Zemine tıkla: oraya yürü (çift tık: koşarak) · Engellere yürüyünce zıplar, atlar ya da eğilir · E: otur / kalk · C: çömel</p>
             <p class="muted motion-robot-credit" data-i18n="motion.robotCredit">MotionBricks: NVIDIA (Open Model Agreement) · tarayıcı portu: townbox (Apache-2.0) · robot: Unitree (BSD-3). Model ilk açılışta ~369 MB iner ve tarayıcıda saklanır.</p>
           </div>
           <div class="ios-segment v2v-kind-switch" id="v2v-kind" role="group">
@@ -497,10 +513,20 @@
             <button type="button" class="mb-btn" id="mb-take-download" data-i18n="motion.takeDownload">Kaydı indir</button>
             <button type="button" class="mb-btn" id="mb-take-discard" data-i18n="motion.takeDiscard">Kaydı sil</button>
           </div>
+          <div class="mb-review hidden" id="mb-review" role="dialog" aria-label="Kaydı izle" data-i18n-aria-label="motion.reviewTitle">
+            <video id="mb-review-video" controls loop playsinline></video>
+            <div class="mb-review-bar">
+              <span id="mb-review-msg"></span>
+              <button type="button" class="mb-btn" id="mb-review-prompt" data-i18n="motion.promptAdd" disabled>Hareketleri prompt'a ekle</button>
+              <button type="button" class="mb-btn" id="mb-review-retake" data-i18n="motion.reviewRetake">Yeniden çek</button>
+              <button type="button" class="mb-btn on" id="mb-review-keep" data-i18n="motion.reviewKeep">Bu kaydı kullan</button>
+            </div>
+          </div>
           <div class="mb-hud">
             <div class="mb-hud-top">
               <span class="mb-rec hidden" id="mb-rec"><i></i><span id="mb-rec-time">0.0</span></span>
               <span class="mb-hud-spacer"></span>
+              <button type="button" class="mb-btn hidden" id="mb-watch" data-i18n="motion.reviewTitle">Kaydı izle</button>
               <button type="button" class="mb-btn" id="mb-camera" data-i18n="motion.robotCamera" title="Kamerayı robotun arkasına al" data-i18n-title="motion.robotCameraTitle">Kamera</button>
               <button type="button" class="mb-btn" id="mb-restart" data-i18n="motion.robotRestart" title="Robotu başlangıç noktasına döndür" data-i18n-title="motion.robotRestartTitle">Baştan</button>
               <button type="button" class="mb-btn" id="mb-fullscreen" data-i18n="motion.fullscreen">Tam ekran</button>
@@ -1627,7 +1653,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=sage1" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=mrev2" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
@@ -1635,7 +1661,7 @@
   <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=sage1" charset="utf-8"></script>
+  <script src="/static/app.js?v=mrev1" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=8" charset="utf-8"></script>
@@ -1643,7 +1669,7 @@
 <script src="/static/h3-enhancements.js?v=3"></script>
   <script src="/static/video-workflows.js?v=13"></script>
   <script src="/static/motion-sketch.js?v=4"></script>
-  <script src="/static/motion-robot.js?v=7"></script>
+  <script src="/static/motion-robot.js?v=9"></script>
   <script src="/static/game-sprites.js?v=6"></script>
   <script src="/static/scene-selectors.js?v=3"></script>
   <script src="/static/scene-settings.js?v=3"></script>

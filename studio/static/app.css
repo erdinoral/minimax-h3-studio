@@ -1787,6 +1787,29 @@ body.ws-motion #panel-mode-v2v { margin-top: 14px; }
 }
 .mb-take-retry.hidden { display: none; }
 
+/* Review of the latest robot take, over the live stage. */
+.mb-review {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  background: rgba(10, 10, 10, 0.92);
+}
+.mb-review video { max-width: 100%; max-height: calc(100% - 56px); border-radius: 6px; background: #000; }
+.mb-review-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; color: var(--text); font-size: 0.8rem; }
+.motion-robot-keys, .motion-robot-note { font-size: 0.74rem; line-height: 1.45; }
+.mb-preset-actions { display: flex; gap: 8px; margin: 6px 0 4px; }
+.mb-preset-actions button { flex: 1; }
+.mb-objects { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; margin: 4px 0 8px; }
+.mb-object { display: flex; flex-direction: column; gap: 2px; font-size: 0.72rem; color: var(--muted); }
+.mb-object input { width: 100%; min-width: 0; }
+.ref-thumb video { cursor: pointer; }
+
 /* Sketch: interpretation method and the frame approval card. */
 .sk-method-note { margin: 4px 0 10px; font-size: 0.74rem; line-height: 1.4; color: var(--accent-amber); }
 .sk-method-note.hidden { display: none; }

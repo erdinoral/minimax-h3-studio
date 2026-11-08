@@ -9,14 +9,35 @@
     "injured_torso_1d", "injured_leg_1d", "zombie_1d", "combat_1d"];
   // Capture mode keeps the page's own HUD; the Studio stage replaces it.
   const FRAME_CSS = "#title,#stats,#log,#timeline-wrap,#caption,#card{display:none!important}";
+  // [back, left, height] from the robot along its facing when the shot is framed.
+  const CAMERAS = { behind: [4.2, 1.2, 1.6], side: [0.3, 4.5, 1.3], front: [-4.5, 0.6, 1.5], tripod: [-6, 4, 1.6], wide: [8.5, 2.5, 4.2] };
+  // "course" is MotionBricks' built-in layout: every object in one lane along +X from the start at x = -5.5,
+  // vault at 4, duck-under at 12, jump at 19.5, seat at (19.3, 11). Presets are authored for it.
+  const LAYOUTS = ["gym", "course"];
+  const PRESETS = {
+    vault: { seconds: 10, steps: [{ goal: [7, 0] }] },
+    parkour: { seconds: 15, steps: [{ goal: [24, 0], run: true }] },
+    parkourSit: { seconds: 20, steps: [{ goal: [21.5, 0], run: true }, { goal: [19.8, 8.5], run: true }, { goal: [19.3, 11] }] },
+    zombie: { seconds: 10, steps: [{ mode: "zombie_1d", goal: [0, 0] }] },
+    sneak: { seconds: 10, steps: [{ mode: "crouch_directional_2d", goal: [2, 0] }] },
+    vogue: { seconds: 15, steps: [{ mode: "vogue_1d", goal: [-1.5, 0] }, { goal: [-1.5, 3] }, { goal: [-5, 3] }, { goal: [-5, 0] }] },
+    injured: { seconds: 10, steps: [{ mode: "injured_leg_1d", goal: [-1, 0] }] },
+  };
+  const OBJECTS = ["MidJumpSP", "AvoidanceSP", "SmallJumpSP", "SitSP"];
 
   const SOURCES = ["video", "robot", "sketch"];
-  let source = "video";
-  try { source = SOURCES.includes(localStorage.getItem("h3.motionSource")) ? localStorage.getItem("h3.motionSource") : "video"; } catch {}
+  const stored = (key, allowed, fallback) => {
+    try { const value = localStorage.getItem(key); return allowed.includes(value) ? value : fallback; } catch { return fallback; }
+  };
+  let source = stored("h3.motionSource", SOURCES, "video");
+  let cameraMode = stored("h3.mbCamera", Object.keys(CAMERAS), "behind");
+  let layout = stored("h3.mbLayout", LAYOUTS, "gym");
+  let preset = stored("h3.mbPreset", Object.keys(PRESETS), "parkour");
+  let script = null, presetBusy = false;
   window.h3MotionSource = () => source;
   let frame = null, win = null, prepared = false, looping = false, lastTick = 0, lastPose = null;
   let gait = GAITS[0], running = false, recording = null, uploading = false, takeSeconds = 10;
-  let stepping = Promise.resolve(), previewBusy = false, notice = null, pendingTake = null;
+  let stepping = Promise.resolve(), previewBusy = false, notice = null, pendingTake = null, lastTake = null;
   const TAKE_KEY = "robot-take";
 
   const mb = () => (win && win.MB && win.MBCapture ? win.MB : null);
@@ -73,7 +94,7 @@
     if (frame) return;
     frame = document.createElement("iframe");
     frame.title = "MotionBricks";
-    frame.src = "/motionbricks/index.html?capture=1";
+    frame.src = frameUrl();
     frame.addEventListener("load", () => {
       win = frame.contentWindow;
       // Steps queued on the unloaded page never settle.
@@ -106,21 +127,27 @@
     prepared = true;
   }
 
+  function frameUrl() {
+    return `/motionbricks/index.html?capture=1${layout === "course" ? "&scene=course" : ""}`;
+  }
+
   function frameCamera() {
     const { character: ch, camera, controls } = mb();
     const p = ch.pose, f = ch.movement.currentFacing;
-    const back = 4.2, side = 1.2;
+    const [back, side, height] = CAMERAS[cameraMode];
     // MotionBricks is Z-up; three.js shows world (x, y, z) at (x, z, -y).
     const x = p[0] - f[0] * back - f[1] * side, y = p[1] - f[1] * back + f[0] * side;
-    camera.position.set(x, 1.6, -y);
+    camera.position.set(x, height, -y);
     controls.target.set(p[0], 0.85, -p[1]);
     camera.lookAt(controls.target);
     lastPose = null;
   }
 
   // Same delta follow as the playground's live mode, which capture mode turns off.
+  // The tripod camera stays put and only pans to keep the robot in frame.
   function follow() {
     const { character: ch, camera, controls } = mb();
+    if (cameraMode === "tripod") { controls.target.set(ch.pose[0], 0.85, -ch.pose[1]); return; }
     const p = [ch.pose[0], ch.pose[2] * 0.9, -ch.pose[1]];
     if (!lastPose) { lastPose = p; return; }
     const d = [p[0] - lastPose[0], (p[1] - lastPose[1]) * 0.3, p[2] - lastPose[2]];
@@ -153,6 +180,7 @@
       if (modelReady() && !previewBusy) {
         const target = win;
         previewBusy = true;
+        presetTick();
         step(dt).finally(() => { if (win === target) previewBusy = false; });
       }
       draw();
@@ -182,6 +210,8 @@
     $("mb-rec").classList.toggle("hidden", !recording);
     if (recording) $("mb-rec-time").textContent = `${(recording.frames / FPS).toFixed(1)} s`;
     $("mb-fullscreen").textContent = t(document.fullscreenElement ? "motion.exitFullscreen" : "motion.fullscreen");
+    const presetOff = !!recording || uploading || presetBusy || !modelReady();
+    ["mb-preset-try", "mb-preset-record"].forEach((id) => { if ($(id)) $(id).disabled = presetOff; });
   }
 
   function sceneHelpers() {
@@ -198,11 +228,13 @@
     const { renderer, camera } = mb();
     const canvas = renderer.domElement;
     const [w, h] = takeSize();
-    const frames = [];
+    const frames = [], events = [];
+    let lastActive = null;
     recording = { stop: false, frames: 0, seconds: takeSeconds };
     document.body.classList.add("mb-recording");
     $("motion-view-workspace")?.setAttribute("title", t("motion.recording"));
     renderTake();
+    renderOptions();
     const helpers = sceneHelpers();
     const total = takeSeconds * FPS;
     try {
@@ -214,7 +246,13 @@
           camera.updateProjectionMatrix();
         }
         // A fixed step per frame keeps the take at a true 24 fps however slow the browser is.
+        presetTick();
         await step(1 / FPS);
+        const active = mb().director?.active || null;
+        if (active && active !== lastActive && OBJECTS.includes(active.name)) {
+          events.push({ t: frames.length / FPS, kind: active.name });
+        }
+        lastActive = active;
         helpers.forEach((object) => { object.visible = false; });
         draw();
         frames.push(await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92)));
@@ -228,21 +266,25 @@
       camera.aspect = win.innerWidth / win.innerHeight;
       camera.updateProjectionMatrix();
       recording = null;
+      endScript();
       document.body.classList.remove("mb-recording");
       $("motion-view-workspace")?.removeAttribute("title");
       renderTake();
+      renderOptions();
     }
     if (frames.length < MIN_SECONDS * FPS) {
       notify(t("motion.tooShort"));
       return;
     }
-    await upload({ blob: new Blob(frames, { type: "video/x-motion-jpeg" }), frames: frames.length, savedAt: Date.now() });
+    await upload({ blob: new Blob(frames, { type: "video/x-motion-jpeg" }), frames: frames.length, savedAt: Date.now(), events });
   }
 
   async function upload(take) {
+    let ready = null;
     uploading = true;
     renderStatus();
     renderTake();
+    renderOptions();
     try {
       const body = new FormData();
       body.append("file", take.blob, "robot_take.mjpeg");
@@ -250,6 +292,7 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : response.statusText);
       window.h3SetMotionReference?.(data);
+      ready = { url: data.url, seconds: Number(data.seconds) || take.frames / FPS, events: take.events || [] };
       dropTake();
     } catch (error) {
       keepTake(take);
@@ -258,7 +301,9 @@
       uploading = false;
       renderStatus();
       renderTake();
+      renderOptions();
     }
+    if (ready) { lastTake = ready; openReview(); }
   }
 
   // A take that failed to upload stays here (and in IndexedDB) until it is sent, saved or discarded.
@@ -302,6 +347,188 @@
     }
   }
 
+  function openReview() {
+    if (!lastTake?.url) return;
+    const video = $("mb-review-video");
+    if (video.getAttribute("src") !== lastTake.url) video.src = lastTake.url;
+    $("mb-review-msg").textContent = t("motion.reviewMsg", { sec: lastTake.seconds.toFixed(1) });
+    $("mb-review").classList.remove("hidden");
+    $("mb-watch").classList.remove("hidden");
+    renderObjects();
+    video.currentTime = 0;
+    void video.play().catch(() => {});
+  }
+
+  // A preset walks the robot through its goals one after another; the next goal is given only once
+  // the previous one is reached and any interaction (vault, sit…) it triggered on the way has ended.
+  function presetTick() {
+    if (!script || !mb()) return;
+    const { ui, character: ch } = mb();
+    if (ui.goal || ch.sm.isInteracting) return;
+    const next = script.steps[script.index++];
+    if (!next) return;
+    const mode = next.mode || (script.index === 1 ? GAITS[0] : null);
+    if (mode) { gait = mode; mb().setMode(mode); renderGaits(); }
+    ui.run = !!next.run || running;
+    ui.goal = next.goal.slice();
+    ui.goalRun = !!next.run;
+  }
+
+  function endScript() {
+    if (!script) return;
+    script = null;
+    if (!mb()) return;
+    mb().ui.goal = null;
+    mb().ui.run = running;
+  }
+
+  async function until(test, ms) {
+    const end = performance.now() + ms;
+    while (performance.now() < end) {
+      if (test()) return true;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
+  }
+
+  // Presets always start from a fresh course layout, so the robot stands at the start facing the lane.
+  async function runPreset(withRecording) {
+    const plan = PRESETS[preset];
+    if (!plan || recording || uploading || presetBusy) return;
+    presetBusy = true;
+    renderOptions();
+    try {
+      setLayout("course", true);
+      if (!(await until(() => mb() && prepared && modelReady(), 120000))) { notify(t("motion.presetTimeout")); return; }
+      script = { steps: plan.steps, index: 0 };
+      if (withRecording) { setSeconds(plan.seconds); await record(); }
+    } finally {
+      presetBusy = false;
+      renderOptions();
+      focusFrame();
+    }
+  }
+
+  function setSeconds(seconds) {
+    takeSeconds = seconds;
+    document.querySelectorAll("#mb-seconds-chips [data-mb-seconds]").forEach((chip) => {
+      chip.classList.toggle("on", Number(chip.dataset.mbSeconds) === seconds);
+    });
+  }
+
+  function setLayout(next, reload) {
+    if (recording || uploading) return;
+    const changed = next !== layout;
+    layout = LAYOUTS.includes(next) ? next : "gym";
+    try { localStorage.setItem("h3.mbLayout", layout); } catch {}
+    renderOptions();
+    if (!frame || !(changed || reload)) return;
+    endScript();
+    win = null;
+    prepared = false;
+    frame.src = frameUrl();
+  }
+
+  function setCamera(next) {
+    if (recording) return;
+    cameraMode = CAMERAS[next] ? next : "behind";
+    try { localStorage.setItem("h3.mbCamera", cameraMode); } catch {}
+    renderOptions();
+    if (mb()) frameCamera();
+    focusFrame();
+  }
+
+  function chipRow(hostId, values, current, labelKey, attr, onPick) {
+    const host = $(hostId);
+    if (!host) return;
+    host.innerHTML = "";
+    values.forEach((value) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = `chip${value === current ? " on" : ""}`;
+      chip.dataset[attr] = value;
+      chip.textContent = t(`${labelKey}.${value}`);
+      chip.setAttribute("aria-pressed", value === current ? "true" : "false");
+      chip.disabled = !!recording || uploading || presetBusy;
+      chip.onclick = () => onPick(value);
+      host.append(chip);
+    });
+  }
+
+  function renderOptions() {
+    chipRow("mb-presets", Object.keys(PRESETS), preset, "motion.preset", "mbPreset", (value) => {
+      preset = value;
+      try { localStorage.setItem("h3.mbPreset", preset); } catch {}
+      renderOptions();
+    });
+    chipRow("mb-cameras", Object.keys(CAMERAS), cameraMode, "motion.cam", "mbCamera", setCamera);
+    chipRow("mb-layouts", LAYOUTS, layout, "motion.world", "mbLayout", (value) => setLayout(value, false));
+    const busy = !!recording || uploading || presetBusy;
+    ["mb-preset-try", "mb-preset-record"].forEach((id) => { if ($(id)) $(id).disabled = busy || !modelReady(); });
+  }
+
+  function objectNames() {
+    try { return JSON.parse(localStorage.getItem("h3.mbObjects") || "{}") || {}; } catch { return {}; }
+  }
+
+  function renderObjects() {
+    const host = $("mb-objects");
+    if (host && !host.childElementCount) {
+      const names = objectNames();
+      OBJECTS.forEach((kind) => {
+        const label = document.createElement("label");
+        label.className = "mb-object";
+        const span = document.createElement("span");
+        span.dataset.objLabel = kind;
+        const input = document.createElement("input");
+        input.type = "text";
+        input.maxLength = 80;
+        input.dataset.mbObject = kind;
+        input.value = names[kind] || "";
+        input.oninput = () => {
+          const all = objectNames();
+          all[kind] = input.value.trim();
+          try { localStorage.setItem("h3.mbObjects", JSON.stringify(all)); } catch {}
+        };
+        label.append(span, input);
+        host.append(label);
+      });
+    }
+    host?.querySelectorAll("[data-obj-label]").forEach((span) => { span.textContent = t(`motion.obj.${span.dataset.objLabel}`); });
+    host?.querySelectorAll("[data-mb-object]").forEach((input) => { input.placeholder = t(`motion.objPh.${input.dataset.mbObject}`); });
+    const events = lastTake?.events || [];
+    ["mb-prompt-add", "mb-review-prompt"].forEach((id) => {
+      const button = $(id);
+      if (!button) return;
+      button.disabled = !events.length;
+      button.title = events.length ? "" : t("motion.promptNone");
+    });
+  }
+
+  function promptTimeline(events) {
+    const names = objectNames();
+    return events.map((event) => t(`motion.verb.${event.kind}`, {
+      t: event.t.toFixed(1),
+      obj: names[event.kind] || t(`motion.objDefault.${event.kind}`),
+    })).join(" ");
+  }
+
+  function addTimelineToPrompt() {
+    const events = lastTake?.events || [];
+    const prompt = $("prompt");
+    if (!events.length || !prompt) { notify(t("motion.promptNone")); return; }
+    const line = promptTimeline(events);
+    prompt.value = prompt.value.trim() ? `${prompt.value.trim()}\n${line}` : line;
+    prompt.dispatchEvent(new Event("input", { bubbles: true }));
+    notify(t("motion.promptAdded"));
+  }
+
+  function closeReview() {
+    $("mb-review-video")?.pause();
+    $("mb-review")?.classList.add("hidden");
+    focusFrame();
+  }
+
   function notify(message) {
     notice = { message, until: performance.now() + 5000 };
     renderStatus();
@@ -341,6 +568,9 @@
       });
     });
     $("mb-record")?.addEventListener("click", () => { void record(); focusFrame(); });
+    $("mb-watch")?.addEventListener("click", openReview);
+    $("mb-review-keep")?.addEventListener("click", closeReview);
+    $("mb-review-retake")?.addEventListener("click", () => { closeReview(); notify(t("motion.retakeHint")); });
     $("mb-take-upload")?.addEventListener("click", () => { if (pendingTake && !uploading) void upload(pendingTake); });
     $("mb-take-download")?.addEventListener("click", downloadTake);
     $("mb-take-discard")?.addEventListener("click", () => {
@@ -356,10 +586,15 @@
     $("mb-interact")?.addEventListener("click", () => { if (mb()) mb().ui.interact = true; focusFrame(); });
     $("mb-camera")?.addEventListener("click", () => { if (mb()) frameCamera(); focusFrame(); });
     $("mb-restart")?.addEventListener("click", () => {
-      if (!frame || recording || uploading) return;
+      if (!frame || recording || uploading || presetBusy) return;
+      endScript();
       win = null;
       frame.contentWindow.location.reload();
     });
+    $("mb-preset-try")?.addEventListener("click", () => { void runPreset(false); });
+    $("mb-preset-record")?.addEventListener("click", () => { void runPreset(true); });
+    $("mb-prompt-add")?.addEventListener("click", addTimelineToPrompt);
+    $("mb-review-prompt")?.addEventListener("click", addTimelineToPrompt);
     $("mb-fullscreen")?.addEventListener("click", () => {
       if (document.fullscreenElement) document.exitFullscreen?.();
       else $("mb-stage")?.requestFullscreen?.();
@@ -369,11 +604,13 @@
     if ($("mb-stage") && window.ResizeObserver) new ResizeObserver(fit).observe($("mb-stage"));
     document.addEventListener("h3-workspace", sync);
     document.addEventListener("h3-motion-view", sync);
-    document.addEventListener("h3-lang", () => { renderGaits(); renderTake(); if (present()) renderStatus(); });
+    document.addEventListener("h3-lang", () => { renderGaits(); renderTake(); renderOptions(); renderObjects(); if (present()) renderStatus(); });
   }
 
   bind();
   renderGaits();
+  renderOptions();
+  renderObjects();
   setSource(source);
   void restoreTake();
 })();

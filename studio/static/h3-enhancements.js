@@ -2,7 +2,7 @@
   let busy = false;
   let loaded = false;
   let config = {refmod_enabled: false, refmod_ready: false};
-  const en = () => window.h3Lang?.() === 'en';
+  const en = () => window.h3Lang?.() !== 'tr';
   const text = (a,b) => en() ? a : b;
   const anchors = ['studio-theme-settings', 'scene-refmod-slot', 'cinema-refmod-slot'];
   function render() {

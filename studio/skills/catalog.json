@@ -79,6 +79,27 @@
       "look": "music_video_cool",
       "vendor": ["cool-music-video"],
       "role": "genre"
+    },
+    {
+      "id": "technical_cutaway",
+      "title": "Technical cutaway",
+      "look": "technical_cutaway",
+      "vendor": [],
+      "role": "genre"
+    },
+    {
+      "id": "xray",
+      "title": "X-ray see-through",
+      "look": "xray",
+      "vendor": [],
+      "role": "genre"
+    },
+    {
+      "id": "blueprint",
+      "title": "Engineering blueprint",
+      "look": "blueprint",
+      "vendor": [],
+      "role": "genre"
     }
   ]
 }

@@ -135,8 +135,10 @@ def build(job):
                             sampler=job.get('sampler') or 'res_multistep',
                             scheduler=job.get('scheduler') or 'simple', sage_attention='disabled',
                             lora_name=job.get('lora_name'), lora_strength=job.get('lora_strength') or 0.75)
-    # Preserve the user's acceleration choice for new runs. Spectrum's mutable
-    # binding cannot safely participate in persisted prefix reuse (see below).
+    # Spectrum's mutable binding cannot safely participate in persisted prefix
+    # reuse (see below), so the user chooses speed or a run that can be extended.
+    if job.get('continuum_extendable') and not job.get('continuum_base_graph'):
+        remove_spectrum(graph)
     # Retain the already-patched native model branch and scheduler.
     model = graph['16']['inputs']['model']
     sigmas = graph['14']['inputs']['sigmas']

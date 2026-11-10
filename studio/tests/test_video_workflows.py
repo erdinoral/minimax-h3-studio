@@ -52,6 +52,17 @@ class WorkflowContracts(unittest.TestCase):
         job['continuum_base_graph']['legacy']={'class_type':'SpectrumApplyMiniMaxH3','inputs':{'model':['6',0]}}
         with self.assertRaises(ValueError): continuum.build(job)
 
+    def test_extendable_continuum_skips_spectrum_and_saves_sections(self):
+        job=dict(id='keep',prompt='Test',duration=5,width=864,height=480,steps=12,seed=7,
+                 h3_models=DEFAULT_MODELS,continuum_run='keep',continuum_extendable=True)
+        with patch.object(Path,'read_text',return_value='{"spectrum_enabled": true}'):
+            graph=continuum.build(job)
+        self.assertFalse(continuum.has_spectrum(graph))
+        self.assertFalse(continuum.has_spectrum(job['continuum_base_graph']))
+        self.assertEqual(graph['c_sample']['inputs']['run_storage'],'Save + Auto Resume')
+        self.assertEqual(broken_links(graph),[])
+        self.assertEqual(graph['9']['inputs']['model'],graph['c_sample']['inputs']['model'])
+
     def test_section_context_does_not_rewrite_saved_prefix(self):
         previous=['Original saved prompt']
         result=continuum.extend_prompts(previous,['Blue enters','Both fight'],'Red remains on the left')

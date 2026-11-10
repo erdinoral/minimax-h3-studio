@@ -1,7 +1,7 @@
 /* Single-clip audio, persistent themes and a bilingual workflow guide. */
 (() => {
   const $ = id => document.getElementById(id);
-  const tr = () => window.h3Lang?.() !== 'en';
+  const tr = () => window.h3Lang?.() === 'tr';
   const label = (en, turkish) => tr() ? turkish : en;
   let audio = null, busy = false, revision = 0;
   const status = message => { $('scene-audio-status').textContent = message; };

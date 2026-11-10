@@ -40,6 +40,43 @@ class Enhancements(unittest.TestCase):
             content = b'hyperflow' * 200000
             self.assertEqual(compat['check'](io.BytesIO(content)), hashlib.sha256(content).hexdigest())
 
+    def test_installer_ships_hybrid_lora_loader_and_verified_grid(self):
+        root = Path(__file__).resolve().parents[2]
+        installer = root / 'studio' / 'tools' / 'install_film_workflows.py'
+        tree = ast.parse(installer.read_text(encoding='utf-8'))
+        constants = {t.id: ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign)
+                     for t in n.targets if isinstance(t, ast.Name) and t.id in ('WORKFLOW_PACKS', 'HYBRID_GRID')}
+        docs = (root / 'docs' / 'hybrid-h3.md').read_text(encoding='utf-8')
+        pack = next(p for p in constants['WORKFLOW_PACKS'] if p[0] == 'ComfyUI-H3-PowerLoraStack')
+        self.assertIn(pack[2], docs)
+        self.assertIn(constants['HYBRID_GRID'][3], docs)
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'install_hybrid_grid')
+        with tempfile.TemporaryDirectory() as directory:
+            fake = Path(directory) / 'download.safetensors'
+            namespace = {'APP': Path(directory), 'Path': Path, 'hashlib': hashlib,
+                         'shutil': __import__('shutil'), 'HYBRID_GRID': ('repo', 'loras/grid.safetensors', 3, 'bad')}
+            exec(compile(ast.Module(body=[function], type_ignores=[]), str(installer), 'exec'), namespace)
+
+            def download(*_args, **_kwargs):
+                fake.write_bytes(b'abc')
+                return str(fake)
+            with patch('huggingface_hub.hf_hub_download', download):
+                with self.assertRaisesRegex(RuntimeError, 'checksum'):
+                    namespace['install_hybrid_grid']()
+            self.assertFalse((Path(directory) / 'models/h3_adaln/grid.safetensors').exists())
+            namespace['HYBRID_GRID'] = ('repo', 'loras/grid.safetensors', 3, hashlib.sha256(b'abc').hexdigest())
+            with patch('huggingface_hub.hf_hub_download', download):
+                namespace['install_hybrid_grid']()
+            self.assertEqual((Path(directory) / 'models/h3_adaln/grid.safetensors').read_bytes(), b'abc')
+
+    def test_setup_errors_tell_users_what_to_do(self):
+        studio = Path(__file__).resolve().parents[1]
+        node = (studio / 'comfy_nodes/h3_studio_enhancements/__init__.py').read_text(encoding='utf-8')
+        self.assertIn('Run Update in Pinokio', node)
+        server = (studio / 'server.py').read_text(encoding='utf-8')
+        self.assertIn('rendered with Spectrum on', server)
+        self.assertNotIn('older Continuum run used Spectrum', server)
+
     def test_refmod_replaces_encoder_and_rewires_conditioning_only(self):
         graph = build_ref2va_prompt(text='Actor walks', ref_image_names=['actor.png'], width=864, height=480,
                                    length=121, sage_attention='disabled')

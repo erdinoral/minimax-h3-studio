@@ -1,4 +1,5 @@
 """Copy optional creator workflows with unique names, adapting installed weights."""
+import hashlib
 import shutil
 import json
 import sys
@@ -22,6 +23,8 @@ WORKFLOW_PACKS = (
     ('ComfyUI-H3-Continuum', 'https://github.com/ukr8b3g-cmyk/ComfyUI-H3-Continuum.git', '308653cff108061a94381cef446fef985384b214'),
     ('MiniMax-H3-Flow-Aligned-Regenerate', 'https://github.com/xmarre/MiniMax-H3-Flow-Aligned-Regenerate.git', '2bc8247810f99ccf5f580bfab985b7defe26a620'),
     ('Comfyui_Minimax_h3_latent_Upscaler-Plus', 'https://github.com/xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus.git', '1ddcc33e9b674aaabbccc3808fe36e1a47bdd36d'),
+    # Required by H3StudioHybridLora, the default draft/medium speed LoRA loader.
+    ('ComfyUI-H3-PowerLoraStack', 'https://github.com/cicalooo/ComfyUI-H3-PowerLoraStack.git', '55da4ee624a6d730c3853cd7309892ec38257a60'),
 )
 
 def install_workflow_packs():
@@ -43,6 +46,26 @@ def install_workflow_packs():
             revision='3f941d5d182014dd5c0a5e16330420ee2d4aa0c6',
             local_dir=str(target.parent / '.h3_download'))
         shutil.move(downloaded, target)
+    install_hybrid_grid()
+
+
+HYBRID_GRID = ('deAPI-ai/minimax-h3-33b-int8', 'loras/h3_silu_temb_grid.safetensors',
+               5510600, '30eb3c2cc7fb6b470d9717ff840d359313ac27cd64b705e32da1baa10f72d6a8')
+
+
+def install_hybrid_grid():
+    repo, filename, size, sha = HYBRID_GRID
+    target = APP / 'models' / 'h3_adaln' / Path(filename).name
+    if target.is_file():
+        return
+    from huggingface_hub import hf_hub_download
+    target.parent.mkdir(parents=True, exist_ok=True)
+    downloaded = Path(hf_hub_download(repo, filename=filename, local_dir=str(target.parent / '.h3_download')))
+    digest = hashlib.sha256(downloaded.read_bytes()).hexdigest()
+    if downloaded.stat().st_size != size or digest != sha:
+        downloaded.unlink(missing_ok=True)
+        raise RuntimeError('Hybrid LoRA AdaLN grid checksum mismatch; file was not activated')
+    shutil.move(str(downloaded), target)
 
 
 def adapt(data):

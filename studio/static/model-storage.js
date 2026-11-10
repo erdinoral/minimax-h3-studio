@@ -2,7 +2,7 @@
   const host=document.getElementById('model-storage');
   if (!host) return;
   let files=[];
-  const en=()=>window.h3Lang?.()==='en';
+  const en=()=>window.h3Lang?.() !== 'tr';
   const size=bytes=>bytes>=1024**3 ? (bytes/1024**3).toFixed(1)+' GB' : (bytes/1024**2).toFixed(1)+' MB';
   const messages={
     'storage.busy':['Üretim veya indirme sürüyor; bitince tekrar dene.','Generation or downloading is active; try again when it finishes.'],

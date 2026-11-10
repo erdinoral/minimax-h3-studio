@@ -441,7 +441,7 @@
     for (const s of sets) {
       const opt = document.createElement("option");
       opt.value = s.id;
-      const when = s.created ? new Date(s.created * 1000).toLocaleString(window.h3Lang?.() === "en" ? "en-GB" : "tr-TR", { dateStyle: "short", timeStyle: "short" }) : s.id;
+      const when = s.created ? new Date(s.created * 1000).toLocaleString({ tr: "tr-TR", fr: "fr-FR", es: "es-ES", de: "de-DE" }[window.h3Lang?.()] || "en-GB", { dateStyle: "short", timeStyle: "short" }) : s.id;
       opt.textContent = `${when} · ${s.jobs.map((j) => animLabel(j.game.animation)).join(", ")}`;
       select.append(opt);
     }

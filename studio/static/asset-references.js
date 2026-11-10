@@ -1,7 +1,7 @@
 /* Scene and Director share the server's ordered reference preview. */
 (() => {
   const esc = x => String(x ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const tr = () => window.h3Lang?.() !== 'en';
+  const tr = () => window.h3Lang?.() === 'tr';
   const word = (a,b) => tr() ? a : b;
   window.assetReferenceLabel = im => {
     const angle = /_(front|rear|right|left)\.png$/i.exec(im.file || '');

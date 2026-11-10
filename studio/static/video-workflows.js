@@ -1,13 +1,13 @@
 (() => {
   const $ = id => document.getElementById(id);
   let caps = {}, clip = null, method = 'standard', chunks = 1, layout = 'single', segments = [''], context = '', continuity = 'balanced';
-  let sourceId = null, sourceMeta = null;
-  try { localStorage.removeItem('h3.prepareRefine'); } catch {}
-  const text = (tr, en) => window.h3Lang?.() === 'en' ? en : tr;
+  let sourceId = null, sourceMeta = null, extendable = true;
+  try { localStorage.removeItem('h3.prepareRefine'); extendable = localStorage.getItem('h3.continuumExtendable') !== '0'; } catch {}
+  const text = (tr, en) => window.h3Lang?.() !== 'tr' ? en : tr;
   // Motion Transfer cannot run as Continuum, so the Motion tab always uses the standard method.
   const activeMethod = () => document.body?.classList.contains('ws-motion') ? 'standard' : method;
   window.getVideoWorkflowPayload = () => ({continuation_method:activeMethod(),
-    continuum_context:context, continuum_continuity:continuity, continuum_chunks:layout==='segments'?segments.length:chunks,
+    continuum_context:context, continuum_continuity:continuity, continuum_extendable:extendable, continuum_chunks:layout==='segments'?segments.length:chunks,
     ...(activeMethod()==='continuum' && layout==='segments'?{continuum_segment_prompts:segments.map(p=>p.trim())}:{}), prepare_refine:false});
   window.getContinuumMainPrompt = () => activeMethod()==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
   window.getDirectorContinuumBackend = () => "continuum";
@@ -20,7 +20,7 @@
     let seconds=Number(selected?.dataset.dur)||5;
     const continuing=document.querySelector('#panel-mode-continue')?.classList.contains('hidden')===false;
     if(continuing && sourceMeta?.continuum_chunk_seconds)seconds=sourceMeta.continuum_chunk_seconds;
-    for(const id of ['continuum-context','continuum-continuity']){
+    for(const id of ['continuum-context','continuum-continuity','continuum-extendable']){
       const control=$(id);if(control)control.disabled=continuing && !!sourceMeta?.continuum_run;
     }
     if(continuing && sourceMeta?.continuum_run){
@@ -53,6 +53,8 @@
         <details class="continuum-advanced"><summary>${text('Tutarlılık ayarları','Continuity settings')}</summary>
           <label>${text('Ortak karakter ve ortam','Shared characters and setting')}<textarea id="continuum-context" rows="3"></textarea></label>
           <label>${text('Geçiş bağlamı','Transition context')}<select id="continuum-continuity"><option value="balanced">${text('Dengeli · 22 kare','Balanced · 22 frames')}</option><option value="strong">${text('Güçlü · 39 kare (deneysel)','Strong · 39 frames (experimental)')}</option></select></label>
+          <label class="continuum-extendable"><input id="continuum-extendable" type="checkbox" ${extendable?'checked':''}> ${text('Sonradan uzatılabilir kaydet','Save so it can be extended later')}
+            <small class="muted">${text('Açıkken bu iş Spectrum olmadan üretilir. Kapalıyken Spectrum ayarı kullanılır ve daha hızlı olabilir, ama video Continuum ile uzatılamaz.','When on, this run skips Spectrum. When off, your Spectrum setting is used and may be faster, but the video cannot be extended with Continuum.')}</small></label>
         </details>
         <p id="continuum-total" class="muted"></p>
       </div>
@@ -77,6 +79,7 @@
     $('continuum-context').oninput=e=>{context=e.target.value;};
     $('continuum-continuity').value=continuity;
     $('continuum-continuity').onchange=e=>{continuity=e.target.value;};
+    $('continuum-extendable').onchange=e=>{extendable=e.target.checked;try{localStorage.setItem('h3.continuumExtendable',extendable?'1':'0');}catch{}};
     updateTotal();
     const button = $('btn-h3-refine');
     if (button) {

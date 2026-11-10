@@ -67,7 +67,7 @@
     musicConcept: "",
     musicLyrics: "",
     musicLyricTimeline: [],
-    projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | intro | outro
+    projectPurpose: null, // short_film | music_video | ad | trailer | social | documentary | explainer | intro | outro
     projectStyle: null, // realistic | anime | disney | game | cgi_3d | comic | illustration | oil_paint | clay | found_footage
     projectSilent: false,
     progressHideTimer: null,
@@ -207,10 +207,11 @@
     "trailer",
     "social",
     "documentary",
+    "explainer",
     "intro",
     "outro",
   ];
-  const CINEMA_PURPOSE_KEYS = ["short_film", "music_video", "ad", "intro", "outro"];
+  const CINEMA_PURPOSE_KEYS = ["short_film", "music_video", "ad", "explainer", "intro", "outro"];
   // Kept as inert compatibility values while old saved settings are loaded.
   // The public UI no longer exposes this mode.
   const ADULT_LORA_ID = "erosmax-4step";
@@ -478,6 +479,9 @@
   function uiLang() {
     return typeof h3Lang === "function" ? h3Lang() : "tr";
   }
+  function uiLocale(english) {
+    return { tr: "tr-TR", fr: "fr-FR", es: "es-ES", de: "de-DE" }[uiLang()] || english;
+  }
 
   const CINEMA_LOOK_PRESETS = {
     auto: {
@@ -669,12 +673,40 @@
       style: "realistic",
       audio: "silent",
     },
+    technical_cutaway: {
+      camera: "steadicam",
+      palette: "rec709",
+      lighting: "studio",
+      era: "present",
+      purpose: "explainer",
+      style: "cgi_3d",
+      audio: "film",
+    },
+    xray: {
+      camera: "steadicam",
+      palette: "cold",
+      lighting: "studio",
+      era: "present",
+      purpose: "explainer",
+      style: "cgi_3d",
+      audio: "film",
+    },
+    blueprint: {
+      camera: "steadicam",
+      palette: "cold",
+      lighting: "studio",
+      era: "present",
+      purpose: "explainer",
+      style: "cgi_3d",
+      audio: "film",
+    },
   };
   const CINEMA_LOOKS_BY_PURPOSE = {
     auto: null,
     short_film: ["feature", "anamorphic", "noir", "golden", "sci_fi_hard", "sci_fi_opera", "sci_fi_wasteland", "sci_fi_alien", "micro_expression", "handdrawn_live", "cgi_short"],
     music_video: ["music_video", "music_video_cool", "retro_80s"],
     ad: ["commercial", "product_minimal"],
+    explainer: ["technical_cutaway", "xray", "blueprint", "product_minimal", "cgi_short"],
     intro: ["title_sequence", "noir", "sci_fi_hard", "sci_fi_opera"],
     outro: ["title_sequence", "noir", "golden"],
   };
@@ -702,6 +734,9 @@
       ["handdrawn_live", "Hand-drawn live"],
       ["cgi_short", "3D CGI short"],
       ["music_video_cool", "Music video cool"],
+      ["technical_cutaway", "Technical cutaway"],
+      ["xray", "X-ray"],
+      ["blueprint", "Blueprint"],
     ],
     camera: [
       ["auto", "Auto"],
@@ -820,7 +855,7 @@
     state.cinema.audio = { ...base.audio, ...(state.cinema.audio || {}) };
     // Spoken dialogue defaults to English. EN UI always pins English; TR UI keeps
     // whatever is set (default English) so users can still get pure English clips.
-    if (typeof window.h3Lang === "function" && window.h3Lang() === "en") {
+    if (typeof window.h3Lang === "function" && window.h3Lang() !== "tr") {
       state.cinema.audio.voice_lang = "English";
     }
     if (!Array.isArray(state.cinema.shots)) state.cinema.shots = [];
@@ -960,7 +995,7 @@
   }
 
   function jobProductionMeta(job) {
-    const en = window.h3Lang?.() === "en";
+    const en = window.h3Lang?.() !== "tr";
     const bits = [`${jobVideoSeconds(job) || "?"}${tt("sec")} · ${job.width || "?"}×${job.height || "?"} · ${job.mode || "t2v"}`];
     if (job.h3_models?.unet) bits.push(`Model: ${job.h3_models.unet}`);
     if (job.steps != null) bits.push(`${en ? "Steps" : "Adım"}: ${job.steps} · ${job.sampler || ""}`);
@@ -2847,6 +2882,30 @@
       soundscape: "diegetic room / crowd only if needed; primary song muxed later",
       music: "N/A",
     },
+    technical_cutaway: {
+      visual_style: "Premium 3D technical cutaway visualization",
+      craft: "precise sectioned mechanism with internal parts exposed along a clean cut plane, distinct materials per part (machined steel, brass, rubber, glass), one mechanism moving at a slow readable pace, clean neutral studio backdrop, short on-screen labels spelled exactly as quoted in a bold clean sans-serif, held steady on clean space",
+      avoid: "misspelled, flickering or morphing label text, long sentences on screen, cluttered background, fast chaotic motion, parts merging into each other",
+      camera_bias: "Slow orbit or push-in toward the active part; keep the whole mechanism readable before going close.",
+      soundscape: "mechanical clicks, gears and airflow matching the visible motion, quiet studio room tone",
+      music: "N/A",
+    },
+    xray: {
+      visual_style: "3D x-ray see-through visualization",
+      craft: "translucent outer shell revealing the glowing internal structure, internal parts clearly separated by brightness, dark backdrop, clinical clarity, steady slow motion of the inner mechanism, short on-screen labels spelled exactly as quoted in a bold clean sans-serif, held steady on clean space",
+      avoid: "misspelled or flickering label text, noisy glow flooding the frame, horror tone, fast camera moves",
+      camera_bias: "Steady medium framing with a gentle orbit; slow push-in on the active inner part.",
+      soundscape: "soft low hum, subtle internal mechanical or fluid sounds matching the motion",
+      music: "N/A",
+    },
+    blueprint: {
+      visual_style: "Animated engineering blueprint look",
+      craft: "crisp white line work on deep blue, isometric technical space, parts sliding into place and assembling step by step, clean geometric motion, short on-screen labels spelled exactly as quoted in a bold clean sans-serif, held steady on clean space",
+      avoid: "photoreal clutter, misspelled labels or random dimension numbers, messy hand-sketched lines",
+      camera_bias: "Locked isometric or slow drift; parts move, camera stays calm.",
+      soundscape: "soft drafting and click sounds as parts lock together",
+      music: "N/A",
+    },
   };
 
   function enrichStructuredFromLook(structured) {
@@ -3235,10 +3294,10 @@
         ? (cinemaStudioMode() === 'seamless' && globalThis.H3DirectorChains?.sequenceGroups
             ? globalThis.H3DirectorChains.sequenceGroups(shots).map((group, chainIndex) =>
                 '<section class="director-sequence"><h3>' + htmlEsc('Continuum ' + (chainIndex + 1)) +
-                '</h3><p class="muted">' + htmlEsc(uiLang() === 'en' ? 'New video → ordered continuation sections' : 'Yeni video → sırayla işlenen devam bölümleri') + '</p>' +
+                '</h3><p class="muted">' + htmlEsc(uiLang() !== 'tr' ? 'New video → ordered continuation sections' : 'Yeni video → sırayla işlenen devam bölümleri') + '</p>' +
                 group.shots.map((s, i) => cinemaShotHtml(s, globalIndexStart + shots.indexOf(s), shots.indexOf(s)) +
-                  '<details class="director-section-prompt"><summary>' + htmlEsc((uiLang() === 'en' ? 'Section prompt ' : 'Bölüm promptu ') + (i + 1)) + '</summary><textarea data-director-prompt="' + htmlEsc(s.id) + '" aria-label="Continuum prompt">' + htmlEsc(s.text || '') + '</textarea></details>').join('') +
-                '<button type="button" class="btn-secondary" data-add-continuum-section="' + htmlEsc(group.shots[group.shots.length - 1].id) + '">' + htmlEsc(uiLang() === 'en' ? '+ Continuation section' : '+ Devam bölümü') + '</button></section>').join('')
+                  '<details class="director-section-prompt"><summary>' + htmlEsc((uiLang() !== 'tr' ? 'Section prompt ' : 'Bölüm promptu ') + (i + 1)) + '</summary><textarea data-director-prompt="' + htmlEsc(s.id) + '" aria-label="Continuum prompt">' + htmlEsc(s.text || '') + '</textarea></details>').join('') +
+                '<button type="button" class="btn-secondary" data-add-continuum-section="' + htmlEsc(group.shots[group.shots.length - 1].id) + '">' + htmlEsc(uiLang() !== 'tr' ? '+ Continuation section' : '+ Devam bölümü') + '</button></section>').join('')
             : shots.map((s, i) => cinemaShotHtml(s, globalIndexStart + i, i)).join(''))
         : '<p class="muted cinema-chapter-empty">' + htmlEsc(tt("cinema.chapterEmpty")) + "</p>";
     const tools =
@@ -7644,14 +7703,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       if (state.projectPurpose === "music_video") {
         note += tt("dir.purposeMv");
         if (fromScene) toast(tt("toast.purposeMv")); } else {
-        const extra =
-          state.projectPurpose === "documentary"
-            ? tt("dir.extra.documentary")
-            : state.projectPurpose === "intro"
-              ? tt("dir.extra.intro")
-              : state.projectPurpose === "outro"
-                ? tt("dir.extra.outro")
-                : "";
+        const extra = ["documentary", "explainer", "intro", "outro"].includes(state.projectPurpose)
+          ? tt("dir.extra." + state.projectPurpose)
+          : "";
         note += tt("dir.purposeAv") + extra;
         if (fromScene) toast(tf("toast.purposeAv", { label }));
       }
@@ -9602,7 +9656,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         card.className = "gallery-card gallery-photo-card";
         card.dataset.photoName = photo.name || "";
         const when = photo.created_at
-          ? new Date(Number(photo.created_at) * 1000).toLocaleString(uiLang() === "en" ? "en-US" : "tr-TR", {
+          ? new Date(Number(photo.created_at) * 1000).toLocaleString(uiLocale("en-US"), {
               day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
             })
           : "";
@@ -9744,7 +9798,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           : `#${done.length - i}`;
       const when = j.done_at || j.created_at;
       const clock = when
-        ? new Date(Number(when) * 1000).toLocaleString(uiLang() === "en" ? "en-US" : "tr-TR", {
+        ? new Date(Number(when) * 1000).toLocaleString(uiLocale("en-US"), {
             day: "2-digit",
             month: "2-digit",
             hour: "2-digit",
@@ -10239,7 +10293,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     try {
       const speedSettingsApplied = await pendingSpeedSpectrumApply;
       await waitForDraftLora();
-      if (!speedSettingsApplied) throw Error(window.h3Lang?.() === "en"
+      if (!speedSettingsApplied) throw Error(window.h3Lang?.() !== "tr"
         ? "Acceleration settings could not be saved; retry before generating."
         : "Hızlandırma ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
       await h3AccelerationLatestSave;
@@ -10357,7 +10411,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     try {
       const speedSettingsApplied = await pendingSpeedSpectrumApply;
       await waitForDraftLora();
-      if (!speedSettingsApplied) throw Error(window.h3Lang?.() === "en"
+      if (!speedSettingsApplied) throw Error(window.h3Lang?.() !== "tr"
         ? "Acceleration settings could not be saved; retry before generating."
         : "Hızlandırma ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
       await h3AccelerationLatestSave;
@@ -10690,7 +10744,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         const items = catalog.filter(spec => spec.id && spec.file && spec.ready && loraCategory(spec) === category);
         if (!items.length) return "";
         return `<details class="lora-category" data-category="${htmlEsc(category)}" ${expanded.has(category) && !checks.querySelector(`details[data-category="${CSS.escape(category)}"][data-search-opened]`) ? "open" : ""}><summary>${htmlEsc(loraCategoryLabel(category))}</summary><div class="lora-category-items">` +
-          items.map(spec => `<div class="lora-pick-row"><label><input type="checkbox" aria-label="${htmlEsc(spec.label)}" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label><input type="number" data-lora-weight="${htmlEsc(spec.file)}" aria-label="${htmlEsc(spec.label)} ${window.h3Lang?.() === "en" ? "weight" : "ağırlık"}" min="-6" max="6" step="0.05" value="${loraWeight(spec)}" style="width:75px" /></div>`).join("") + "</div></details>";
+          items.map(spec => `<div class="lora-pick-row"><label><input type="checkbox" aria-label="${htmlEsc(spec.label)}" value="${htmlEsc(spec.id)}" ${selected.has(spec.id) ? "checked" : ""} /> ${htmlEsc(spec.label)}</label><input type="number" data-lora-weight="${htmlEsc(spec.file)}" aria-label="${htmlEsc(spec.label)} ${window.h3Lang?.() !== "tr" ? "weight" : "ağırlık"}" min="-6" max="6" step="0.05" value="${loraWeight(spec)}" style="width:75px" /></div>`).join("") + "</div></details>";
       }).join("");
       applyLoraSearch(hostId);
       const syncLoraChecks = () => {
@@ -10896,7 +10950,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   function renderH3Engine(engine) {
     const host = $("h3-engine-control");
     if (!host) return;
-    const en = window.h3Lang?.() === "en";
+    const en = window.h3Lang?.() !== "tr";
     host.innerHTML = `<h3>${en ? "Video engine" : "Video motoru"}</h3><div class="h3-engine-switch" role="group" aria-label="Video engine">${[["minimax", "MiniMax H3"], ["singularity", "H3 Singularity"]].map(([id, label]) => `<button type="button" data-engine="${id}" aria-pressed="${engine.active === id}" ${id === "singularity" && !engine.singularity_ready ? "disabled" : ""}>${label}</button>`).join("")}</div><p class="muted">${en ? "Active" : "Aktif"}: <strong>${engine.active === "singularity" ? "H3 Singularity" : engine.active === "minimax" ? "MiniMax H3" : (en ? "Custom models" : "Özel modeller")}</strong> · ${en ? "Applies to new Scene and Director jobs." : "Yeni Sahne ve Direktör üretimlerinde geçerli."}</p><p class="muted">${engine.singularity_ready ? (en ? "Singularity installed; no download needed." : "Singularity yüklü; yeniden indirme gerekmiyor.") : (en ? "Download Singularity below to enable it." : "Singularity için aşağıdan modeli indir.")}</p>`;
     host.onclick = async event => {
       const button = event.target.closest("button[data-engine]");
@@ -10917,7 +10971,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const response = await fetch("/api/h3-acceleration");
       if (!response.ok || !host.isConnected) return;
       const data = await response.json();
-      const en = window.h3Lang?.() === "en";
+      const en = window.h3Lang?.() !== "tr";
       let panel = document.getElementById("h3-acceleration-settings");
       if (!panel) {
         panel = document.createElement("div");
@@ -10930,7 +10984,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const paint = () => {
         const weight = Number(current.spectrum_blend_weight ?? 0.5);
         const presets = current.spectrum_presets || [{id:"light",blend_weight:0.25},{id:"balanced",blend_weight:0.5},{id:"strong",blend_weight:0.75}];
-        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span>${infoTipHtml(en ? "Spectrum Continuum runs cannot resume saved sections. Can change motion and speech quality." : "Spectrum ile Continuum kayıtlı bölümlerden sürdürülemez. Hareket ve konuşma kalitesini değiştirebilir.")}</label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend>${infoTipHtml(en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0.")}<div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sol-Attn<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Sol-Attn sparse attention" : "Sol-Attn seyrek dikkat"}" id="h3-sparse-enabled" data-acceleration="sparse" ${current.sparse_enabled ? "checked" : ""}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "ComfyUI's built-in sparse attention acceleration" : "ComfyUI'ın yerleşik seyrek dikkat hızlandırması"}</p><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sage Attention</span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="Sage Attention" id="h3-sage-enabled" data-acceleration="sage" ${current.sage_enabled && current.sage_available ? "checked" : ""} ${current.sage_available ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span>${infoTipHtml(en ? "Faster attention kernels. Turn off if renders fail or look wrong. Applies to new jobs." : "Daha hızlı dikkat çekirdekleri. Üretim hata verirse ya da görüntü bozuk çıkarsa kapat. Yeni işlerde geçerli.")}</label><p class="muted">${current.sage_available ? (en ? "Speeds up rendering on supported NVIDIA GPUs" : "Desteklenen NVIDIA GPU'larda üretimi hızlandırır") : (en ? "Not installed or not supported by this GPU" : "Kurulu değil ya da bu GPU desteklemiyor")}</p>`;
+        panel.innerHTML = `<label class="h3-spectrum-row"><span class="h3-spectrum-name">Spectrum<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Spectrum mode" : "Spectrum modu"}" id="h3-spectrum-enabled" data-acceleration="spectrum" ${current.spectrum_enabled ? "checked" : ""} ${current.spectrum_installed ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span>${infoTipHtml(en ? "Continuum videos made with Spectrum cannot be extended later; Continuum's 'Save so it can be extended later' option skips Spectrum for that run. Can change motion and speech quality." : "Spectrum ile yapılan Continuum videoları sonradan uzatılamaz; Continuum'daki 'Sonradan uzatılabilir kaydet' seçeneği o işte Spectrum'u atlar. Hareket ve konuşma kalitesini değiştirebilir.")}</label><fieldset class="h3-spectrum-blend" ${current.spectrum_installed ? "" : "disabled"}><legend>${en ? "Video prediction blend" : "Video tahmin payı"}</legend>${infoTipHtml(en ? "0–1 video blend; not the percentage of skipped steps. Applies to new jobs. Audio blend stays at 0." : "0–1 görüntü karışımı; atlanan adımların yüzdesi değildir. Yeni işlerde geçerli. Ses tahmin payı 0.")}<div class="h3-spectrum-presets">${[...presets,{id:"custom"}].map(p => `<button type="button" data-spectrum-preset="${p.id}" aria-pressed="${(current.spectrum_preset || "balanced") === p.id}">${labels[p.id]}${p.blend_weight == null ? "" : `<span>${Number(p.blend_weight).toFixed(2)}</span>`}</button>`).join("")}</div><div class="h3-spectrum-value"><input type="range" min="0" max="1" step="0.01" value="${weight}" data-spectrum-range aria-label="${en ? "Video prediction blend" : "Video tahmin payı"}"><input type="number" min="0" max="1" step="0.01" value="${weight}" data-spectrum-weight aria-label="${en ? "Custom prediction blend" : "Özel tahmin payı"}"></div></fieldset><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sol-Attn<span class="h3-spectrum-badge">${en ? "Experimental" : "Deneysel"}</span></span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="${en ? "Sol-Attn sparse attention" : "Sol-Attn seyrek dikkat"}" id="h3-sparse-enabled" data-acceleration="sparse" ${current.sparse_enabled ? "checked" : ""}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span></label><p class="muted">${en ? "ComfyUI's built-in sparse attention acceleration" : "ComfyUI'ın yerleşik seyrek dikkat hızlandırması"}</p><label class="h3-spectrum-row"><span class="h3-spectrum-name">Sage Attention</span><span class="h3-spectrum-toggle"><input type="checkbox" role="switch" aria-label="Sage Attention" id="h3-sage-enabled" data-acceleration="sage" ${current.sage_enabled && current.sage_available ? "checked" : ""} ${current.sage_available ? "" : "disabled"}><span class="h3-spectrum-track" aria-hidden="true"><span class="h3-spectrum-knob"></span></span><span class="h3-spectrum-state" aria-hidden="true"></span></span>${infoTipHtml(en ? "Faster attention kernels. Turn off if renders fail or look wrong. Applies to new jobs." : "Daha hızlı dikkat çekirdekleri. Üretim hata verirse ya da görüntü bozuk çıkarsa kapat. Yeni işlerde geçerli.")}</label><p class="muted">${current.sage_available ? (en ? "Speeds up rendering on supported NVIDIA GPUs" : "Desteklenen NVIDIA GPU'larda üretimi hızlandırır") : (en ? "Not installed or not supported by this GPU" : "Kurulu değil ya da bu GPU desteklemiyor")}</p>`;
       };
       const save = async changes => {
         panel.querySelectorAll("button, input").forEach(control => control.disabled = true);
@@ -10969,7 +11023,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const host = $("optional-h3-models");
     if (!host) return;
     clearTimeout(optionalModelTimer);
-    const english = window.h3Lang?.() === "en";
+    const english = window.h3Lang?.() !== "tr";
     try {
       const response = await fetch("/api/h3-models/optional");
       if (!response.ok) return;
@@ -12690,7 +12744,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     for (const s of saves) {
       const li = document.createElement("li");
       const left = document.createElement("div");
-      const when = s.created_at ? new Date(s.created_at * 1000).toLocaleString(uiLang() === "en" ? "en-GB" : "tr-TR",
+      const when = s.created_at ? new Date(s.created_at * 1000).toLocaleString(uiLocale("en-GB"),
         { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
       left.innerHTML = `<strong>${htmlEsc(s.name || "")}</strong> · ${tf("queue.saveCount", { n: s.count })}${when ? ` · ${when}` : ""}`;
       const right = document.createElement("div");
@@ -12748,7 +12802,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const lane = normLane(state.prodLane);
     const active = state.jobs.filter((j) => jobLane(j) === lane && (j.status === "queued" || j.status === "running"));
     if (!active.length) return tToast("queue.saveNothing");
-    const when = new Date().toLocaleString(uiLang() === "en" ? "en-GB" : "tr-TR",
+    const when = new Date().toLocaleString(uiLocale("en-GB"),
       { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const button = e.currentTarget;
     const name = await askDialog({
@@ -13347,7 +13401,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         names = [];
       }
     }
-    setDonorRoll(["Diamond204a", "Corey", ...names]);
+    setDonorRoll(["Diamond204a", "Corey", "Jürgen", ...names]);
   }
 
   $("btn-donor-ticker")?.addEventListener("click", () => $("btn-support")?.click());
@@ -13611,7 +13665,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   document.addEventListener("h3-lang", () => {
     const engineHeading = $("h3-engine-control")?.querySelector('h3');
-    if (engineHeading) engineHeading.textContent = window.h3Lang?.() === 'en' ? 'Video engine' : 'Video motoru';
+    if (engineHeading) engineHeading.textContent = window.h3Lang?.() !== 'tr' ? 'Video engine' : 'Video motoru';
     if ($("h3-engine-control")) void renderH3Acceleration($("h3-engine-control"));
     syncGalleryPhotoToolbar();
     syncGalleryVideoToolbar();

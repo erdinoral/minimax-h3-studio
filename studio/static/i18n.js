@@ -466,6 +466,24 @@
       "cont.lastFrame": "Son kare",
       "player.empty": "Henüz video yok",
       "player.continue": "Bu videodan devam",
+      "labels.open": "Etiketler",
+      "labels.hint": "Videoya okunaklı yazı ve oklu etiket ekle; sonuç ayrı video olarak kaydedilir",
+      "labels.needClip": "Önce bir video aç",
+      "labels.title": "Etiketler · Nasıl çalışır",
+      "labels.intro": "Videoya sonradan, birebir doğru yazıyla etiket ekle: uzun metinler, kesin isimler ya da yazısız üretilmiş videolar için. Kaynak video korunur, sonuç galeriye yeni video olarak kaydedilir.",
+      "labels.add": "Etiket ekle",
+      "labels.tip": "Bir etiketi seç, sonra videoda göstereceği parçaya tıkla. Başlangıç zamanı oynatıcının o anki saniyesinden alınır.",
+      "labels.start": "Başla",
+      "labels.end": "Bitir",
+      "labels.pointer": "Ok",
+      "labels.remove": "Kaldır",
+      "labels.placeholder": "Ör. Piston",
+      "labels.apply": "Videoya işle",
+      "labels.cancel": "Vazgeç",
+      "labels.empty": "En az bir etikete yazı gir.",
+      "labels.working": "Etiketler işleniyor…",
+      "labels.saved": "Kaydedildi; etiketli video galeride.",
+      "labels.failed": "Etiketler eklenemedi.",
       "player.download": "İndir",
       "player.prompt": "Prompt",
       "prod.ready": "Hazır",
@@ -941,6 +959,9 @@
       "cinema.look.handdrawn_live": "Çizgi + canlı",
       "cinema.look.cgi_short": "3D CGI kısa",
       "cinema.look.music_video_cool": "Klip · cool",
+      "cinema.look.technical_cutaway": "Teknik kesit",
+      "cinema.look.xray": "X-ray",
+      "cinema.look.blueprint": "Blueprint",
       "prompt.rewriterChecking": "Yönetmen LLM kontrol ediliyor…",
       "bind.prodLaneTabs": "Üretim sekmesi",
       "bind.comfyPillTitle": "Comfy arka uç — Pinokio Stop ile kapanır",
@@ -1395,6 +1416,7 @@
       "purpose.trailer": "trailer",
       "purpose.social": "sosyal",
       "purpose.documentary": "belgesel",
+      "purpose.explainer": "nasıl çalışır",
       "purpose.intro": "intro",
       "purpose.outro": "outro",
       "style.realistic": "gerçekçi",
@@ -1471,6 +1493,7 @@
       "toast.purposeMv": "Müzik klibi · sadece video (ses yok)",
       "dir.purposeAv": " Video + ses üretilebilir.",
       "dir.extra.documentary": " Gözlemci kamera, doğal ışık; röportaj/VO olabilir.",
+      "dir.extra.explainer": " Kesit / x-ray anlatımı: shot başına tek mekanizma, yavaş ve okunaklı hareket. Kısa etiket yazıları (ör. \"PİSTON\") doğrudan videoya yazılır; temiz yazı için step sayısını yüksek tut. İstersen etiketleri sonradan oynatıcıdaki Etiketler aracıyla da ekleyebilirsin.",
       "dir.extra.intro": " Açılış / logo / başlık reveal — kısa ve ritimli.",
       "dir.extra.outro": " Kapanış kartı / jenerik / CTA.",
       "toast.purposeAv": "{label} · video + ses",
@@ -2282,6 +2305,24 @@
       "cont.lastFrame": "Last frame",
       "player.empty": "No video yet",
       "player.continue": "Continue from this video",
+      "labels.open": "Labels",
+      "labels.hint": "Add readable text and pointer labels; the result is saved as a separate video",
+      "labels.needClip": "Open a video first",
+      "labels.title": "Labels · How it works",
+      "labels.intro": "Add labels afterwards with exact lettering: for longer text, precise names or videos generated without text. The source video is kept and the result is saved to the Gallery as a new video.",
+      "labels.add": "Add label",
+      "labels.tip": "Select a label, then click the part of the video it should point to. The start time comes from the current player position.",
+      "labels.start": "Start",
+      "labels.end": "End",
+      "labels.pointer": "Pointer",
+      "labels.remove": "Remove",
+      "labels.placeholder": "e.g. Piston",
+      "labels.apply": "Burn into video",
+      "labels.cancel": "Cancel",
+      "labels.empty": "Enter text for at least one label.",
+      "labels.working": "Burning labels…",
+      "labels.saved": "Saved; the labelled video is in the Gallery.",
+      "labels.failed": "Could not add the labels.",
       "player.download": "Download",
       "player.prompt": "Prompt",
       "prod.ready": "Ready",
@@ -2757,6 +2798,9 @@
       "cinema.look.handdrawn_live": "Hand-drawn live",
       "cinema.look.cgi_short": "3D CGI short",
       "cinema.look.music_video_cool": "Music video cool",
+      "cinema.look.technical_cutaway": "Technical cutaway",
+      "cinema.look.xray": "X-ray",
+      "cinema.look.blueprint": "Blueprint",
       "prompt.rewriterChecking": "Checking Director LLM…",
       "bind.prodLaneTabs": "Production tab",
       "bind.comfyPillTitle": "Comfy backend — Pinokio Stop closes it",
@@ -3211,6 +3255,7 @@
       "purpose.trailer": "trailer",
       "purpose.social": "social",
       "purpose.documentary": "documentary",
+      "purpose.explainer": "how it works",
       "purpose.intro": "intro",
       "purpose.outro": "outro",
       "style.realistic": "realistic",
@@ -3287,6 +3332,7 @@
       "toast.purposeMv": "Music video · picture only (no audio)",
       "dir.purposeAv": " Video + audio can be generated.",
       "dir.extra.documentary": " Observational camera, natural light; interview/VO possible.",
+      "dir.extra.explainer": " Cutaway / x-ray explainer: one mechanism per shot, slow readable motion. Short labels (e.g. \"PISTON\") are written straight into the video; keep the step count high for clean lettering. You can also add labels afterwards with the Labels tool in the player.",
       "dir.extra.intro": " Opening / logo / title reveal — short and rhythmic.",
       "dir.extra.outro": " End card / credits / CTA.",
       "toast.purposeAv": "{label} · video + audio",
@@ -3965,22 +4011,56 @@
     ["#lora-url-span", "lora.url"],
   ];
 
+  // fr/es/de live in /static/i18n/<lang>.json and load on demand; missing keys fall back to English.
+  const LANGS = ["en", "tr", "fr", "es", "de"];
+  const PACK_VERSION = "3";
+
+  function pickLang(value) {
+    const s = String(value || "").toLowerCase();
+    return LANGS.find((code) => s === code || s.startsWith(code + "-")) || "";
+  }
+
   function readLang() {
     try {
-      const s = localStorage.getItem("h3-lang");
-      if (s === "en" || s === "tr") return s;
+      const s = pickLang(localStorage.getItem("h3-lang"));
+      if (s) return s;
     } catch {
       /* ignore */
+    }
+    if (typeof navigator !== "undefined") {
+      for (const pref of navigator.languages || [navigator.language]) {
+        const s = pickLang(pref);
+        if (s) return s;
+      }
     }
     return "en";
   }
 
   let lang = readLang();
+  const loading = {};
+
+  function loadPack(code) {
+    if (I18N[code] || loading[code] || typeof fetch !== "function") return;
+    loading[code] = fetch(`/static/i18n/${code}.json?v=${PACK_VERSION}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+      .then((pack) => {
+        I18N[code] = pack;
+        if (lang === code) applyI18n();
+      })
+      .catch(() => {
+        delete loading[code];
+      });
+  }
 
   function t(key) {
-    const pack = I18N[lang] || I18N.tr;
+    const pack = I18N[lang] || I18N.en;
     if (pack[key] != null) return pack[key];
+    if (I18N.en[key] != null) return I18N.en[key];
     return key;
+  }
+
+  function isText(key, text) {
+    return Object.values(I18N).some((pack) => pack && pack[key] === text);
   }
 
   function applyBound() {
@@ -4026,11 +4106,11 @@
       if (el.dataset.chip != null) el.dataset.chip = `${d} ${t("sec")}`;
     });
     const idle = document.getElementById("prod-text");
-    if (idle && /^(Hazır|Ready)$/.test(idle.textContent.trim())) idle.textContent = t("prod.ready");
+    if (idle && isText("prod.ready", idle.textContent.trim())) idle.textContent = t("prod.ready");
     const checking = document.getElementById("prompt-rewriter-status");
-    if (checking && /^(Yönetmen LLM kontrol ediliyor…|Checking Director LLM…)$/.test(checking.textContent.trim())) checking.textContent = t("prompt.rewriterChecking");
+    if (checking && isText("prompt.rewriterChecking", checking.textContent.trim())) checking.textContent = t("prompt.rewriterChecking");
     const musicMeta = document.getElementById("music-meta");
-    if (musicMeta && /^(yok|No song)$/.test(musicMeta.textContent.trim())) musicMeta.textContent = t("ui.noSong");
+    if (musicMeta && isText("ui.noSong", musicMeta.textContent.trim())) musicMeta.textContent = t("ui.noSong");
     document.querySelectorAll("[data-i18n]").forEach((el) => {
       el.textContent = t(el.getAttribute("data-i18n"));
     });
@@ -4083,8 +4163,18 @@
   function syncLangSwitch() {
     document.querySelectorAll("#lang-switch [data-lang]").forEach((b) => {
       b.classList.toggle("on", b.dataset.lang === lang);
+      b.setAttribute("aria-checked", String(b.dataset.lang === lang));
     });
+    const current = document.getElementById("lang-current");
+    if (current) current.textContent = lang.toUpperCase();
     document.documentElement.lang = lang;
+  }
+
+  function setLangMenu(open) {
+    const box = document.getElementById("lang-switch");
+    if (!box) return;
+    box.classList.toggle("open", open);
+    document.getElementById("lang-toggle")?.setAttribute("aria-expanded", String(open));
   }
 
   function applyI18n() {
@@ -4095,12 +4185,13 @@
   }
 
   function setLang(next) {
-    lang = next === "en" ? "en" : "tr";
+    lang = pickLang(next) || "en";
     try {
       localStorage.setItem("h3-lang", lang);
     } catch {
       /* ignore */
     }
+    loadPack(lang);
     applyI18n();
   }
 
@@ -4110,10 +4201,35 @@
   window.applyI18n = applyI18n;
   window.setH3Lang = setLang;
   document.addEventListener("DOMContentLoaded", () => {
-    document.getElementById("lang-switch")?.addEventListener("click", (e) => {
+    const box = document.getElementById("lang-switch");
+    box?.addEventListener("click", (e) => {
       const b = e.target.closest("[data-lang]");
-      if (b) setLang(b.dataset.lang);
+      if (b) {
+        setLang(b.dataset.lang);
+        setLangMenu(false);
+        document.getElementById("lang-toggle")?.focus();
+      } else if (e.target.closest("#lang-toggle")) {
+        setLangMenu(!box.classList.contains("open"));
+        if (box.classList.contains("open")) box.querySelector(".lang-option.on")?.focus();
+      }
     });
+    document.addEventListener("click", (e) => {
+      if (box && !box.contains(e.target)) setLangMenu(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!box?.classList.contains("open")) return;
+      const options = [...box.querySelectorAll(".lang-option")];
+      const at = options.indexOf(document.activeElement);
+      if (e.key === "Escape") {
+        setLangMenu(false);
+        document.getElementById("lang-toggle")?.focus();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const step = e.key === "ArrowDown" ? 1 : -1;
+        options[(at + step + options.length) % options.length]?.focus();
+      }
+    });
+    loadPack(lang);
     applyI18n();
   });
 })();

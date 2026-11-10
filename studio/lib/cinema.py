@@ -63,6 +63,9 @@ SETUP_HINTS: dict[str, dict[str, str]] = {
         "handdrawn_live": "hand-drawn live hybrid, ink and paper texture over staged performance",
         "cgi_short": "premium 3D CGI cinematic short, PBR materials, clear silhouette animation",
         "music_video_cool": "cool music-video cinematic, rhythmic graphic frames, bold lighting accents",
+        "technical_cutaway": "technical cutaway visualization, precise sectioned mechanism with exposed internal parts, clean neutral studio backdrop, slow readable motion",
+        "xray": "x-ray see-through visualization, translucent outer shell revealing glowing internal structure, dark backdrop, clinical clarity",
+        "blueprint": "animated engineering blueprint look, crisp white line work on deep blue, parts assembling in clean isometric space",
     },
     "camera": {
         "35mm": "shot on 35mm spherical cinema lenses, natural falloff, classic motion-picture texture",
@@ -130,6 +133,7 @@ SETUP_HINTS: dict[str, dict[str, str]] = {
         "trailer": "trailer pacing, hook shots, escalating energy",
         "social": "social-clip pacing, punchy short-form framing",
         "documentary": "documentary observational pacing",
+        "explainer": "how-it-works explainer pacing, one mechanism per shot, clear cause-and-effect motion, uncluttered framing",
         "intro": "title-sequence / intro pacing",
         "outro": "end-credits / outro pacing",
     },
@@ -2153,7 +2157,7 @@ _FRAME_STRIP = re.compile(r"<\s*(?:Picture|Video)\s*\d+\s*>|\[\s*Shot\s*\d+\s*\]
 
 
 def storyboard_frame_prompt(
-    shot: dict[str, Any], refs: list[dict[str, str]], style_line: str = ""
+    shot: dict[str, Any], refs: list[dict[str, str]], style_line: str = "", allow_text: bool = False
 ) -> str:
     """Qwen prompt for the opening frame of a shot (no dialogue, no sheet layout)."""
     st = shot.get("structured") if isinstance(shot.get("structured"), dict) else {}
@@ -2181,16 +2185,27 @@ def storyboard_frame_prompt(
     }
     for i, ref in enumerate(refs, start=1):
         lines.append(f"Picture {i} is {ref['name']}: {roles.get(ref['kind'], 'visual reference')}.")
-    lines.append(
-        "Natural film composition with depth, one continuous image. "
-        "No text, no subtitles, no collage, no panels, no split screen, no character sheet layout."
-    )
+    if allow_text:
+        lines.append(
+            "Natural composition with depth, one continuous image. Any on-screen label named in the scene is "
+            "spelled exactly as written in quotes, in a clean bold sans-serif, large and sharp. "
+            "No subtitles, no collage, no panels, no split screen, no character sheet layout."
+        )
+    else:
+        lines.append(
+            "Natural film composition with depth, one continuous image. "
+            "No text, no subtitles, no collage, no panels, no split screen, no character sheet layout."
+        )
     return "\n".join(lines)
 
 
 STORYBOARD_FRAME_NEGATIVE = (
     "collage, split screen, multiple panels, character sheet, turnaround, multiple views, "
     "text, subtitles, watermark, logo, frame border, deformed hands, extra limbs, blurry"
+)
+STORYBOARD_FRAME_NEGATIVE_LABELS = (
+    "collage, split screen, multiple panels, character sheet, turnaround, multiple views, "
+    "misspelled text, garbled letters, subtitles, watermark, frame border, deformed hands, extra limbs, blurry"
 )
 
 

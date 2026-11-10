@@ -17,8 +17,8 @@
     const copy = document.createElement('span'); copy.className = 'scene-card-copy'; label.classList.add('scene-card-title'); copy.append(label, value); summary.replaceChildren(icon, copy, chevron);
     const sync = () => {
       const selected = list.querySelector('.chip.on, .chip[aria-pressed="true"]');
-      value.textContent = selected?.textContent || (window.h3Lang?.() === 'en' ? 'Select' : 'Seç');
-      if (id === 'quality-chips') label.textContent = window.h3Lang?.() === 'en' ? 'Quality' : 'Kalite';
+      value.textContent = selected?.textContent || (window.h3Lang?.() !== 'tr' ? 'Select' : 'Seç');
+      if (id === 'quality-chips') label.textContent = window.h3Lang?.() !== 'tr' ? 'Quality' : 'Kalite';
       summary.setAttribute('aria-label', label.textContent + ': ' + value.textContent);
       details.classList.toggle('has-selection', !!selected);
     };

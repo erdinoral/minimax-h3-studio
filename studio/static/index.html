@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=mrev2" />
+  <link rel="stylesheet" href="/static/app.css?v=extendable1" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -40,9 +40,18 @@
       <div class="sys-item" id="sys-comfy-item"><span>Comfy</span><b id="sys-comfy">—</b></div>
     </div>
     <nav class="menu">
-      <div class="lang-switch" id="lang-switch" role="group" aria-label="Language">
-        <button type="button" class="chip" data-lang="en">EN</button>
-        <button type="button" class="chip" data-lang="tr">TR</button>
+      <div class="lang-switch" id="lang-switch">
+        <button type="button" class="lang-toggle" id="lang-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-menu" aria-label="Language">
+          <span class="lang-burger" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="lang-current" id="lang-current">TR</span>
+        </button>
+        <div class="lang-menu" id="lang-menu" role="menu" aria-label="Language">
+          <button type="button" class="lang-option" role="menuitemradio" data-lang="en" style="--i:0"><b>EN</b><span>English</span></button>
+          <button type="button" class="lang-option" role="menuitemradio" data-lang="tr" style="--i:1"><b>TR</b><span>Türkçe</span></button>
+          <button type="button" class="lang-option" role="menuitemradio" data-lang="fr" style="--i:2"><b>FR</b><span>Français</span></button>
+          <button type="button" class="lang-option" role="menuitemradio" data-lang="es" style="--i:3"><b>ES</b><span>Español</span></button>
+          <button type="button" class="lang-option" role="menuitemradio" data-lang="de" style="--i:4"><b>DE</b><span>Deutsch</span></button>
+        </div>
       </div>
       <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
       <button type="button" id="btn-settings" class="menu-btn">Ayarlar</button>
@@ -94,6 +103,7 @@
             <button type="button" class="chip" data-group="purpose" data-purpose="trailer" aria-pressed="false">trailer</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="social" aria-pressed="false">sosyal</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="documentary" aria-pressed="false">belgesel</button>
+            <button type="button" class="chip" data-group="purpose" data-purpose="explainer" aria-pressed="false">nasıl çalışır</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="intro" aria-pressed="false">intro</button>
             <button type="button" class="chip" data-group="purpose" data-purpose="outro" aria-pressed="false">outro</button>
           </div>
@@ -617,6 +627,7 @@
         <button type="button" class="btn-secondary hidden" id="btn-player-delete">Sil</button>
         <button type="button" class="cta hidden" id="btn-open-prompt" title="Bu videonun üretim prompt’u" data-i18n-title="ui.btn-open-prompt.title">Prompt</button>
         <button type="button" class="btn-secondary h3-refine-action" id="btn-h3-refine" disabled>H3 Refine <small>Experimental</small></button>
+        <button type="button" class="btn-secondary" id="btn-video-labels" data-i18n="labels.open" disabled>Labels</button>
       </div>
       <div class="prod-info" id="prod-info">
         <div class="prod-main">
@@ -775,6 +786,7 @@
         <button type="button" class="chip" data-group="purpose" data-purpose="trailer" data-chip="trailer" aria-pressed="false">trailer</button>
         <button type="button" class="chip" data-group="purpose" data-purpose="social" data-chip="sosyal" aria-pressed="false">sosyal</button>
         <button type="button" class="chip" data-group="purpose" data-purpose="documentary" data-chip="belgesel" aria-pressed="false">belgesel</button>
+        <button type="button" class="chip" data-group="purpose" data-purpose="explainer" data-chip="nasıl çalışır" aria-pressed="false">nasıl çalışır</button>
         <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
         <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
         <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
@@ -835,6 +847,7 @@
             <option value="trailer">trailer</option>
             <option value="social">sosyal</option>
             <option value="documentary">belgesel</option>
+            <option value="explainer">nasıl çalışır</option>
             <option value="intro">intro</option>
             <option value="outro">outro</option>
           </select>
@@ -1653,26 +1666,27 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=mrev2" charset="utf-8"></script>
-  <script src="/static/film-workspace.js?v=cinema182" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=langmenu2" charset="utf-8"></script>
+  <script src="/static/film-workspace.js?v=cinema182L" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
-  <script src="/static/lora-guidance.js?v=5" charset="utf-8"></script>
-  <script src="/static/asset-references.js?v=3" charset="utf-8"></script>
+  <script src="/static/lora-guidance.js?v=6" charset="utf-8"></script>
+  <script src="/static/asset-references.js?v=4" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=mrev1" charset="utf-8"></script>
+  <script src="/static/app.js?v=explain3" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
-  <script src="/static/model-storage.js?v=folders246" charset="utf-8"></script>
+  <script src="/static/model-storage.js?v=folders246L" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=8" charset="utf-8"></script>
-  <script src="/static/workflow-access.js?v=guide259" charset="utf-8"></script>
-<script src="/static/h3-enhancements.js?v=3"></script>
-  <script src="/static/video-workflows.js?v=13"></script>
+  <script src="/static/workflow-access.js?v=guide259L" charset="utf-8"></script>
+<script src="/static/h3-enhancements.js?v=4"></script>
+  <script src="/static/video-workflows.js?v=15"></script>
+  <script src="/static/video-labels.js?v=1"></script>
   <script src="/static/motion-sketch.js?v=4"></script>
   <script src="/static/motion-robot.js?v=9"></script>
-  <script src="/static/game-sprites.js?v=6"></script>
-  <script src="/static/scene-selectors.js?v=3"></script>
+  <script src="/static/game-sprites.js?v=7"></script>
+  <script src="/static/scene-selectors.js?v=4"></script>
   <script src="/static/scene-settings.js?v=3"></script>
-  <script src="/static/sponsor-banner.js?v=3"></script>
+  <script src="/static/sponsor-banner.js?v=4"></script>
 </body>
 </html>

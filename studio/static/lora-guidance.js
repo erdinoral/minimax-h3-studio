@@ -1,6 +1,6 @@
 window.createLoraGuidanceEditor = function (catalog, toast) {
   const t=k=>window.t(`loraGuide.${k}`);
-  function translate(){document.querySelectorAll('[data-lora-notes]').forEach(b=>b.textContent=window.h3Lang?.() === 'en' ? 'Usage notes' : 'Kullanım notları');}
+  function translate(){document.querySelectorAll('[data-lora-notes]').forEach(b=>b.textContent=window.h3Lang?.() !== 'tr' ? 'Usage notes' : 'Kullanım notları');}
   translate();document.addEventListener('h3-lang',translate);
   document.addEventListener('click',async e=>{
     const button=e.target.closest('[data-lora-notes]');if(!button)return;
@@ -50,7 +50,7 @@ window.createLoraGuidanceEditor = function (catalog, toast) {
     ['Kamera hareketleri', 'Camera movement', 'Kamera kaydırma, yaklaşma veya benzeri çekim hareketlerini yönlendirmeye yardımcı olur. Sonuç seçilen LoRA’ya ve prompta bağlıdır.', 'Help guide camera motion such as pans or push-ins. Results depend on the selected LoRA and prompt.'],
     ['Yüz ve karakter değiştirme', 'Face and character replacement', 'Uyumlu iş akışlarında yüz veya karakter görünümünü değiştirmeye yardımcı olur. Gerekli referansları ilgili üretim modunda hazırlamak gerekir.', 'Help change face or character appearance in compatible workflows. Prepare the required references in the relevant generation mode.']
   ];
-  const en = () => window.h3Lang?.() === 'en';
+  const en = () => window.h3Lang?.() !== 'tr';
   const label = (tr, english) => en() ? english : tr;
   const translate = () => document.querySelectorAll('[data-lora-guide]').forEach(button => {button.textContent = label('LoRA rehberi', 'LoRA guide');});
   document.addEventListener('h3-lang', translate);

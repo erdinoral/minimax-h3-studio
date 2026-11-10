@@ -5,7 +5,7 @@
   let names = ["Diamond204a", "Corey"];
   let turn = 0;
   let hideTimer;
-  const english = () => document.documentElement.lang === "en";
+  const english = () => document.documentElement.lang !== "tr";
   function show() {
     if (document.hidden) return;
     banner.style.setProperty("--sponsor-travel", `${banner.clientWidth}px`);

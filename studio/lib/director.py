@@ -58,6 +58,7 @@ ALLOWED_PURPOSES = (
     "trailer",
     "social",
     "documentary",
+    "explainer",
     "intro",
     "outro",
 )
@@ -100,6 +101,8 @@ def normalize_purpose(value: Any = None, raw: str = "") -> str:
         return v
     blob = f"{v} {raw or ''}".lower()
     pairs = (
+        ("explainer", ("nasıl çalışır", "how it works", "how_it_works", "explainer", "açıklayıcı",
+                       "comment ça marche", "cómo funciona", "wie funktioniert")),
         ("music_video", ("müzik klibi", "music_video")),
         ("documentary", ("belgesel",)),
         ("intro", ("açılış",)),
@@ -454,7 +457,7 @@ def scene_format_from_text(text: Any, *, clip_sec: int = 5) -> str:
 
 
 def scene_format_question(lang: Any = None) -> str:
-    if normalize_ui_lang(lang) == "en":
+    if normalize_ui_lang(lang) != "tr":
         return (
             "Before I write anything: is this a **long scene** or a **single shot**?\n\n"
             "- **Long scene**: several shots in the Director, built from cuts and continuous pieces. "
@@ -2151,16 +2154,24 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
     return brief
 
 
+UI_LANG_NAMES = {"en": "English", "tr": "Turkish", "fr": "French", "es": "Spanish", "de": "German"}
+
+
 def normalize_ui_lang(value: Any = None) -> str:
     s = str(value or "tr").lower().strip()
-    return "en" if s.startswith("en") else "tr"
+    return next((code for code in UI_LANG_NAMES if s.startswith(code)), "en")
+
+
+def ui_lang_name(lang: Any = None) -> str:
+    return UI_LANG_NAMES[normalize_ui_lang(lang)]
 
 
 def ui_lang_addendum(lang: Any = None) -> str:
-    if normalize_ui_lang(lang) == "en":
+    if normalize_ui_lang(lang) != "tr":
+        name = ui_lang_name(lang)
         return (
             "\n\n## UI LANGUAGE OVERRIDE (highest priority)\n"
-            "The Studio UI is English. Speak to the user in **English** in every `reply` and chat turn. "
+            f"The Studio UI is {name}. Speak to the user in **{name}** in every `reply` and chat turn. "
             "This overrides any instruction to speak Turkish.\n"
             "JSON keys stay English. Every `h3Prompt` / SCENE body MUST stay English.\n"
             "Spoken dialogue defaults to **pure English**: use `<d>[English] …</d>` only. "
@@ -2183,10 +2194,10 @@ def ready_shots_reply(n: int, need: Any = None, lang: Any = None) -> str:
     if need and need != n:
         extra = (
             f" (target {need})"
-            if normalize_ui_lang(lang) == "en"
+            if normalize_ui_lang(lang) != "tr"
             else f" (hedef {need})"
         )
-    if normalize_ui_lang(lang) == "en":
+    if normalize_ui_lang(lang) != "tr":
         noun = "shot" if n == 1 else "shots"
         return (
             f"{n} {noun} ready{extra}.\n\n"
@@ -2199,14 +2210,14 @@ def ready_shots_reply(n: int, need: Any = None, lang: Any = None) -> str:
 
 
 def opening_message(lang: Any = None) -> str:
-    if normalize_ui_lang(lang) == "en":
+    if normalize_ui_lang(lang) != "tr":
         return (
             "Hi — I'm **H3 Director**. Pick a project from the chips.\n\n"
             "Workflow: we lock the idea → I give you an **N-shot outline** (titles + beats) "
             "→ then each shot is written as a full **cinematic SCENE** one by one "
             "(character card, micro-action, camera — not keyword soup).\n"
             "**music video** = silent picture + song mux at the end.\n"
-            "Type: short film / ad / trailer / social / documentary / intro / outro.\n"
+            "Type: short film / ad / trailer / social / documentary / how it works / intro / outro.\n"
             "Look: realistic, anime, disney, game, 3D CGI, comic, illustration, oil paint, clay, found footage.\n"
             "Give duration + story + character/location; say when the idea is locked.\n"
             "The **Plan** tab lets you read and edit every shot.\n\n"
@@ -2219,7 +2230,7 @@ def opening_message(lang: Any = None) -> str:
         "→ sonra her shot’u **tek tek** sinematik SCENE olarak yazarım "
         "(karakter kartı, mikro eylem, kamera — keyword soup yok).\n"
         "**müzik klibi** = sessiz görüntü + finalde şarkı mux.\n"
-        "Tür: kısa film / reklam / trailer / sosyal / belgesel / intro / outro.\n"
+        "Tür: kısa film / reklam / trailer / sosyal / belgesel / nasıl çalışır / intro / outro.\n"
         "Tarz: gerçekçi, anime, disney, oyun, 3D CGI, çizgi roman, illüstrasyon, yağlı boya, kil, found footage.\n"
         "Süre + hikâye + karakter/lokasyon ver; “tamam / N shot / fikrimiz bu” de.\n"
         "**Plan** sekmesinde tüm shot metinlerini görüp düzenleyebilirsin.\n\n"
@@ -2237,20 +2248,20 @@ def fallback_director_reply(sess: dict[str, Any], user_msg: str = "", lang: Any 
     clip = int(sess.get("clip_duration") or 5)
     bits = []
     if purpose:
-        bits.append(f"purpose={purpose}" if ui == "en" else f"proje={purpose}")
+        bits.append(f"purpose={purpose}" if ui != "tr" else f"proje={purpose}")
     if style:
-        bits.append(f"look={style}" if ui == "en" else f"tarz={style}")
+        bits.append(f"look={style}" if ui != "tr" else f"tarz={style}")
     if silent or purpose in ("music_video", "music-video"):
         bits.append(
             "silent picture (song at the end)"
-            if ui == "en"
+            if ui != "tr"
             else "sessiz görüntü (şarkı finalde)"
         )
-    bits.append(f"clip={clip}s" if ui == "en" else f"klip={clip}sn")
+    bits.append(f"clip={clip}s" if ui != "tr" else f"klip={clip}sn")
     ctx = ", ".join(bits)
     low = (user_msg or "").lower()
     if any(k in low for k in ("süre", "sn", "saniye", "dakika", "dk", "sec", "second", "minute")):
-        if ui == "en":
+        if ui != "tr":
             return (
                 f"Got the duration ({ctx}). "
                 "Now send a short logline + main character(s) + location; "
@@ -2262,7 +2273,7 @@ def fallback_director_reply(sess: dict[str, Any], user_msg: str = "", lang: Any 
             f"ben de {clip}sn’lik SCENE zincirini kurayım."
         )
     if purpose in ("music_video", "music-video") or silent:
-        if ui == "en":
+        if ui != "tr":
             return (
                 f"We're in music-video mode ({ctx}). "
                 "Send song feel / tempo + story + character + location; "
@@ -2274,7 +2285,7 @@ def fallback_director_reply(sess: dict[str, Any], user_msg: str = "", lang: Any 
             "ben sessiz SCENE senaryolarını çıkarırım."
         )
     if purpose:
-        if ui == "en":
+        if ui != "tr":
             return (
                 f"Noted ({ctx}). "
                 "Give total duration (sec) + 1–2 sentence story + character/location; "
@@ -2285,7 +2296,7 @@ def fallback_director_reply(sess: dict[str, Any], user_msg: str = "", lang: Any 
             "Toplam süre (sn) + 1–2 cümle hikâye + karakter/mekân ver; "
             "ardından sinematik SCENE’leri yazarım."
         )
-    if ui == "en":
+    if ui != "tr":
         return (
             "The connection dropped, but I'm here. "
             "Pick a project chip or write: film / music video, total duration (sec), "

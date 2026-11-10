@@ -30,7 +30,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
     "director_progress", default=None
 )
 
-from lib import h3_enhancements, continuum, flow_refine, video_refine, native_continuation, motion_long, face_crop
+from lib import h3_enhancements, continuum, flow_refine, video_refine, video_labels, native_continuation, motion_long, face_crop
 from lib import h3_acceleration, render_control, diagnostics
 from lib import motionbricks
 from lib import sketch
@@ -105,6 +105,7 @@ from lib.director import (
     skeleton_brief_from_text,
     system_prompt,
     ui_lang_addendum,
+    ui_lang_name,
     normalize_ui_lang,
     validate_brief,
     _clean_shot,
@@ -1187,7 +1188,8 @@ def _archive_job_to_gallery(job: dict) -> None:
         "started_at": job.get("started_at"),
         "done_at": done_at,
         **{key:job.get(key) for key in ('prompt_id','cancel_requested_at','cancel_source','recovered_from_status','continuum_grouping',
-                                      'continue_from','director_root_id','director_parent_id','director_chain_role','film_id','continuum_scene_ids')},
+                                      'continue_from','director_root_id','director_parent_id','director_chain_role','film_id','continuum_scene_ids',
+                                      'labels_source_id','overlay_labels')},
         "render_sec": render_sec,
         "url": f"/api/gallery/{jid}/video",
         "local_path": str(dest),
@@ -1350,6 +1352,8 @@ class GenerateBody(BaseModel):
     continuum_segment_prompts: list[str] | None = None
     continuum_context: str = Field("", max_length=8000)
     continuum_continuity: str = "balanced"
+    # Spectrum runs cannot save sections, so extendable runs skip Spectrum.
+    continuum_extendable: bool = True
     # Motion Transfer through Continuum: the single reference video guides each chunk in turn.
     continuum_video_follow: bool = False
     prepare_refine: bool = False
@@ -3041,7 +3045,8 @@ async def generate(body: GenerateBody):
         if continue_from and not (parent and (parent.get('continuum_run') or native_parent)):
             raise HTTPException(409, 'Source clip has no Continuum run record')
         if parent and continuum.has_spectrum(parent.get('continuum_base_graph') or {}):
-            raise HTTPException(409, 'This older Continuum run used Spectrum and cannot safely reuse its saved sections. Start a new Continuum video; the original is preserved.')
+            raise HTTPException(409, 'This Continuum video was rendered with Spectrum on, so its sections were not saved and it cannot be extended with Continuum. '
+                                     'Continue it with Continuum off (standard continuation), or turn Spectrum off in Settings before making Continuum videos you want to extend. The original is preserved.')
         previous = list(parent.get('continuum_prompts') or []) if parent and not native_parent else []
         context = parent.get('continuum_context', '') if parent else body.continuum_context
         continuity_mode = parent.get('continuum_continuity', 'balanced') if parent else body.continuum_continuity
@@ -3057,7 +3062,8 @@ async def generate(body: GenerateBody):
         continuum_data = {'continuum_run':parent['continuum_run'] if parent and not native_parent else 'studio_' + uuid.uuid4().hex,
                           'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration,
                           'continuum_resume':bool(parent and not native_parent),
-                          'continuum_context':context, 'continuum_continuity':continuity_mode}
+                          'continuum_context':context, 'continuum_continuity':continuity_mode,
+                          'continuum_extendable':bool(body.continuum_extendable)}
         if follow_video:
             continuum_data['continuum_ref_video'] = ref_videos[0]
         if parent:
@@ -5911,7 +5917,8 @@ async def cinema_shot_frame(body: CinemaShotFrameBody):
         raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
     setup = lib.get("setup") or {}
     style = setup.get("style") if setup.get("style") not in (None, "", "auto") else "realistic"
-    prompt = cinema.storyboard_frame_prompt(shot, refs, style_craft_line(normalize_style(style)))
+    labels = setup.get("purpose") == "explainer"
+    prompt = cinema.storyboard_frame_prompt(shot, refs, style_craft_line(normalize_style(style)), allow_text=labels)
     title = (body.title or "").strip() or str((shot.get("structured") or {}).get("title") or "").strip()
     job = {
         "id": uuid.uuid4().hex,
@@ -5925,7 +5932,8 @@ async def cinema_shot_frame(body: CinemaShotFrameBody):
         "scene_title": "Frame · " + (title or body.shot_id[:8]),
         "created_at": time.time(),
         "frame_shot_id": body.shot_id,
-        "frame_args": {"prompt": prompt, "refs": [r["file"] for r in refs], "aspect": body.aspect},
+        "frame_args": {"prompt": prompt, "refs": [r["file"] for r in refs], "aspect": body.aspect,
+                       "negative": cinema.STORYBOARD_FRAME_NEGATIVE_LABELS if labels else cinema.STORYBOARD_FRAME_NEGATIVE},
     }
     async with _lock:
         _jobs.append(job)
@@ -5944,7 +5952,7 @@ async def _run_shot_frame(job: dict) -> None:
         elif (REFS / name).is_file():
             refs.append(await comfy.upload_image(REFS / name, name))
     graph = qwen_still.build_storyboard_frame(
-        prompt=str(args.get("prompt") or ""), negative=cinema.STORYBOARD_FRAME_NEGATIVE,
+        prompt=str(args.get("prompt") or ""), negative=str(args.get("negative") or cinema.STORYBOARD_FRAME_NEGATIVE),
         ref_images=refs, aspect=str(args.get("aspect") or "16:9"), steps=24,
         seed=uuid.uuid4().int % (2**32))
     source = await _run_qwen_still(job, graph)
@@ -8365,6 +8373,48 @@ async def workflow_capabilities():
             'continuum_max_chunks':16}
 
 
+class LabelsBody(BaseModel):
+    labels: list[dict] = []
+
+
+@app.post('/api/clips/{clip_id}/labels')
+async def label_clip(clip_id: str, body: LabelsBody):
+    source = _clip_record(clip_id)
+    if not source:
+        raise HTTPException(404, 'Clip not found')
+    if source.get('status', 'done') != 'done':
+        raise HTTPException(409, 'The video render must finish first')
+    try:
+        video_labels.clean_labels(body.labels)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    src = await _ensure_job_video(source)
+    label_id = str(uuid.uuid4())
+    out = CLIPS / f'{label_id}.mp4'
+    try:
+        info = await asyncio.to_thread(video_labels.burn, src, out, body.labels)
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(500, str(exc)[-400:]) from exc
+    # Continuation state belongs to the unlabelled source, so it is not copied.
+    job = {key: value for key, value in source.items() if key in (
+        'prompt', 'aspect', 'quality', 'seed', 'steps', 'sampler', 'scheduler', 'h3_models', 'lora_name',
+        'lora_strength', 'lora_strengths', 'effective_lora_name', 'effective_lora_strength', 'effective_spectrum',
+        'silent_audio', 'purpose', 'ref_images', 'mode', 'lane', 'scene_title', 'film_id', 'shot_id', 'shot_index')}
+    now = time.time()
+    job.update(id=label_id, status='done', progress=100, progress_label='done', width=info['width'], height=info['height'],
+               duration=max(1, round(info['duration'])) if info['duration'] else source.get('duration'),
+               created_at=now, started_at=now, done_at=now, local_path=str(out), error=None,
+               output={'filename': out.name, 'subfolder': '', 'type': 'studio', 'url': f'/api/clips/{label_id}/video'},
+               labels_source_id=clip_id, overlay_labels=info['labels'])
+    job['download_name'] = video_download_name(job, item_id=label_id)
+    async with _lock:
+        _jobs.append(job)
+        _save_jobs()
+    _archive_job_to_gallery(job)
+    slog.info('clip labels burned', source=clip_id[:8], id=label_id[:8], labels=len(info['labels']))
+    return job
+
+
 class RefineBody(BaseModel):
     quality: str
     method: str = 'video'
@@ -9205,8 +9255,8 @@ async def _director_chat_impl(body: DirectorChatBody):
         sys += scene_format_addendum(sess.get("scene_format") or "")
     if plan_mode:
         sys = (sys or "") + "\n\n" + PLAN_MODE_ADDENDUM
-        if ui_lang == "en":
-            sys += "\nPlan-mode `reply` must be English (not Turkish)."
+        if ui_lang != "tr":
+            sys += f"\nPlan-mode `reply` must be {ui_lang_name(ui_lang)} (not Turkish)."
     if sess.get("cinema_studio"):
         sys = (sys or "") + "\n\n" + CINEMA_STUDIO_ADDENDUM
         cine_board = format_cinema_board(cinema.load(), full=plan_mode)
@@ -9249,8 +9299,8 @@ async def _director_chat_impl(body: DirectorChatBody):
                 {
                     "role": "user",
                     "content": (
-                        "[system] Retry after error. Write a 2–4 sentence director reply in English; do not leave it empty."
-                        if ui_lang == "en"
+                        f"[system] Retry after error. Write a 2–4 sentence director reply in {ui_lang_name(ui_lang)}; do not leave it empty."
+                        if ui_lang != "tr"
                         else (
                             "[sistem] Hata sonrası yeniden dene. "
                             "Türkçe 2–4 cümle yönetmen cevabı yaz; boş bırakma."

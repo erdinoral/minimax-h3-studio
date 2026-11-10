@@ -168,5 +168,56 @@
     "camera_bias": "Tracking and handheld pulses timed to imagined beat; punch-ins on peaks.",
     "soundscape": "diegetic room / crowd only if needed; primary song muxed later",
     "music": "N/A"
+  },
+  "technical_cutaway": {
+    "setup": {
+      "camera": "steadicam",
+      "palette": "rec709",
+      "lighting": "studio",
+      "era": "present",
+      "purpose": "explainer",
+      "style": "cgi_3d",
+      "audio": "film"
+    },
+    "visual_style": "Premium 3D technical cutaway visualization",
+    "craft": "precise sectioned mechanism with internal parts exposed along a clean cut plane, distinct materials per part (machined steel, brass, rubber, glass), one mechanism moving at a slow readable pace, clean neutral studio backdrop, short on-screen labels spelled exactly as quoted in a bold clean sans-serif, held steady on clean space",
+    "avoid": "misspelled, flickering or morphing label text, long sentences on screen, cluttered background, fast chaotic motion, parts merging into each other",
+    "camera_bias": "Slow orbit or push-in toward the active part; keep the whole mechanism readable before going close.",
+    "soundscape": "mechanical clicks, gears and airflow matching the visible motion, quiet studio room tone",
+    "music": "N/A"
+  },
+  "xray": {
+    "setup": {
+      "camera": "steadicam",
+      "palette": "cold",
+      "lighting": "studio",
+      "era": "present",
+      "purpose": "explainer",
+      "style": "cgi_3d",
+      "audio": "film"
+    },
+    "visual_style": "3D x-ray see-through visualization",
+    "craft": "translucent outer shell revealing the glowing internal structure, internal parts clearly separated by brightness, dark backdrop, clinical clarity, steady slow motion of the inner mechanism, short on-screen labels spelled exactly as quoted in a bold clean sans-serif, held steady on clean space",
+    "avoid": "misspelled or flickering label text, noisy glow flooding the frame, horror tone, fast camera moves",
+    "camera_bias": "Steady medium framing with a gentle orbit; slow push-in on the active inner part.",
+    "soundscape": "soft low hum, subtle internal mechanical or fluid sounds matching the motion",
+    "music": "N/A"
+  },
+  "blueprint": {
+    "setup": {
+      "camera": "steadicam",
+      "palette": "cold",
+      "lighting": "studio",
+      "era": "present",
+      "purpose": "explainer",
+      "style": "cgi_3d",
+      "audio": "film"
+    },
+    "visual_style": "Animated engineering blueprint look",
+    "craft": "crisp white line work on deep blue, isometric technical space, parts sliding into place and assembling step by step, clean geometric motion, short on-screen labels spelled exactly as quoted in a bold clean sans-serif, held steady on clean space",
+    "avoid": "photoreal clutter, misspelled labels or random dimension numbers, messy hand-sketched lines",
+    "camera_bias": "Locked isometric or slow drift; parts move, camera stays calm.",
+    "soundscape": "soft drafting and click sounds as parts lock together",
+    "music": "N/A"
   }
 }

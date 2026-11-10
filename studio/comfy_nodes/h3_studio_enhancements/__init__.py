@@ -79,7 +79,8 @@ class H3StudioHybridLora:
         import nodes
         loader = nodes.NODE_CLASS_MAPPINGS.get('H3PowerLoraStack')
         if loader is None:
-            raise RuntimeError('Install ComfyUI-H3-PowerLoraStack and restart ComfyUI; see docs/hybrid-h3.md')
+            raise RuntimeError('LightX2V Hybrid r48 needs ComfyUI-H3-PowerLoraStack. Run Update in Pinokio '
+                               '(it installs the loader), then restart ComfyUI; or pick another speed LoRA. See docs/hybrid-h3.md')
         patched, report = loader().apply(model=model, quantized_layers='auto', adaln_port='auto',
                                         lora_1={'on': True, 'lora': lora_name, 'strength': strength_model})
         if (lora_name not in report or 'merged' not in report

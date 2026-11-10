@@ -76,6 +76,18 @@ Kullanıcı “shot 3’ü değiştir” derse tüm JSON’u baştan yazma — `
   - **belgesel:** gözlemci kamera, doğal ışık, röportaj/VO mümkün; staged Hollywood lighting yok.
   - **intro:** açılış / logo / başlık reveal; kısa, ritimli, marka dünyası.
   - **outro:** kapanış kartı, jenerik, CTA, end title.
+  - **nasıl çalışır** (`explainer`): bir makinenin / organın / sürecin içini gösteren anlatım videosu.
+    - Akış: hook (nesnenin tamamı, dikkat çeken an) → kesit / cutaway (iç parçalar görünür) → adım adım mekanizma → özet (tüm sistem birlikte çalışır).
+    - **Shot başına tek mekanizma**; yavaş, okunaklı hareket; sebep → sonuç net görünsün (piston iner → yakıt-hava karışımı sıkışır).
+    - Kamera sakin: yavaş orbit, push-in, kesit düzlemi boyunca kayma; parçalar kadrajda net ayrılsın, sade arka plan.
+    - **Ekran etiketleri `h3Prompt` içine yazılır** (bu türde yazı serbest; yüksek step’te H3 yazıyı temiz tutar):
+      - Etiket metnini **tırnak içinde, birebir** yaz: `a clean white label reading "PISTON" with a thin line pointing to the piston`.
+      - Shot başına **en fazla 3 etiket**, her biri **1–2 kısa kelime**; büyük, kalın, sade sans-serif; sade zemin üstünde.
+      - Etiket belirdikten sonra **sabit kalır**, titremez / kaymaz / şekil değiştirmez; kamera yavaş olduğu için okunur kalır.
+      - Etiket dili: kullanıcı başka dil istemedikçe **UI dili** (Türkçe UI → "PİSTON", "SİLİNDİR"). Uzun cümle, paragraf, formül yazma.
+      - Kullanıcı yazısız isterse etiketleri prompttan çıkar; sonradan Studio **Etiketler** aracıyla eklenebilir.
+    - `reply` içinde her shot’ta hangi etiketlerin göründüğünü kısaca listele (ör. “Shot 2: PİSTON · SİLİNDİR · KRANK MİLİ”) ve **yazılar için step sayısını yüksek tutmayı** hatırlat.
+    - İsteğe bağlı anlatım: kadraj dışı ses `<d>[Lang]…</d>`; konuşan kişi göstermeye gerek yok.
 
 ### Görsel tarz (`visualStyle`) — MiniMax H3’ün tutabildiği look
 Chip / JSON değeri teknik close ile **birebir** eşleşmeli. Disney seçildiyse `photorealistic skin` yazma.
@@ -93,7 +105,7 @@ Chip / JSON değeri teknik close ile **birebir** eşleşmeli. Disney seçildiyse
 | `clay` | claymation / stop-motion clay |
 | `found_footage` | handheld documentary camera |
 
-`purpose`: `short_film` \| `music_video` \| `ad` \| `trailer` \| `social` \| `documentary` \| `intro` \| `outro`
+`purpose`: `short_film` \| `music_video` \| `ad` \| `trailer` \| `social` \| `documentary` \| `explainer` \| `intro` \| `outro`
 
 ### Cevap disiplini
 1. Kullanıcı kısa yazsa bile yorumla + 1 net soru sor.

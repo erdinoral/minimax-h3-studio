@@ -10,7 +10,7 @@ window.createFilmWorkspace = function (api) {
   const wn = (key, n) => w(key).replace('{n}', String(n));
   const chapterDisplay = name => {
     const match = /^Bölüm (\d+)$/.exec(name) || /^Sahne (\d+)$/.exec(name);
-    return match && window.h3Lang?.() === 'en' ? wn('chapterDefault', match[1]) : name;
+    return match && window.h3Lang?.() !== 'tr' ? wn('chapterDefault', match[1]) : name;
   };
   const clone = x => JSON.parse(JSON.stringify(x));
   const assets = () => groups.flatMap(([key]) => (api.get()[key] || []).map(a => ({...a, kind:key.slice(0,-1)})));
@@ -94,7 +94,7 @@ window.createFilmWorkspace = function (api) {
       <button data-film="add">${esc(w('addShot'))}</button>${s ? `<button data-film="up">${esc(w('moveLeft'))}</button><button data-film="down">${esc(w('moveRight'))}</button><button data-film="duplicate">${esc(w('duplicate'))}</button><button data-film="delete">${esc(w('removeShot'))}</button>` : ''}
       ${s ? `<div class="film-takes"><label>${esc(w('alternateTake'))} <select data-film="take"><option value="">${esc(w('latestFinished'))}</option>${jobs.filter(j=>j.status==='done').map((j,i)=>`<option value="${esc(j.id)}" ${s.selected_job===j.id?'selected':''}>${esc(wn('shot', i+1))} · ${esc(j.id.slice(0,8))}</option>`).join('')}</select></label><button data-film="approve" ${selected?'':'disabled'}>${esc(w('approve'))}</button><button data-film="produce-shot">${esc(w('produceAlternate'))}</button></div>` : ''}</section>
       <aside class="film-inspector">${s ? `<h3>${esc(w('references'))}</h3><label class="film-import">${esc(w('uploadFrame'))}<input type="file" accept="image/png,image/jpeg,image/webp" data-film="frame" hidden></label>${s.first_frame_name ? `<small>${esc(s.first_frame_name)}</small><button data-film="clear-frame">${esc(w('removeFrame'))}</button>` : ''}<label>${esc(w('sceneName'))}<input data-film="scene" value="${esc(s.scene)}" placeholder="${esc(w('scenePlaceholder'))}"></label><label>${esc(w('action'))}<textarea data-film="text" rows="4">${esc(s.text)}</textarea></label><label>${esc(w('link'))}<select data-film="mode"><option value="t2v" ${s.mode!=='continue'?'selected':''}>${esc(w('newTake'))}</option><option value="continue" ${s.mode==='continue'?'selected':''}>${esc(w('continueTake'))}</option></select></label>
-      <button class="btn-secondary" data-film="preview-refs">${esc(window.h3Lang?.() === "en" ? "Preview references" : "Gönderilecek referanslar")}</button>
+      <button class="btn-secondary" data-film="preview-refs">${esc(window.h3Lang?.() !== "tr" ? "Preview references" : "Gönderilecek referanslar")}</button>
       ${!Array.isArray(s.bindings) ? `<p class="film-warning">${esc(w('legacyBindings'))}</p><button data-film="explicit">${esc(w('pickReferences'))}</button>` : ''}
       ${groups.map(([key,label])=>`<fieldset><legend>${esc(w(label))}</legend>${(film[key]||[]).map(a=>{
         const b=s.bindings?.find(b=>b.asset_id===a.id), snap=b?.snapshot||a, ims=snap.images||[];

@@ -11,9 +11,9 @@ class LegacyLoraActorSheetTests(unittest.IsolatedAsyncioTestCase):
         import server
         self.assertTrue(server._asset_needs_sheet(dict(LEGACY)))
 
-    async def test_legacy_lora_actor_uses_selected_image_provider(self):
+    async def test_legacy_lora_actor_follows_the_saved_provider(self):
         import server
-        for provider, method in (("image_studio", "qwen"), ("minimax", "h3"), ("look_sheets", "sheet")):
+        for provider, method in (("image_studio", "qwen"), ("minimax", "h3"), ("look_sheets", "h3")):
             cine = {"characters": [dict(LEGACY)], "image_provider": provider,
                     "shots": [{"text": "NEA walks.", "structured": {"character": "NEA"}}]}
             gen = AsyncMock(return_value={"asset": {"id": "nea", "name": "NEA"}, "job": {"id": "j1"}})

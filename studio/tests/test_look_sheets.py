@@ -2,7 +2,7 @@ import copy
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
 from lib import cinema, look_sheets
 from lib.comfy import build_ref2va_prompt
@@ -29,50 +29,6 @@ class LookSheetsTests(unittest.TestCase):
 
 
 class LookSheetsEndpointTests(unittest.IsolatedAsyncioTestCase):
-    async def test_reference_upload_preserves_qwen_provider(self):
-        import server
-        enqueue = AsyncMock(return_value={'job':{'id':'test'}})
-        with patch.object(server.comfy, 'healthy', AsyncMock(return_value=True)), patch.object(server.cinema, 'load', return_value={}), patch.object(server, '_queue_cinema_qwen_sheet_job', enqueue), patch.object(server, '_queue_cinema_sheet_job', AsyncMock()) as h3:
-            await server.cinema_generate_sheet(server.CinemaSheetBody(name='Lara', ref_image='lara.png', image_provider='image_studio'))
-        h3.assert_not_called()
-        self.assertEqual(enqueue.call_args.kwargs['ref_image'], 'lara.png')
-
-    async def test_queue_preserves_source_and_uses_ref_video_without_still_adapter(self):
-        import server
-        client = AsyncMock()
-        client.get.side_effect = lambda url: Mock(json=lambda: {url.rsplit('/', 1)[-1]: {}}, raise_for_status=lambda: None)
-        context = AsyncMock()
-        context.__aenter__.return_value = client
-        queued = {'id':'sheet1'}
-        generated = AsyncMock(return_value=queued)
-        with tempfile.TemporaryDirectory() as root:
-            source = Path(root) / 'car.png'
-            source.write_bytes(b'image')
-            with patch.object(server, 'REFS', Path(root)), patch.object(server, 'COMFY_INPUT', Path(root)), patch.object(server.cinema, 'load', return_value={'film_id':'film', 'vehicles':[]}), patch.object(server.cinema, 'upsert_asset', return_value={'id':'car'}) as upsert, patch.object(server.httpx, 'AsyncClient', return_value=context), patch.object(server, 'generate', generated), patch.object(server, '_jobs', [queued]), patch.object(server, '_save_jobs'), patch.object(server, 'still_catalog_spec', return_value={'id':'still', 'file':'still.safetensors'}), patch.object(server, 'spec_ready', return_value=True):
-                await server._queue_cinema_sheet_job(kind='vehicle', name='Car', sheet_method='look_sheets', ref_image='car.png')
-        body = generated.call_args.args[0]
-        self.assertEqual(body.mode, 'ref')
-        self.assertEqual(body.ref_images, ['car.png'])
-        self.assertFalse(body.lora_name)
-        self.assertEqual(upsert.call_args.args[1]['source_ref'], 'car.png')
-        self.assertEqual(queued['sheet_method'], 'look_sheets')
-        self.assertEqual(queued['film_id'], 'film')
-
-    async def test_look_sheets_bypasses_qwen_provider(self):
-        import server
-        enqueue = AsyncMock(return_value={'job':{'id':'test'}})
-        with patch.object(server.comfy, 'healthy', AsyncMock(return_value=True)), patch.object(server.cinema, 'load', return_value={}), patch.object(server, '_queue_cinema_sheet_job', enqueue), patch.object(server, '_queue_cinema_qwen_sheet_job', AsyncMock()) as qwen:
-            await server.cinema_generate_sheet(server.CinemaSheetBody(name='Ada', ref_image='ada.png', sheet_method='look_sheets', image_provider='image_studio'))
-        qwen.assert_not_called()
-        self.assertEqual(enqueue.call_args.kwargs['sheet_method'], 'look_sheets')
-
-    async def test_missing_reference_does_not_queue(self):
-        import server
-        with patch.object(server.cinema, 'load', return_value={'characters':[]}), patch.object(server, 'generate', AsyncMock()) as generate:
-            with self.assertRaisesRegex(ValueError, 'source reference'):
-                await server._queue_cinema_sheet_job(kind='vehicle', name='Car', sheet_method='look_sheets')
-        generate.assert_not_called()
-
     async def test_selected_views_attach_without_cropping_and_deleted_cards_stay_deleted(self):
         import server
         actor = {'id':'a', 'kind':'character', 'name':'Ada', 'source_ref':'source.png', 'images':[]}

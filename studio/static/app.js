@@ -53,7 +53,6 @@
     firstFrameName: null,
     lastFrameName: null,
     refImageSize: "match",
-    imageStudioSteps: 30,
     directorSessionId: null,
     directorReady: false,
     directorBrief: null,
@@ -832,7 +831,7 @@
       seed_lock: false,
       lora_selection: [],
       lora_weights: {},
-      image_provider: "minimax",
+      image_provider: "image_studio",
       audio: {
         mode: "film",
         score_id: "",
@@ -1510,7 +1509,6 @@
   function stopImageStudioQueuePoll() {
     if (imageStudioQueuePoll) clearInterval(imageStudioQueuePoll);
     imageStudioQueuePoll = null;
-    if ($("cinema-image-provider-status")) $("cinema-image-provider-status").textContent = "";
   }
 
   async function generateImageStudioReference() {
@@ -1535,7 +1533,6 @@
         body: JSON.stringify({
           prompt,
           aspect: state.aspect || "16:9",
-          steps: state.imageStudioSteps,
         }),
       });
       const data = await r.json().catch(() => ({}));
@@ -1932,7 +1929,7 @@
 
   async function generateSingleFrame(which) {
     // A dedicated frame prompt is optional: re-use the scene prompt so that
-    // pressing the Image Studio button always has an intuitive result.
+    // pressing the H3-Image button always has an intuitive result.
     const prompt = ($(`${which}-frame-prompt`)?.value || $("prompt")?.value || "").trim();
     const button = $(`btn-${which}-frame-generate`);
     const status = $(`${which}-frame-generate-status`);
@@ -1950,7 +1947,7 @@
       const r = await fetch("/api/image-studio/reference", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, aspect: state.aspect || "16:9", steps: state.imageStudioSteps }),
+        body: JSON.stringify({ prompt, aspect: state.aspect || "16:9" }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
@@ -2409,13 +2406,13 @@
     return '<div class="cinema-folder-wrap">' + tab + body + "</div>";
   }
 
+  // "minimax" = H3 Studio (last frame of a short H3 video); older films may say "look_sheets".
   function normalizeCinemaImageProvider(value) {
-    return value === "image_studio" ? "image_studio" : "minimax";
+    return value === "minimax" || value === "look_sheets" ? "minimax" : "image_studio";
   }
 
   function cinemaImageProductionMethod() {
-    const provider = normalizeCinemaImageProvider(ensureCinema().image_provider);
-    return provider === "image_studio" ? "qwen" : "h3";
+    return normalizeCinemaImageProvider(ensureCinema().image_provider) === "minimax" ? "h3" : "qwen";
   }
 
   function cinemaLookReferenceKey(kind, id) {
@@ -2452,7 +2449,7 @@
     try {
       const ok = await regenerateCinemaAsset(kind, id, button, {
         ref_images: [ref.name], ref_image: ref.name,
-        sheet_method: "look_sheets", production_method: "sheet",
+        production_method: cinemaImageProductionMethod(),
       });
       if (ok && state.cinemaLookRefs[key] === ref) delete state.cinemaLookRefs[key];
     } finally {
@@ -3693,14 +3690,14 @@
     const lock = $("cinema-seed-lock");
     if (lock) lock.checked = !!c.seed_lock;
     document.querySelectorAll("#cinema-image-provider [data-image-provider]").forEach((btn) => {
-      const on = btn.dataset.imageProvider === (normalizeCinemaImageProvider(c.image_provider));
+      const on = btn.dataset.imageProvider === normalizeCinemaImageProvider(c.image_provider);
       btn.classList.toggle("on", on);
       btn.setAttribute("aria-pressed", String(on));
     });
     const methodHint = $("cinema-image-provider-status");
     if (methodHint) {
       methodHint.textContent = tt("cinema.methodHint." + cinemaImageProductionMethod());
-      methodHint.closest('.cinema-asset-method')?.setAttribute('title', methodHint.textContent);
+      methodHint.closest(".cinema-image-provider")?.setAttribute("title", methodHint.textContent);
     }
     if (seed && document.activeElement !== seed && !lock?.checked) {
       seed.value = String(c.seed != null && c.seed !== "" ? c.seed : -1);
@@ -4705,7 +4702,7 @@ async function clearCinemaSheetRef(kind) {
       return;
     }
     if (btn) btn.disabled = true;
-    if (ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
+    startImageStudioQueuePoll();
     if (statusEl) statusEl.textContent = tt("cinema.sheetQueuing");
     try {
       const cine = ensureCinema();
@@ -5577,7 +5574,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     opts = opts && typeof opts === "object" ? opts : {};
     const btn = $("btn-cinema-produce");
     if (btn) btn.disabled = true;
-    if (ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
+    startImageStudioQueuePoll();
     try {
       await waitForDraftLora();
       const c = ensureCinema();
@@ -5771,11 +5768,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   async function regenerateCinemaAsset(kind, assetId, button, sheetOptions = {}) {
     const item = cinemaItem(kind, assetId);
     if (!item || !(item.name || "").trim()) return;
-    if (!sheetOptions.sheet_method && item.source_ref) {
-      sheetOptions = { ref_image: item.source_ref, ref_images: [item.source_ref] };
+    if (!sheetOptions.ref_image && item.source_ref) {
+      sheetOptions = { ...sheetOptions, ref_image: item.source_ref, ref_images: [item.source_ref] };
     }
     if (button) button.disabled = true;
-    if (!sheetOptions.sheet_method && ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
+    startImageStudioQueuePoll();
     try {
       const cine = ensureCinema();
       await saveCinema(true);
@@ -5844,7 +5841,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       return;
     }
     if (button) button.disabled = true;
-    if (ensureCinema().image_provider === "image_studio") startImageStudioQueuePoll();
+    startImageStudioQueuePoll();
     try {
       await waitForDraftLora();
       flushCinemaFields();
@@ -9219,7 +9216,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("sk-review-regen")?.addEventListener("click", () => {
       void sketchReviewPost("regenerate", {
         sketch_text: $("sk-review-text").value.trim(),
-        sketch_method: window.h3SketchMethod?.() || "img2img",
+        sketch_method: window.h3SketchMethod?.() || "edit",
         sketch_fidelity: window.h3SketchFidelity?.() || "balanced",
       }, (job) => {
         setSketchReviewId(job.id);
@@ -9518,6 +9515,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       let clipLabel = localizeSystemLabel(job.progress_label) || tt("prod.comfyProgress");
       if (progressSource !== "queue" && step != null && stepMax > 0 && !/(?:örnekleme|sampling)\s+\d+\/\d+/i.test(clipLabel)) {
         clipLabel = tf("job.sampling", { step: String(step), max: String(stepMax) });
+      }
+      const chunk = Number(job.continuum_chunk) || 0;
+      const chunkTotal = Number(job.continuum_chunk_total) || 0;
+      if (progressSource !== "queue" && chunk > 0 && chunkTotal > 1) {
+        const parts = clipLabel.split(" · ");
+        parts.splice(1, 0, tf("job.continuumChunk", { n: String(chunk), total: String(chunkTotal) }));
+        clipLabel = parts.join(" · ");
       }
       const bits = [];
       if (bi > 0 && bt > 0) bits.push(`${bi}/${bt}`);
@@ -10314,7 +10318,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         sketch_text: prompt,
         sketch_style: state.projectStyle || null,
         sketch_fidelity: window.h3SketchFidelity?.() || "balanced",
-        sketch_method: window.h3SketchMethod?.() || "img2img",
+        sketch_method: window.h3SketchMethod?.() || "edit",
       };
       const r = await fetch("/api/sketch/frame", {
         method: "POST",
@@ -11602,10 +11606,6 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     e.target.value = "";
   });
   $("btn-image-studio-ref")?.addEventListener("click", () => void generateImageStudioReference());
-  document.querySelectorAll("[data-image-steps]").forEach((button) => button.addEventListener("click", () => {
-    state.imageStudioSteps = Number(button.dataset.imageSteps) <= 20 ? 20 : 30;
-    document.querySelectorAll("[data-image-steps]").forEach((item) => item.classList.toggle("on", Number(item.dataset.imageSteps) === state.imageStudioSteps));
-  }));
   $("face-files")?.addEventListener("change", (e) => {
     syncFilePickName(e.target);
     void uploadRefFiles(e.target.files, "face");

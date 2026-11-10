@@ -55,14 +55,15 @@ test("the drawing draft and its settings survive a reload", () => {
   assert.match(sketch, /store\.put\(DRAFT_KEY, \{ blob, width: canvas\.width, height: canvas\.height, aspect: aspectKey/);
   assert.match(sketch, /void restoreDraft\(\);/);
   assert.match(sketch, /if \(!draft\?\.blob \|\| touched \|\| hasInk\) return;/, "a fresh stroke wins over a late restore");
-  assert.match(sketch, /localStorage\.setItem\(SETTINGS_KEY, JSON\.stringify\(\{ tool, size, color, method, fidelity: fidelity\(\) \}\)\)/);
+  assert.match(sketch, /localStorage\.setItem\(SETTINGS_KEY, JSON\.stringify\(\{ tool, size, color, fidelity: fidelity\(\) \}\)\)/);
   assert.match(sketch, /window\.addEventListener\("pagehide"/);
 });
 
-test("a missing Edit model falls back to img2img and says so", () => {
-  assert.match(sketch, /return editMissing\?\.length \? "img2img" : method;/);
+test("drawings always go to H3-Image as a visual reference and a missing model is named", () => {
+  assert.match(sketch, /function effectiveMethod\(\) \{\s*return "edit";/);
+  assert.doesNotMatch(html, /data-sk-method=/);
   assert.match(sketch, /t\("sketch\.editMissingNote", \{ files: editMissing\.join\(", "\) \}\)/);
-  assert.match(app, /sketch_method: window\.h3SketchMethod\?\.\(\) \|\| "img2img"/);
+  assert.match(app, /sketch_method: window\.h3SketchMethod\?\.\(\) \|\| "edit"/);
   assert.match(app, /d\.code\.startsWith\("sketch\."\)/);
 });
 
@@ -269,7 +270,7 @@ test("approval goes through the animate endpoint and frames are never auto-rende
 
 test("new Motion strings exist in Turkish and English", () => {
   const keys = [
-    "sketch.makeFrame", "sketch.method", "sketch.methodEdit", "sketch.methodImg2img", "sketch.methodHint",
+    "sketch.makeFrame",
     "sketch.editMissing", "sketch.editMissingNote", "sketch.reviewTitle", "sketch.reviewText", "sketch.reviewTextPh",
     "sketch.regenerate", "sketch.animate", "sketch.stateQueued", "sketch.stateFraming", "sketch.stateAwaiting",
     "sketch.stateApproved", "sketch.stateError", "sketch.reviewEmpty", "sketch.frameReady", "sketch.animateQueued",

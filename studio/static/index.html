@@ -16,7 +16,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=extendable1" />
+  <link rel="stylesheet" href="/static/app.css?v=h3image3" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -68,7 +68,7 @@
         <div class="ios-segment v2v-kind-switch motion-source-switch" id="motion-source" role="group">
           <button type="button" class="on" data-motion-source="video" aria-pressed="true" data-i18n="motion.sourceVideo" data-i18n-title="hint.v2v">H3 Video</button>
           <button type="button" data-motion-source="robot" aria-pressed="false" data-i18n="motion.sourceRobot" data-i18n-title="motion.robotHint">MotionBricks</button>
-          <button type="button" data-motion-source="sketch" aria-pressed="false" data-i18n="motion.sourceSketch" data-i18n-title="sketch.hint">Qwen Çizim</button>
+          <button type="button" data-motion-source="sketch" aria-pressed="false" data-i18n="motion.sourceSketch" data-i18n-title="sketch.hint">H3-Image Çizim</button>
         </div>
         <p class="muted mode-hint" id="scene-zone-sub">Tek video üretimi: yeni / devam / referans. Film için üstten <strong>Direktör</strong>.</p>
 
@@ -158,8 +158,7 @@
               </div>
               <div id="first-frame-generate-pane" class="hidden">
                 <textarea id="first-frame-prompt" class="frame-prompt" rows="2" data-i18n-placeholder="frame.promptPh" placeholder="Başlangıç karesini anlat…"></textarea>
-                <div class="ios-segment image-studio-quality"><button type="button" data-image-steps="20">Taslak · 20 step</button><button type="button" class="on" data-image-steps="30" data-i18n="ui.label0">Yüksek · 30 step</button></div>
-                <button type="button" class="chip frame-generate-btn" id="btn-first-frame-generate" data-i18n="frame.generateWithStudio">Image Studio ile üret</button>
+                <button type="button" class="chip frame-generate-btn" id="btn-first-frame-generate" data-i18n="frame.generateWithStudio">H3-Image ile üret</button>
                 <span id="first-frame-generate-status" class="frame-generate-status" aria-live="polite"></span>
               </div>
             </div>
@@ -201,9 +200,8 @@
         <div id="panel-mode-ref" class="hidden">
           <p class="muted mode-hint">Genel referans (Ref2VA): stil, sahne, obje, kıyafet… Video bu kareden <em>başlamaz</em> — I2V için Yeni video + İlk kare. Prompt’ta <code>&lt;Picture 1&gt;</code>.</p>
           <div class="image-studio-bridge">
-            <div class="ios-segment image-studio-quality"><button type="button" data-image-steps="20">Taslak · 20 step</button><button type="button" class="on" data-image-steps="30" data-i18n="ui.label0">Yüksek · 30 step</button></div>
-            <button type="button" class="chip" id="btn-image-studio-ref" data-i18n="imageStudio.generate">Image Studio ile görsel üret</button>
-            <span class="muted" id="image-studio-ref-status" data-i18n="imageStudio.hint">Qwen Image · görsel otomatik referanslara eklenir</span>
+            <button type="button" class="chip" id="btn-image-studio-ref" data-i18n="imageStudio.generate">H3-Image ile görsel üret</button>
+            <span class="muted" id="image-studio-ref-status" data-i18n="imageStudio.hint">H3-Image · görsel otomatik referanslara eklenir</span>
           </div>
           <label id="ref-images-label">Referans görseller (1–9)</label>
           <label class="file-pick">
@@ -226,11 +224,6 @@
               <span class="file-pick-btn" data-i18n="sketch.upload">Çizim yükle</span>
               <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
             </label>
-            <label data-i18n="sketch.method">Yorumlama</label>
-            <div class="chips" id="sk-method-chips" role="group" aria-label="Yorumlama" data-i18n-aria-label="sketch.method" data-i18n-title="sketch.methodHint">
-              <button type="button" class="chip on" data-sk-method="edit" aria-pressed="true" data-i18n="sketch.methodEdit">Görsel referans</button>
-              <button type="button" class="chip" data-sk-method="img2img" aria-pressed="false" data-i18n="sketch.methodImg2img">Çizgiden başlat</button>
-            </div>
             <p class="muted sk-method-note hidden" id="sk-method-note" role="status"></p>
             <label data-i18n="sketch.fidelity">Çizime bağlılık</label>
             <div class="chips" id="sk-fidelity-chips" role="group" aria-label="Çizime bağlılık" data-i18n-aria-label="sketch.fidelity" data-i18n-title="sketch.fidelityHint">
@@ -1057,11 +1050,11 @@
       <div class="cinema-workspace-toolbar">
         <div class="cinema-workspace-tools">
         <button type="button" class="cinema-library-heading" id="btn-cinema-library-toggle" aria-pressed="false" aria-controls="cinema-asset-stack"><span id="cinema-library-toggle-label" data-i18n="ui.cinema-library-toggle-label">Kütüphane</span><span class="cinema-library-chevron" aria-hidden="true">▾</span></button>
-        <div class="cinema-image-provider cinema-asset-method cinema-asset-method-compact" role="group" aria-labelledby="cinema-image-provider-label">
-          <span id="cinema-image-provider-label" data-i18n="cinema.imageProvider">Asset üretim yöntemi</span>
+        <div class="cinema-image-provider" role="group" aria-labelledby="cinema-image-provider-label">
+          <span id="cinema-image-provider-label" data-i18n="cinema.imageProvider">Görsel üretim yöntemi</span>
           <div class="ios-segment" id="cinema-image-provider">
-            <button type="button" class="on" data-image-provider="minimax" aria-pressed="true">H3</button>
-            <button type="button" data-image-provider="image_studio" aria-pressed="false">Qwen</button>
+            <button type="button" data-image-provider="minimax" aria-pressed="false">H3 Studio</button>
+            <button type="button" class="on" data-image-provider="image_studio" aria-pressed="true">H3-Image</button>
           </div>
           <span class="muted" id="cinema-image-provider-status" aria-live="polite"></span>
         </div>
@@ -1104,7 +1097,7 @@
                 <div id="cinema-char-library" class="cinema-library-list"></div>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="character" data-asset-panel="create">
-                <p class="muted mode-hint" id="cinema-char-create-hint" data-i18n="ui.cinema-char-create-hint">Ayarlar ön ayarına göre · isteğe bağlı yüz fotoğrafı · son kare still · video silinir. Bittince otomatik kütüphaneye kaydolur.</p>
+                <p class="muted mode-hint" id="cinema-char-create-hint" data-i18n="ui.cinema-char-create-hint">Seçilen yöntemle üretilir (H3 Studio veya H3-Image) · isteğe bağlı yüz fotoğrafı · bitince otomatik kütüphaneye kaydolur.</p>
                 <label class="cinema-field-label" id="cinema-char-create-name-label" data-i18n="ui.cinema-char-create-name-label">Karakter adı</label>
                 <input type="text" id="cinema-char-create-name" placeholder="Ada" />
                 <label class="cinema-field-label" id="cinema-char-create-notes-label" data-i18n="ui.cinema-char-create-notes-label">Görünüm</label>
@@ -1150,7 +1143,7 @@
                 <div id="cinema-creature-library" class="cinema-library-list"></div>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="creature" data-asset-panel="create">
-                <p class="muted mode-hint" id="cinema-creature-create-hint">Her varlık adı + notuna göre benzersiz görünür; stok canavar varsayılmaz. Üç panelde tanımdaki form korunur.</p>
+                <p class="muted mode-hint" id="cinema-creature-create-hint">Her varlık adı + notuna göre benzersiz görünür; stok canavar varsayılmaz. Görünüşlerde tanımdaki form korunur.</p>
                 <label class="cinema-field-label" id="cinema-creature-create-name-label">Varlık adı</label>
                 <input type="text" id="cinema-creature-create-name" placeholder="The Shape" />
                 <label class="cinema-field-label" id="cinema-creature-create-notes-label">Görünüm / davranış</label>
@@ -1196,7 +1189,7 @@
                 <div id="cinema-vehicle-library" class="cinema-library-list"></div>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="vehicle" data-asset-panel="create">
-                <p class="muted mode-hint" id="cinema-vehicle-create-hint">Her araç adı + notuna göre benzersiz görünür; stok gemi/araba varsayılmaz. Üç panelde siluet ve malzeme korunur.</p>
+                <p class="muted mode-hint" id="cinema-vehicle-create-hint">Her araç adı + notuna göre benzersiz görünür; stok gemi/araba varsayılmaz. Görünüşlerde siluet ve malzeme korunur.</p>
                 <label class="cinema-field-label" id="cinema-vehicle-create-name-label">Araç adı</label>
                 <input type="text" id="cinema-vehicle-create-name" placeholder="Aurora Drift" />
                 <label class="cinema-field-label" id="cinema-vehicle-create-notes-label">Görünüm / siluet</label>
@@ -1242,7 +1235,7 @@
                 <div id="cinema-loc-library" class="cinema-library-list"></div>
               </div>
               <div class="cinema-asset-tab-panel hidden" data-asset-kind="location" data-asset-panel="create">
-                <p class="muted mode-hint" id="cinema-loc-create-hint" data-i18n="ui.cinema-loc-create-hint">Ön ayar · isteğe bağlı mekan foto · son kare still · video silinir · otomatik kütüphaneye kaydolur. Tek kare: bütün mekan bir görselde.</p>
+                <p class="muted mode-hint" id="cinema-loc-create-hint" data-i18n="ui.cinema-loc-create-hint">Seçilen yöntemle üretilir (H3 Studio veya H3-Image) · isteğe bağlı mekan fotoğrafı · otomatik kütüphaneye kaydolur.</p>
                 <label class="cinema-field-label" id="cinema-loc-create-name-label" data-i18n="ui.cinema-loc-create-name-label">Mekan adı</label>
                 <input type="text" id="cinema-loc-create-name" placeholder="Rooftop" />
                 <label class="cinema-field-label" id="cinema-loc-create-notes-label" data-i18n="ui.cinema-loc-create-notes-label">Tanım</label>
@@ -1666,7 +1659,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=langmenu2" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=h3image5" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182L" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
@@ -1674,7 +1667,7 @@
   <script src="/static/asset-references.js?v=4" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=explain3" charset="utf-8"></script>
+  <script src="/static/app.js?v=h3image4" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246L" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=8" charset="utf-8"></script>
@@ -1682,7 +1675,7 @@
 <script src="/static/h3-enhancements.js?v=4"></script>
   <script src="/static/video-workflows.js?v=15"></script>
   <script src="/static/video-labels.js?v=1"></script>
-  <script src="/static/motion-sketch.js?v=4"></script>
+  <script src="/static/motion-sketch.js?v=6"></script>
   <script src="/static/motion-robot.js?v=9"></script>
   <script src="/static/game-sprites.js?v=7"></script>
   <script src="/static/scene-selectors.js?v=4"></script>

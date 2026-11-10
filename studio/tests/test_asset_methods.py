@@ -4,19 +4,17 @@ from lib import qwen_still
 
 
 class AssetMethodTests(unittest.IsolatedAsyncioTestCase):
-    async def test_explicit_method_never_switches_when_a_reference_is_present(self):
+    async def test_h3_draws_from_a_video_and_other_methods_with_h3_image(self):
         import server
-        for method in ('h3', 'qwen', 'sheet'):
-            h3 = AsyncMock(return_value={'job':{'id':'test'}})
-            qwen = AsyncMock(return_value={'job':{'id':'test'}})
-            with patch.object(server.comfy, 'healthy', AsyncMock(return_value=True)), patch.object(server.cinema, 'load', return_value={}), patch.object(server, '_queue_cinema_sheet_job', h3), patch.object(server, '_queue_cinema_qwen_sheet_job', qwen):
-                await server.cinema_generate_sheet(server.CinemaSheetBody(name='Lara', ref_image='source.png', production_method=method, image_provider='image_studio'))
-            if method == 'qwen':
-                h3.assert_not_called()
-                self.assertEqual(qwen.call_args.kwargs['ref_image'], 'source.png')
-            else:
-                qwen.assert_not_called()
-                self.assertEqual(h3.call_args.kwargs['sheet_method'], 'look_sheets' if method == 'sheet' else 'standard')
+        for method, provider, target in (('h3', 'image_studio', '_queue_cinema_sheet_job'),
+                                         (None, 'minimax', '_queue_cinema_sheet_job'),
+                                         ('qwen', 'minimax', '_queue_cinema_qwen_sheet_job'),
+                                         ('sheet', 'minimax', '_queue_cinema_qwen_sheet_job'),
+                                         (None, 'image_studio', '_queue_cinema_qwen_sheet_job')):
+            queue = AsyncMock(return_value={'job':{'id':'test'}})
+            with patch.object(server.comfy, 'healthy', AsyncMock(return_value=True)), patch.object(server, target, queue):
+                await server.cinema_generate_sheet(server.CinemaSheetBody(name='Lara', ref_image='source.png', production_method=method, image_provider=provider))
+            self.assertEqual(queue.call_args.kwargs['ref_image'], 'source.png', (method, provider))
 
     def test_qwen_edit_generates_separate_views_from_the_original_source(self):
         for kind, count in [('character',5), ('vehicle',4), ('location',4)]:

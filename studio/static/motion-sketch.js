@@ -1,7 +1,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const t = (key, args = {}) => Object.entries(args).reduce((s, [k, v]) => s.replace(`{${k}}`, v), window.t ? window.t(key) : key);
-  // Same canvases as the robot takes; the server pads to Qwen's own size for the aspect.
+  // Same canvases as the robot takes; the server pads to H3-Image's size for the aspect.
   const SIZES = { "16:9": [1280, 720], "9:16": [720, 1280], "1:1": [960, 960], "21:9": [1344, 576], "4:3": [1152, 864] };
   const COLORS = ["#111111", "#e53935", "#fb8c00", "#fdd835", "#43a047", "#1e88e5", "#8e24aa", "#6d4c41", "#f2b48c", "#9e9e9e"];
   const UNDO_LIMIT = 15;
@@ -65,7 +65,6 @@
   let tool = settings.tool === "eraser" ? "eraser" : "pen";
   let size = [4, 10, 24].includes(settings.size) ? settings.size : 10;
   let color = COLORS.includes(settings.color) ? settings.color : COLORS[0];
-  let method = settings.method === "img2img" ? "img2img" : "edit";
   let hasInk = false, drawing = null, aspectKey = "", editMissing = null, capsAt = 0, saveTimer = 0, touched = false;
   const history = createHistory(UNDO_LIMIT);
 
@@ -76,7 +75,7 @@
   const fidelity = () => document.querySelector("#sk-fidelity-chips .chip.on")?.dataset.skFidelity || "balanced";
 
   function saveSettings() {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ tool, size, color, method, fidelity: fidelity() })); } catch {}
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ tool, size, color, fidelity: fidelity() })); } catch {}
   }
 
   function paper(w, h) {
@@ -253,19 +252,12 @@
     document.querySelectorAll("#sk-fidelity-chips [data-sk-fidelity]").forEach((b) => b.classList.toggle("on", b.dataset.skFidelity === next));
   }
 
-  // Without the Edit model the drawing can only seed img2img; say so instead of hiding the choice.
+  // H3-Image always reads the drawing as Picture 1; the note names its missing files.
   function effectiveMethod() {
-    return editMissing?.length ? "img2img" : method;
+    return "edit";
   }
 
   function renderMethod() {
-    const current = effectiveMethod();
-    document.querySelectorAll("#sk-method-chips [data-sk-method]").forEach((b) => {
-      const on = b.dataset.skMethod === current;
-      b.classList.toggle("on", on);
-      b.setAttribute("aria-pressed", on ? "true" : "false");
-      if (b.dataset.skMethod === "edit") b.disabled = !!editMissing?.length;
-    });
     const note = $("sk-method-note");
     if (!note) return;
     note.textContent = editMissing?.length ? t("sketch.editMissingNote", { files: editMissing.join(", ") }) : "";
@@ -296,12 +288,6 @@
   }));
   document.querySelectorAll("#sk-fidelity-chips [data-sk-fidelity]").forEach((b) => b.addEventListener("click", () => {
     setFidelity(b.dataset.skFidelity);
-    saveSettings();
-  }));
-  document.querySelectorAll("#sk-method-chips [data-sk-method]").forEach((b) => b.addEventListener("click", () => {
-    if (b.disabled) return;
-    method = b.dataset.skMethod === "img2img" ? "img2img" : "edit";
-    renderMethod();
     saveSettings();
   }));
   $("sk-undo")?.addEventListener("click", () => {

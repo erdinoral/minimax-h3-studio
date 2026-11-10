@@ -52,6 +52,26 @@ class WorkflowContracts(unittest.TestCase):
         job['continuum_base_graph']['legacy']={'class_type':'SpectrumApplyMiniMaxH3','inputs':{'model':['6',0]}}
         with self.assertRaises(ValueError): continuum.build(job)
 
+    def test_progress_counts_continuum_sections_from_sampler_restarts(self):
+        import server
+        job=dict(continuum_run='r',continuum_prompts=['a']*12,steps=16)
+        for step in (1,8,16): server._track_continuum_chunk(job,step,16)
+        self.assertEqual((job['continuum_chunk'],job['continuum_chunk_total']),(1,12))
+        server._track_continuum_chunk(job,3,40)
+        server._track_continuum_chunk(job,1,16)
+        server._track_continuum_chunk(job,6,16)
+        self.assertEqual(job['continuum_chunk'],2)
+        extended=dict(continuum_run='r',continuum_prompts=['a']*12,steps=16,continuum_prefix_chunks=6)
+        server._track_continuum_chunk(extended,1,16)
+        self.assertEqual(extended['continuum_chunk'],7)
+        doubled=dict(continuum_run='r',continuum_prompts=['a']*12,steps=8)
+        for step in (1,16,1,5): server._track_continuum_chunk(doubled,step,16)
+        server._track_continuum_chunk(doubled,1,3)
+        self.assertEqual(doubled['continuum_chunk'],2)
+        single=dict(continuum_run='r',continuum_prompts=['a'],steps=16)
+        server._track_continuum_chunk(single,1,16)
+        self.assertNotIn('continuum_chunk',single)
+
     def test_extendable_continuum_skips_spectrum_and_saves_sections(self):
         job=dict(id='keep',prompt='Test',duration=5,width=864,height=480,steps=12,seed=7,
                  h3_models=DEFAULT_MODELS,continuum_run='keep',continuum_extendable=True)

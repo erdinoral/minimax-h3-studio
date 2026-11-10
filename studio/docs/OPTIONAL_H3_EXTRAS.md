@@ -32,8 +32,9 @@ is currently a separate ComfyUI workflow, not an automatic Studio toggle.
 
 ## Spectrum
 
-The launcher pins `806fe498d574a726fecb8818917f00a4b993fd77` (v0.2.29).
-No new installation is needed if this is already installed. Enabled settings
+The launcher pins `7df883bb2361b7884ad789e97effd1dc37c8963a` (v0.2.30), the
+first revision that matches ComfyUI 0.45's grid-based PDD head. Update moves
+existing installs to this revision. Enabled settings
 are not proof that forecasts executed: measure a matching run and inspect
 Spectrum diagnostics before claiming acceleration.
 

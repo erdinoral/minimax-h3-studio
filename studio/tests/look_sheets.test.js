@@ -12,6 +12,7 @@ test('selecting a reference only uploads and previews it; explicit generation qu
     fetch:async url => { requests.push(url); return {ok:true,json:async()=>({name:'source.png',url:'/api/refs/source.png'})}; },
     flushCinemaFields:()=>{}, renderCinemaAssetCards:()=>{},
     regenerateCinemaAsset:async (...args)=>{ queued.push(args); return generation; },
+    cinemaImageProductionMethod:()=>'qwen',
   };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('  function cinemaLookReferenceKey('), source.indexOf('  function cinemaCardHtml(')), context);
@@ -22,8 +23,8 @@ test('selecting a reference only uploads and previews it; explicit generation qu
   await context.produceCinemaLookSheet('character','ada',null);
   assert.equal(queued.length,1);
   assert.equal(queued[0][3].ref_image,'source.png');
-  assert.equal(queued[0][3].sheet_method,'look_sheets');
-  assert.equal(queued[0][3].production_method,'sheet');
+  assert.equal(queued[0][3].sheet_method,undefined);
+  assert.equal(queued[0][3].production_method,'qwen');
   resolveGeneration(true); await first;
   assert.equal(context.state.cinemaLookRefs['film:character:ada'],undefined);
 });
@@ -33,6 +34,7 @@ test('failed sheet generation keeps the staged reference available for retry', a
   const context = {
     state:{cinemaLookRefs:{'film:character:ada':ref}}, ensureCinema:()=>({film_id:'film'}),
     regenerateCinemaAsset:async ()=>false, flushCinemaFields:()=>{}, renderCinemaAssetCards:()=>{},
+    cinemaImageProductionMethod:()=>'qwen',
   };
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('  function cinemaLookReferenceKey('), source.indexOf('  function cinemaCardHtml(')), context);

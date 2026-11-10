@@ -77,7 +77,7 @@ class SketchApprovalTest(unittest.TestCase):
         self.assertEqual(job["sketch_frames"], ["/api/refs/h3_sketch_a.png"])
         self.assertNotIn("frame_name", job)
         self.assertEqual(job["sketch_args"]["text"], "a woman")
-        self.assertEqual(job["sketch_args"]["method"], "img2img")
+        self.assertEqual(job["sketch_args"]["method"], "edit")
         self.assertEqual(job["sketch_args"]["source"], "board.png")
 
     def test_regenerate_after_approval_adds_a_new_card(self):

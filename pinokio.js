@@ -17,6 +17,7 @@ module.exports = {
       "film-tools.js",
       "download/fl2va.js",
       "download/ref2va.js",
+      "download/h3-image.js",
       "download/lora.js",
       "download/lora-erosmax.js",
       "download/lora-turbo6.js",
@@ -47,6 +48,7 @@ module.exports = {
       fl2va: info.exists("app/models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors"),
       ref2va: info.exists("app/models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors"),
       encoder_int8: info.exists("app/models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors"),
+      h3image: info.exists("app/models/diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors") && info.exists("app/models/vae/minimax_h3_image_vae_fp16.safetensors"),
       lora: info.exists("app/models/loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy.safetensors"),
       loraErosmax: info.exists("app/models/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_10ErosMax_beta1_pruned_compat_v001_T8.safetensors"),
       loraTurbo6: info.exists("app/models/loras/minimax_h3_turbo_6step_ema_fl2va_pruned.safetensors"),
@@ -138,6 +140,14 @@ module.exports = {
           icon: "fa-solid fa-download",
           text: "Ref2VA — omni-reference (21.0GB)",
           href: "download/ref2va.js",
+          mode: "refresh"
+        })
+      }
+      if (!has.h3image) {
+        downloads.push({
+          icon: "fa-solid fa-download",
+          text: "H3-Image — draws all Studio still images (22.2GB)",
+          href: "download/h3-image.js",
           mode: "refresh"
         })
       }

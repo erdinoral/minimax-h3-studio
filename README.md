@@ -80,6 +80,8 @@ Default output is a 768-pixel short edge, but that is a default, not a limit —
 
 Plus ComfyUI and its virtualenv (~10 GB).
 
+Needed for every still image, from **Download Models → H3-Image** (22.2 GB): `minimax_h3_image_pruned_int8_convrot.safetensors` and `minimax_h3_image_vae_fp16.safetensors`. It draws Studio's still images and reuses the H3-Encoder above. See [Still images](#still-images-h3-image-only).
+
 ### Why these files and not the official ones
 
 The official release is BF16: a single variant is ~144 GB (66 GB transformer + 67 GB text encoder + 10 GB VAE), and both variants plus the diffusers copy total ~290 GB. That does not fit on a normal SSD, and the BF16 transformer alone does not fit in 32 GB of VRAM.
@@ -125,14 +127,14 @@ Studio never replaces Comfy. If Studio fails, use **Open ComfyUI** as before.
 ### Latest Studio update
 
 - **Scene workspace:** T2V, I2V, reference-video, continuation, selectable multi-LoRA, queue controls and final-frame continuation that follows the actual previous render.
-- **Image Studio workflow:** generate a start/reference image from a prompt or add a local image, then use it in video creation. Image and video results live together in Gallery.
+- **Reference stills:** generate a start/reference image from a prompt with H3-Image or add a local image, then use it in video creation. Image and video results live together in Gallery.
 - **Gallery:** separate Video / Photo view, larger previews, prompt details, individual and bulk deletion, plus player previous/next navigation.
 - **Director / Cinema:** production types for Film/Trailer, Music Video, Commercial, Intro and Outro; simplified content-first JSON import; character, location and scene bindings; continuous shot chains.
 - **Music video planning:** upload a song, add a visual concept and lyrics, create editable lyric timing notes, then prepare a visual clip plan. This assists visual planning; it is not automatic beat-sync or lip-sync.
 
 ### Shot review, reference excerpts and LoRA guidance
 
-Vehicle sheets use four full-vehicle views in a 2×2 grid: front, rear, right side and left side. Both MiniMax and Qwen split these into four separately named reference images. Existing vehicle images stay unchanged until the card is regenerated.
+Vehicle sheets use four full-vehicle views in a 2×2 grid: front, rear, right side and left side. H3-Image draws each as a separately named reference image. Existing vehicle images stay unchanged until the card is regenerated.
 
 **Scene → Asset references** selects individual stills from the active film's character, vehicle, creature and location cards. Refresh after switching films or changing cards. **Preview references** shows the exact ordered asset files and Picture numbers without generating a video. No selection uses names mentioned in the prompt; **No assets** explicitly disables that fallback. Scene selections are saved in this browser for the active film.
 
@@ -174,10 +176,47 @@ curl -X POST "$BASE_URL/api/loras/guidance" -H "Content-Type: application/json" 
   -d '{"file":"YOUR_LORA.safetensors","triggers":"trigger","guide":"Creator usage notes"}'
 ```
 
+### Still images: H3-Image, plus H3 Studio for Director cards
+
+Every still Studio draws uses **MiniMax-H3-Image** in Studio's own ComfyUI: a shot's opening frame, a frame with reference pictures, drawing → frame, and Scene's **Generate with H3-Image** reference and first/last-frame buttons. Qwen-Image and the separate Image Studio app are no longer used. Without the H3-Image files the request fails and names the files to download from **Download Models → H3-Image**.
+
+Director's **Image generation method** switch (saved per film) picks how character/creature/vehicle/location card images are made:
+
+- **H3 Studio** renders a silent 4 s / 20 step H3 clip, keeps its last frame as the card image (split into panels for characters, creatures and vehicles) and deletes the video. Real people tend to look more natural this way. A character reference photo is used as a face lock.
+- **H3-Image** (default) draws the card directly; with a reference photo it draws each view from it separately.
+
+Films saved with the older Look Sheets choice open on H3 Studio. In the API, `production_method` `"h3"` selects H3 Studio and `"qwen"` selects H3-Image on `POST /api/cinema/generate-sheet`.
+
+- H3-Image is distilled: 6 steps, cfg 1, no negative prompt; step counts sent by older clients are ignored. Studio renders at about 2048×2048 of area (16:9 is 2560×1440).
+- Reference pictures are named `<Picture 1>`…`<Picture 3>` in the prompt.
+- Reference views are drawn one at a time at full resolution; a 5-view character sheet took about 5 minutes on a 32 GB GPU.
+
+```bash
+# H3-Image availability and how many stills are rendering or waiting
+curl "$BASE_URL/api/image-studio/status"
+# Draw one reference still and add it to Scene's references
+curl -X POST "$BASE_URL/api/image-studio/reference" -H "Content-Type: application/json" \
+  -d '{"prompt":"An old fisherman on a harbour pier at dusk","aspect":"16:9"}'
+```
+
+```javascript
+const ref = await fetch(`${BASE_URL}/api/image-studio/reference`, {
+  method: 'POST', headers: {'Content-Type': 'application/json'},
+  body: JSON.stringify({prompt: 'An old fisherman on a harbour pier at dusk', aspect: '9:16'})
+}).then(r => r.json());
+// ref.name is the ComfyUI input name to pass as a reference image.
+```
+
+```python
+import httpx
+ref = httpx.post(f'{BASE_URL}/api/image-studio/reference',
+    json={'prompt': 'An old fisherman on a harbour pier at dusk', 'aspect': '16:9'}, timeout=1800).json()
+```
+
 ### Motion: drawing frames, robot takes and long Motion
 
-- **Draw → Create frame → approve → animate.** In **Motion → Qwen drawing**, draw or load a sketch and press **Create frame**. Qwen paints one still; nothing is sent to H3 yet. The **Frame approval** card previews it, lets you edit the description and **Create again**, and **Animate this frame** queues exactly one H3 I2V clip. Sending the approval twice returns the existing video job instead of a duplicate. A frame waiting for approval survives a Studio restart.
-- **Interpretation.** *Visual reference* conditions Qwen-Image-Edit on the drawing (`TextEncodeQwenImageEditPlus`) and asks it to keep the pose, number of people, placement and object contact while completing anatomy, faces and clothes. It needs `qwen_image_edit_2511_fp8mixed.safetensors` in ComfyUI's models; Studio never downloads it and shows the missing file instead. *Start from lines* is the earlier Qwen-Image 2512 img2img path: shapes stay where you drew them, but a stick figure may stay a stick figure. Neither path's visual quality is guaranteed; check the frame before animating.
+- **Draw → Create frame → approve → animate.** In **Motion → H3-Image drawing**, draw or load a sketch and press **Create frame**. H3-Image paints one still; nothing is sent to H3 yet. The **Frame approval** card previews it, lets you edit the description and **Create again**, and **Animate this frame** queues exactly one H3 I2V clip. Sending the approval twice returns the existing video job instead of a duplicate. A frame waiting for approval survives a Studio restart.
+- **Interpretation.** H3-Image reads the drawing as `<Picture 1>` and keeps the pose, number of people, placement and object contact while completing anatomy, faces and clothes. There is no img2img mode: at 6 distilled steps a partial denoise either keeps the strokes or moves the subjects. Visual quality is not guaranteed; check the frame before animating.
 - **Drafts and takes.** The drawing, its tool settings and an un-uploaded robot take are kept in the browser (IndexedDB). A failed robot upload offers **Upload again**, **Download take** (`.mjpeg`) and **Delete take**. Robot takes are encoded locally and no longer require ComfyUI to be open.
 - **Long Motion.** All parts of a long Motion Transfer show as one card with per-part progress, the failing part's error and the join state. **Resume from failed part** re-queues only failed parts; **Retry joining** re-runs just the join. Finished parts are not rendered again and one long job is joined at most once at a time.
 

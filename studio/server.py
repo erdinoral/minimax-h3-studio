@@ -56,6 +56,7 @@ from lib import lora_access
 from lib import model_storage
 from lib.lora_guidance import guidance, guidance_block, save_guidance
 from lib import qwen_still
+from lib import h3_image
 from lib.loras import (
     LORAS_DIR,
     apply_selected_triggers,
@@ -160,10 +161,6 @@ NOTIFY_SETTINGS_FILE = DATA / "notify_settings.json"
 PRODUCTION_FILE = DATA / "production.json"
 CINEMA_FILE = DATA / "cinema.json"
 STATIC = ROOT / "static"
-# Image Studio deliberately keeps its own ComfyUI process.  This bridge only
-# exchanges finished stills with it; the two backends must never render at once
-# on the same GPU.
-IMAGE_STUDIO_URL = os.getenv("H3_IMAGE_STUDIO_URL", "http://127.0.0.1:8790").rstrip("/")
 
 
 def _slug_clip(text: str, *, max_len: int = 36) -> str:
@@ -1426,7 +1423,7 @@ class GenerateBody(BaseModel):
 
 
 class ImageStudioReferenceBody(BaseModel):
-    """A small, intentionally limited surface for the optional local bridge."""
+    """One H3-Image reference still; steps and negative are accepted but unused (6-step distilled model)."""
 
     prompt: str = Field(..., min_length=1, max_length=6000)
     aspect: str = "16:9"
@@ -1446,15 +1443,15 @@ class MotionTransferLongBody(GenerateBody):
 
 
 class SketchVideoBody(GenerateBody):
-    """A hand drawing: Qwen paints a finished first frame; after approval H3 animates it (I2V)."""
+    """A hand drawing: H3-Image paints a finished first frame; after approval H3 animates it (I2V)."""
 
     sketch_name: str = Field(..., min_length=1)
-    # What the drawing shows, without the client's style lock (Qwen gets its own style line).
+    # What the drawing shows, without the client's style lock (H3-Image gets its own style line).
     sketch_text: str = Field("", max_length=2000)
     sketch_style: Optional[str] = None
     sketch_fidelity: str = "balanced"
-    # edit = drawing as a Qwen-Image-Edit reference; img2img = drawing as the starting latent.
-    sketch_method: str = "img2img"
+    # Accepted from older clients and ignored: the drawing is always H3-Image's Picture 1.
+    sketch_method: str = "edit"
 
 
 class BatchBody(BaseModel):
@@ -1534,7 +1531,8 @@ class CinemaProduceBody(BaseModel):
     prepare_sheets: bool = True
     # If true, queue sheets even when the card already has a still
     force_sheets: bool = False
-    image_provider: str = "minimax"
+    # Card stills: "image_studio" = H3-Image, "minimax" = last frame of a short H3 video.
+    image_provider: str = "image_studio"
     post_pass: Optional[str] = None
 
     @field_validator("seed", "steps", mode="before")
@@ -1565,7 +1563,8 @@ class CinemaSingleProduceBody(BaseModel):
     lora_strengths: dict[str, float] = Field(default_factory=dict)
     sage_attention: Optional[str] = "auto"
     post_pass: Optional[str] = None
-    image_provider: str = "minimax"
+    # Card stills: "image_studio" = H3-Image, "minimax" = last frame of a short H3 video.
+    image_provider: str = "image_studio"
 
 
 class StoryboardBody(BaseModel):
@@ -3063,7 +3062,8 @@ async def generate(body: GenerateBody):
                           'continuum_prompts':prompts, 'continuum_chunk_seconds':body.duration,
                           'continuum_resume':bool(parent and not native_parent),
                           'continuum_context':context, 'continuum_continuity':continuity_mode,
-                          'continuum_extendable':bool(body.continuum_extendable)}
+                          'continuum_extendable':bool(body.continuum_extendable),
+                          'continuum_prefix_chunks':len(previous)}
         if follow_video:
             continuum_data['continuum_ref_video'] = ref_videos[0]
         if parent:
@@ -3917,6 +3917,7 @@ _QUEUE_SAVE_DROP_KEYS = (
     "effective_lora_name", "effective_lora_strength", "effective_spectrum",
     "render_pause_requested", "render_paused", "render_control_token", "render_control_ready",
     "comfy_step", "comfy_step_max", "progress_source", "_ws_progress_at",
+    "continuum_chunk", "continuum_chunk_total", "_continuum_last_step", "_continuum_step_max",
     "cancel_requested_at", "cancel_source", "cancel_stage", "cancel_progress",
     "recovered_from_status", "_reattach", "queue_position",
 )
@@ -4087,115 +4088,58 @@ async def upload_ref(file: UploadFile = File(...)):
     return await _import_reference_bytes(await file.read(), file.filename or "ref.png")
 
 
+# Scene's quick reference stills; they run outside the job list, so status counts them here.
+_reference_stills: list[dict] = []
+
+
 @app.get("/api/image-studio/status")
 async def image_studio_status():
-    """Availability plus a privacy-safe summary of Image Studio's live queue."""
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(4.0, connect=2.0)) as client:
-            response = await client.get(f"{IMAGE_STUDIO_URL}/api/status")
-            response.raise_for_status()
-            data = response.json()
-            jobs_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs")
-            jobs = jobs_response.json() if jobs_response.is_success else []
-        active = [j for j in jobs if str(j.get("status") or "").lower() == "running"]
-        queued = [j for j in jobs if str(j.get("status") or "").lower() == "queued"]
-        return {
-            "available": bool(data.get("ok")),
-            "url": IMAGE_STUDIO_URL,
-            "running": len(active),
-            "queued": len(queued),
-            "progress_label": str(active[0].get("progress_label") or "") if active else "",
-        }
-    except Exception:
-        return {"available": False, "url": IMAGE_STUDIO_URL, "running": 0, "queued": 0}
+    """H3-Image availability plus the Studio stills rendering or waiting."""
+    missing = h3_image.missing_models(COMFY_ROOT)
+    stills = [j for j in [*_jobs, *_reference_stills]
+              if j.get("mode") in ("qwen_sheet", "qwen_frame", "sketch_frame", "image_reference")]
+    active = [j for j in stills if j.get("status") == "running"]
+    return {
+        "available": not missing and await comfy.healthy(),
+        "missing": missing,
+        "running": len(active),
+        "queued": sum(j.get("status") == "queued" for j in stills),
+        "progress_label": str(active[0].get("progress_label") or "") if active else "",
+    }
 
 
 @app.post("/api/image-studio/reference")
 async def create_image_studio_reference(body: ImageStudioReferenceBody):
-    """Generate one Qwen still locally, then add it as an H3 Ref2VA reference.
-
-    Image Studio owns a separate ComfyUI process.  Refuse overlap instead of
-    risking a VRAM crash on a single-GPU installation.
-    """
-    if _running or any(j.get("status") in ("queued", "running") for j in _jobs):
-        raise HTTPException(409, "The H3 render queue must be empty — Image Studio uses a separate ComfyUI on the same VRAM")
-    if await comfy.healthy():
-        await comfy.free_memory()
+    """Draw one H3-Image still in Studio's ComfyUI, then add it as an H3 Ref2VA reference."""
+    missing = h3_image.missing_models(COMFY_ROOT)
+    if missing:
+        raise _still_missing_error(missing)
+    if not await comfy.healthy():
+        raise HTTPException(503, "ComfyUI is not running — start it with Start in Pinokio")
     prompt = body.prompt.strip()
-    request_body = {
-        "prompt": prompt,
-        "aspect": body.aspect,
-        "steps": max(20, min(40, int(body.steps or 30))),
-        "mode": "txt2img",
-        "count": 1,
-        "negative": body.negative,
-    }
+    seed = uuid.uuid4().int % (2**32)
+    if body.source_image:
+        name = Path(body.source_image).name
+        source = next((p for p in (REFS / name, COMFY_INPUT / name) if p.is_file()), None)
+        if source is None:
+            raise HTTPException(400, "Source reference image not found")
+        reference = await comfy.upload_image(source, source.name)
+        graph = _build_still("build_storyboard_frame", prompt=f"A new image based on <Picture 1>: {prompt}",
+                             ref_images=[reference], aspect=body.aspect, seed=seed)
+    else:
+        graph = _build_still("build_graph", prompt=prompt, aspect=body.aspect, seed=seed, prefix="H3_Studio_Reference")
+    job = {"id": uuid.uuid4().hex, "mode": "image_reference", "status": "running"}
+    _reference_stills.append(job)
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=4.0)) as client:
-            health_response = await client.get(f"{IMAGE_STUDIO_URL}/api/status")
-            health_payload = health_response.json() if health_response.content else {}
-            if health_response.is_error or not health_payload.get("ok"):
-                raise HTTPException(503, "Image Studio or its own ComfyUI is not running")
-            image_comfy_url = str(health_payload.get("comfy_url") or "").rstrip("/")
-            if body.source_image:
-                source_name = Path(body.source_image).name
-                source_path = next((p for p in (REFS / source_name, COMFY_INPUT / source_name) if p.is_file()), None)
-                if not source_path:
-                    raise HTTPException(400, "Source reference image not found")
-                upload_response = await client.post(
-                    f"{IMAGE_STUDIO_URL}/api/upload",
-                    files={"file": (source_path.name, source_path.read_bytes(), "image/png")},
-                )
-                upload_payload = upload_response.json() if upload_response.content else {}
-                if upload_response.is_error:
-                    raise HTTPException(upload_response.status_code, str(upload_payload.get("detail") or "Image Studio could not upload the reference"))
-                request_body.update({"mode": "vary", "image": upload_payload.get("name") or "", "denoise": 0.55})
-            response = await client.post(f"{IMAGE_STUDIO_URL}/api/generate", json=request_body)
-            payload = response.json() if response.content else {}
-            if response.is_error:
-                raise HTTPException(response.status_code, str(payload.get("detail") or "The Image Studio render could not be started"))
-            image_job_id = str(payload.get("id") or "")
-            if not image_job_id:
-                raise HTTPException(502, "Image Studio did not return a valid job id")
-
-            # Image Studio exposes its own job progress, but the bridge returns
-            # only once there is a durable image that H3 can safely import.
-            deadline = time.monotonic() + (45 * 60)
-            while time.monotonic() < deadline:
-                await asyncio.sleep(1.5)
-                status_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs/{image_job_id}")
-                status_payload = status_response.json() if status_response.content else {}
-                if status_response.is_error:
-                    raise HTTPException(502, "The Image Studio job could not be read")
-                status = str(status_payload.get("status") or "").lower()
-                if status == "done" and status_payload.get("has_image"):
-                    image_response = await client.get(f"{IMAGE_STUDIO_URL}/api/jobs/{image_job_id}/image")
-                    if image_response.is_error or not image_response.content:
-                        raise HTTPException(502, "The Image Studio image could not be downloaded")
-                    # Qwen stays resident in Image Studio's separate ComfyUI by
-                    # default. Free it before the next H3 render needs the GPU.
-                    if image_comfy_url:
-                        try:
-                            await client.post(
-                                f"{image_comfy_url}/free",
-                                json={"unload_models": True, "free_memory": True},
-                                timeout=10.0,
-                            )
-                        except httpx.HTTPError:
-                            pass
-                    result = await _import_reference_bytes(
-                        image_response.content, f"image_studio_{image_job_id[:12]}.png"
-                    )
-                    _set_ref_prompt(result.get("filename") or "", prompt, "image-studio")
-                    result.update({"source": "image-studio", "image_studio_job_id": image_job_id})
-                    return result
-                if status in ("error", "cancelled", "canceled"):
-                    raise HTTPException(502, str(status_payload.get("error") or "The Image Studio render stopped"))
-    except HTTPException:
-        raise
-    except httpx.HTTPError as exc:
-        raise HTTPException(503, f"Image Studio is unreachable ({IMAGE_STUDIO_URL})") from exc
-    raise HTTPException(504, "The Image Studio image did not finish within 45 minutes")
+        still = await _run_qwen_still(job, graph, label=f"{h3_image.LABEL} is drawing the reference")
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    finally:
+        _reference_stills.remove(job)
+    result = await _import_reference_bytes(still.read_bytes(), f"h3_image_{job['id'][:12]}.png")
+    _set_ref_prompt(result.get("filename") or "", prompt, "h3-image")
+    result["source"] = "h3-image"
+    return result
 
 
 @app.post("/api/refs/upload-video")
@@ -5644,8 +5588,11 @@ class CinemaSheetBody(BaseModel):
     # Optional Comfy upload name(s) from /api/refs/upload
     ref_image: Optional[str] = None
     ref_images: Optional[list[str]] = None
-    image_provider: str = "minimax"
+    # Ignored when production_method is sent; "minimax" = H3 video still.
+    image_provider: str = "image_studio"
+    # Accepted from older clients and ignored: Look Sheets is no longer offered.
     sheet_method: str = "standard"
+    # "h3" = last frame of a short H3 video; "qwen" (and older "sheet") = H3-Image.
     production_method: Optional[str] = None
 
     @field_validator("ref_images", mode="before")
@@ -5806,43 +5753,44 @@ async def _maybe_attach_sheet_still(job: dict) -> None:
 
 @app.post("/api/cinema/generate-sheet")
 async def cinema_generate_sheet(body: CinemaSheetBody):
-    """Queue a silent H3 clip that renders a 3-panel character/location reference sheet."""
+    """Queue a card still: H3-Image, or the last frame of a short silent H3 video."""
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI is not running")
     try:
-        sheet_method = body.sheet_method
-        provider = body.image_provider
-        if body.production_method is not None:
-            if body.production_method not in ("h3", "qwen", "sheet"):
-                raise ValueError("Unknown asset production method")
-            sheet_method = "look_sheets" if body.production_method == "sheet" else "standard"
-            provider = "image_studio" if body.production_method == "qwen" else "minimax"
-        elif provider == "look_sheets":
-            sheet_method = "look_sheets"
-        if sheet_method == "standard" and provider == "image_studio":
-            return await _queue_cinema_qwen_sheet_job(
+        method = body.production_method
+        if method is None:
+            method = "h3" if body.image_provider in ("minimax", "look_sheets") else "qwen"
+        if method not in ("h3", "qwen", "sheet"):
+            raise ValueError("Unknown asset production method")
+        if method == "h3":
+            return await _queue_cinema_sheet_job(
                 kind=body.kind or "character", name=body.name, notes=body.notes or "",
-                asset_id=body.asset_id, quality=body.quality, steps=body.steps,
-                aspect=body.aspect or "16:9", style=body.style,
-                ref_image=body.ref_image or next(iter(body.ref_images or []), None),
+                asset_id=body.asset_id, quality=body.quality, aspect=body.aspect or "16:9",
+                style=body.style, seed=body.seed if body.seed is not None else -1,
+                ref_image=body.ref_image, ref_images=body.ref_images,
             )
-        return await _queue_cinema_sheet_job(
-            kind=body.kind or "character",
-            name=body.name,
-            notes=body.notes or "",
-            asset_id=body.asset_id,
-            duration=body.duration,
-            quality=body.quality,
-            steps=body.steps,
-            aspect=body.aspect or "16:9",
-            style=body.style,
-            seed=body.seed if body.seed is not None else -1,
-            ref_image=body.ref_image,
-            ref_images=body.ref_images,
-            sheet_method=sheet_method,
+        return await _queue_cinema_qwen_sheet_job(
+            kind=body.kind or "character", name=body.name, notes=body.notes or "",
+            asset_id=body.asset_id, quality=body.quality, steps=body.steps,
+            aspect=body.aspect or "16:9", style=body.style,
+            ref_image=body.ref_image or next(iter(body.ref_images or []), None),
         )
     except ValueError as e:
         raise HTTPException(400, str(e)[:300]) from e
+
+
+def _build_still(builder: str, **kwargs) -> dict:
+    """Every Studio still is drawn by H3-Image with whichever H3 text encoder is installed."""
+    return getattr(h3_image, builder)(clip_name=h3_image.text_encoder(COMFY_ROOT), **kwargs)
+
+
+def _still_missing(*, available_models=()) -> list[str]:
+    return h3_image.missing_models(COMFY_ROOT, available_models=available_models)
+
+
+def _still_missing_error(missing: list[str]) -> HTTPException:
+    return HTTPException(503, "H3 ComfyUI image models are missing: " + ", ".join(missing)
+                         + ". Download H3-Image from Pinokio's Download Models menu.")
 
 
 async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
@@ -5863,9 +5811,9 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(f"{comfy.base_url}/object_info/UNETLoader")
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
-    missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(kwargs.get("ref_image")), available_models=available)
+    missing = _still_missing(available_models=available)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
+        raise _still_missing_error(missing)
     job = {
         "id": uuid.uuid4().hex,
         "mode": "qwen_sheet",
@@ -5873,8 +5821,8 @@ async def _queue_cinema_qwen_sheet_job(**kwargs) -> dict[str, Any]:
         "film_id": str(cinema.load().get("film_id") or ""),
         "status": "queued",
         "progress": 0,
-        "progress_label": "Qwen image queued",
-        "prompt": f"Qwen image · {name}",
+        "progress_label": f"{h3_image.LABEL} image queued",
+        "prompt": f"{h3_image.LABEL} image · {name}",
         "created_at": time.time(),
         "image_provider": "image_studio",
         "sheet_kind": kind,
@@ -5899,7 +5847,7 @@ class CinemaShotFrameBody(BaseModel):
 
 @app.post("/api/cinema/shot-frame")
 async def cinema_shot_frame(body: CinemaShotFrameBody):
-    """Queue a Qwen storyboard frame for one Director shot (approve it to use as first frame)."""
+    """Queue a storyboard frame for one Director shot (approve it to use as first frame)."""
     lib = cinema.load()
     stored = next((s for s in lib.get("shots") or [] if str(s.get("id") or "") == body.shot_id), None) or {}
     shot = {**stored, **({"text": body.text} if body.text is not None else {}),
@@ -5912,9 +5860,9 @@ async def cinema_shot_frame(body: CinemaShotFrameBody):
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(f"{comfy.base_url}/object_info/UNETLoader")
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
-    missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(refs), available_models=available)
+    missing = _still_missing(available_models=available)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
+        raise _still_missing_error(missing)
     setup = lib.get("setup") or {}
     style = setup.get("style") if setup.get("style") not in (None, "", "auto") else "realistic"
     labels = setup.get("purpose") == "explainer"
@@ -5951,8 +5899,8 @@ async def _run_shot_frame(job: dict) -> None:
             refs.append(name)
         elif (REFS / name).is_file():
             refs.append(await comfy.upload_image(REFS / name, name))
-    graph = qwen_still.build_storyboard_frame(
-        prompt=str(args.get("prompt") or ""), negative=str(args.get("negative") or cinema.STORYBOARD_FRAME_NEGATIVE),
+    graph = _build_still(
+        "build_storyboard_frame", prompt=str(args.get("prompt") or ""), negative=str(args.get("negative") or cinema.STORYBOARD_FRAME_NEGATIVE),
         ref_images=refs, aspect=str(args.get("aspect") or "16:9"), steps=24,
         seed=uuid.uuid4().int % (2**32))
     source = await _run_qwen_still(job, graph)
@@ -5974,9 +5922,10 @@ async def _run_shot_frame(job: dict) -> None:
     slog.info_job(job, "shot frame ready", shot=str(job.get("frame_shot_id") or "")[:8])
 
 
-async def _run_qwen_still(job: dict, graph: dict, *, label: str = "Qwen is drawing the frame",
+async def _run_qwen_still(job: dict, graph: dict, *, label: str = "",
                           span: tuple[int, int] = (0, 100)) -> Optional[Path]:
-    """Queue (or reattach to) a one-image Qwen graph; return its output file, None if cancelled."""
+    """Queue (or reattach to) a one-image still graph; return its output file, None if cancelled."""
+    label = label or f"{h3_image.LABEL} is drawing the frame"
     prompt_id = str(job.get("prompt_id") or "") if job.get("_reattach") else ""
     job.pop("_reattach", None)
     if not prompt_id:
@@ -6005,25 +5954,25 @@ async def _run_qwen_still(job: dict, graph: dict, *, label: str = "Qwen is drawi
             await asyncio.sleep(1.5)
             history = (await comfy.history(prompt_id)).get(prompt_id) or {}
             if (history.get("status") or {}).get("status_str") == "error":
-                raise RuntimeError("The Qwen frame render failed in ComfyUI")
+                raise RuntimeError("The image render failed in ComfyUI")
             images = ((history.get("outputs") or {}).get("70") or {}).get("images") or []
             if images:
                 info = images[0]
                 candidate = (COMFY_OUTPUT / Path(str(info.get("subfolder") or "")) /
                              Path(str(info.get("filename") or "")).name).resolve()
                 if not candidate.is_relative_to(COMFY_OUTPUT.resolve()) or not candidate.is_file():
-                    raise RuntimeError("Qwen frame output not found")
+                    raise RuntimeError("Image output not found")
                 source = candidate
     finally:
         stop_ws.set()
         ws_task.cancel()
     if source is None:
-        raise RuntimeError("The Qwen frame render did not finish within 30 minutes")
+        raise RuntimeError("The image render did not finish within 30 minutes")
     return source
 
 
 async def _sketch_edit_missing() -> list[str]:
-    """Qwen-Edit files the drawing reference needs; Comfy's own UNET list counts (extra model paths)."""
+    """Files the drawing reference needs; Comfy's own UNET list counts (extra model paths)."""
     available = []
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -6031,42 +5980,32 @@ async def _sketch_edit_missing() -> list[str]:
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
     except Exception:
         available = []
-    return qwen_still.missing_models(COMFY_ROOT, edit=True, available_models=available)
+    return _still_missing(available_models=available)
 
 
 @app.get("/api/sketch/capabilities")
 async def sketch_capabilities():
-    edit_missing = await _sketch_edit_missing()
-    img_missing = qwen_still.missing_models(COMFY_ROOT)
-    return {"methods": {"edit": {"available": not edit_missing, "missing": edit_missing,
-                                 "model": qwen_still.EDIT_MODEL},
-                        "img2img": {"available": not img_missing, "missing": img_missing}},
-            "default": "edit" if not edit_missing else "img2img"}
+    missing = await _sketch_edit_missing()
+    return {"methods": {"edit": {"available": not missing, "missing": missing, "model": h3_image.EDIT_MODEL}},
+            "default": "edit"}
 
 
-async def _require_sketch_models(method_name: str) -> None:
-    if method_name == "edit":
-        missing = await _sketch_edit_missing()
-        if missing:
-            raise HTTPException(503, {
-                "code": "sketch.editMissing", "missing": missing,
-                "message": ("Interpreting with an image reference needs the Qwen Edit model, which was not found: " + ", ".join(missing)
-                            + ". Add the model to the ComfyUI models folder or choose 'Start from lines (img2img)'; "
-                              "that method does not guarantee turning a stick figure into a proper person."),
-            })
-        return
-    missing = qwen_still.missing_models(COMFY_ROOT)
+async def _require_sketch_models() -> None:
+    missing = await _sketch_edit_missing()
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
+        raise HTTPException(503, {
+            "code": "sketch.editMissing", "missing": missing,
+            "message": ("Drawing a frame needs H3-Image, which was not found: " + ", ".join(missing)
+                        + ". Download H3-Image from Pinokio's Download Models menu."),
+        })
 
 
-def _sketch_args(*, source: str, text: str, style: str, fidelity: str, method_name: str, aspect: str) -> dict:
+def _sketch_args(*, source: str, text: str, style: str, fidelity: str, aspect: str) -> dict:
+    """H3-Image always reads the drawing as Picture 1: at 6 distilled steps a partial
+    denoise either keeps the strokes or moves the subjects, so img2img is not offered."""
     style_line = style_craft_line(normalize_style(style)) if style else ""
-    method_name = sketch.method(method_name)
-    prompt = (sketch.edit_prompt(text, style_line, fidelity) if method_name == "edit"
-              else sketch.frame_prompt(text, style_line))
-    return {"source": source, "text": text, "style": style, "fidelity": fidelity, "method": method_name,
-            "prompt": prompt, "denoise": sketch.denoise(fidelity), "aspect": qwen_still.closest_aspect(aspect)}
+    return {"source": source, "text": text, "style": style, "fidelity": fidelity, "method": "edit",
+            "prompt": sketch.edit_prompt(text, style_line, fidelity), "aspect": qwen_still.closest_aspect(aspect)}
 
 
 def _sketch_title(text: str) -> str:
@@ -6076,7 +6015,7 @@ def _sketch_title(text: str) -> str:
 @app.post("/api/sketch/frame")
 @app.post("/api/sketch/video")
 async def sketch_frame(body: SketchVideoBody):
-    """Queue a drawing → Qwen still. The still waits for approval; only then H3 animates it."""
+    """Queue a drawing → H3-Image still. The still waits for approval; only then H3 animates it."""
     name = Path(body.sketch_name).name
     if name != body.sketch_name or not any((d / name).is_file() for d in (REFS, COMFY_INPUT)):
         raise HTTPException(400, "Drawing not found; send it again")
@@ -6084,8 +6023,7 @@ async def sketch_frame(body: SketchVideoBody):
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
         raise HTTPException(400, "quality must be 352, 480, 608, 736, 768, or 1088 (aliases: 720, 1080)")
-    method_name = sketch.method(body.sketch_method)
-    await _require_sketch_models(method_name)
+    await _require_sketch_models()
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI is not running — start it with Start in Pinokio")
     style = (body.sketch_style or "").strip()
@@ -6107,7 +6045,7 @@ async def sketch_frame(body: SketchVideoBody):
         "duration": body.duration,
         "sketch_state": "framing",
         "sketch_args": _sketch_args(source=name, text=text, style=style, fidelity=body.sketch_fidelity,
-                                    method_name=method_name, aspect=body.aspect),
+                                    aspect=body.aspect),
         "video_body": video,
     }
     async with _lock:
@@ -6181,14 +6119,12 @@ async def sketch_regenerate(job_id: str, body: SketchRegenerateBody):
             raise HTTPException(409, "The frame is already rendering")
         args = dict(job.get("sketch_args") or {})
     text = (body.sketch_text if body.sketch_text is not None else args.get("text") or "").strip()
-    method_name = sketch.method(body.sketch_method or args.get("method") or "img2img")
     fidelity = body.sketch_fidelity or args.get("fidelity") or "balanced"
-    await _require_sketch_models(method_name)
+    await _require_sketch_models()
     if not await comfy.healthy():
         raise HTTPException(503, "ComfyUI is not running — start it with Start in Pinokio")
     new_args = _sketch_args(source=str(args.get("source") or ""), text=text, style=str(args.get("style") or ""),
-                            fidelity=fidelity, method_name=method_name,
-                            aspect=str(args.get("aspect") or job.get("aspect") or "16:9"))
+                            fidelity=fidelity, aspect=str(args.get("aspect") or job.get("aspect") or "16:9"))
     async with _lock:
         if job.get("video_job_id"):
             # Approved stills feed a video; a retake becomes a new card next to it.
@@ -6216,64 +6152,27 @@ async def sketch_regenerate(job_id: str, body: SketchRegenerateBody):
 async def _run_sketch_frame(job: dict) -> None:
     args = job.get("sketch_args") or {}
     aspect = str(args.get("aspect") or "16:9")
-    width, height = qwen_still.SIZES[qwen_still.closest_aspect(aspect)]
+    width, height = h3_image.SIZES[qwen_still.closest_aspect(aspect)]
     seed = uuid.uuid4().int % (2**32)
-    prompt = str(args.get("prompt") or "")
-
-    def _graph(source_image: str, denoise: float, prefix: str) -> dict:
-        graph = qwen_still.build_graph(prompt=prompt, negative=sketch.NEGATIVE, aspect=aspect, steps=20,
-                                       seed=seed, source_image=source_image, prefix=prefix)
-        graph["50"]["inputs"]["denoise"] = denoise
-        return graph
-
-    if args.get("method") == "edit":
-        if job.get("_reattach"):
-            reference = f"h3_sketchref_{job['id'][:12]}.png"
-        else:
-            missing = await _sketch_edit_missing()
-            if missing:
-                raise RuntimeError("Qwen Edit model not found: " + ", ".join(missing)
-                                   + " — recreate it with 'Start from lines (img2img)'")
-            name = Path(str(args.get("source") or "")).name
-            source = next((d / name for d in (REFS, COMFY_INPUT) if name and (d / name).is_file()), None)
-            if source is None:
-                raise RuntimeError("Drawing file not found")
-            prepared = REFS / f"h3_sketchref_{job['id'][:12]}.png"
-            await asyncio.to_thread(sketch.prepare_reference, source, prepared, width, height)
-            reference = await comfy.upload_image(prepared, prepared.name)
-        job["sketch_stage"] = "edit"
-        still = await _run_qwen_still(
-            job, qwen_still.build_sketch_edit(prompt=prompt, negative=sketch.NEGATIVE, reference=reference,
-                                              aspect=aspect, steps=sketch.EDIT_STEPS, seed=seed),
-            label="Qwen is interpreting the drawing", span=(0, 100))
-        if still is None:
-            return
-        await _finish_sketch_frame(job, still)
-        return
-
-    if job.get("sketch_stage") != "refine":
-        if not job.get("_reattach"):
-            name = Path(str(args.get("source") or "")).name
-            source = next((d / name for d in (REFS, COMFY_INPUT) if name and (d / name).is_file()), None)
-            if source is None:
-                raise RuntimeError("Drawing file not found")
-            prepared = REFS / f"h3_sketchprep_{job['id'][:12]}.png"
-            await asyncio.to_thread(sketch.prepare, source, prepared, width, height, seed)
-            comfy_source = await comfy.upload_image(prepared, prepared.name)
-        else:
-            comfy_source = f"h3_sketchprep_{job['id'][:12]}.png"
-        job["sketch_stage"] = "layout"
-        layout = await _run_qwen_still(
-            job, _graph(comfy_source, float(args.get("denoise") or sketch.denoise("")), "H3_Studio_SketchLayout"),
-            label="Qwen is drawing the layout", span=(0, 50))
-        if layout is None:
-            return
-        job["sketch_layout_name"] = Path(await comfy.upload_image(layout, f"h3_sketchlayout_{job['id'][:12]}.png")).name
-        job["sketch_stage"] = "refine"
-        _save_jobs()
+    if job.get("_reattach"):
+        reference = f"h3_sketchref_{job['id'][:12]}.png"
+    else:
+        missing = await _sketch_edit_missing()
+        if missing:
+            raise RuntimeError("H3-Image not found: " + ", ".join(missing)
+                               + " — download it from Pinokio's Download Models menu")
+        name = Path(str(args.get("source") or "")).name
+        source = next((d / name for d in (REFS, COMFY_INPUT) if name and (d / name).is_file()), None)
+        if source is None:
+            raise RuntimeError("Drawing file not found")
+        prepared = REFS / f"h3_sketchref_{job['id'][:12]}.png"
+        await asyncio.to_thread(sketch.prepare_reference, source, prepared, width, height)
+        reference = await comfy.upload_image(prepared, prepared.name)
+    job["sketch_stage"] = "edit"
     still = await _run_qwen_still(
-        job, _graph(str(job.get("sketch_layout_name") or ""), sketch.REFINE, "H3_Studio_Sketch"),
-        label="Qwen is processing the frame", span=(50, 100))
+        job, _build_still("build_sketch_edit", prompt=str(args.get("prompt") or ""), negative=sketch.NEGATIVE,
+                          reference=reference, aspect=aspect, steps=sketch.EDIT_STEPS, seed=seed),
+        label=f"{h3_image.LABEL} is interpreting the drawing", span=(0, 100))
     if still is None:
         return
     await _finish_sketch_frame(job, still)
@@ -6302,7 +6201,7 @@ async def _generate_cinema_image_studio_sheet(
     style: Optional[str] = None, ref_image: Optional[str] = None,
     job: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Make a Qwen still in H3's own ComfyUI, then attach it to the Director card."""
+    """Make a still in H3's own ComfyUI, then attach it to the Director card."""
     kind, key = cinema.asset_kind_key(kind)
     name = (name or "").strip()
     if not name:
@@ -6322,11 +6221,12 @@ async def _generate_cinema_image_studio_sheet(
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(f"{comfy.base_url}/object_info/UNETLoader")
             available = response.json().get("UNETLoader", {}).get("input", {}).get("required", {}).get("unet_name", [[]])[0]
-    missing = qwen_still.missing_models(COMFY_ROOT, edit=bool(ref_image), available_models=available)
+    missing = _still_missing(available_models=available)
     if missing:
-        raise HTTPException(503, "H3 ComfyUI Qwen image models are missing: " + ", ".join(missing))
+        raise _still_missing_error(missing)
     if not await comfy.healthy():
         raise HTTPException(503, "H3 ComfyUI is not running")
+    model_label = h3_image.LABEL
     source_name = ""
     if ref_image:
         ref_name = Path(ref_image).name
@@ -6336,10 +6236,10 @@ async def _generate_cinema_image_studio_sheet(
         source_name = await comfy.upload_image(ref_path, f"h3_qwen_source_{uuid.uuid4().hex[:12]}.png")
     if source_name:
         w, h = resolve_size("9:16" if kind in ("character", "creature") else aspect, normalize_quality(quality))
-        graph = qwen_still.build_reference_views(kind=kind, notes=notes, style_line=style_line,
+        graph = _build_still("build_reference_views", kind=kind, notes=notes, style_line=style_line,
             source_image=source_name, steps=image_steps, seed=uuid.uuid4().int % (2**32), width=w, height=h)
     else:
-        graph = qwen_still.build_graph(prompt=prompt, negative=negative,
+        graph = _build_still("build_graph", prompt=prompt, negative=negative,
             aspect="16:9" if kind != "location" else aspect,
             steps=image_steps, seed=uuid.uuid4().int % (2**32))
     try:
@@ -6349,7 +6249,7 @@ async def _generate_cinema_image_studio_sheet(
         if job:
             job["prompt_id"] = prompt_id
             job["progress"] = 1
-            job["progress_label"] = "Qwen is running in ComfyUI"
+            job["progress_label"] = f"{model_label} is running in ComfyUI"
             _save_jobs()
         deadline = time.monotonic() + 45 * 60
         source = None
@@ -6367,7 +6267,7 @@ async def _generate_cinema_image_studio_sheet(
                     view_progress["last_step"] = step
                     pct = 100 * (view_progress["completed"] + step / max(1, meta.get("comfy_step_max", image_steps))) / count
                     job["progress"] = max(1, min(99, int(pct)))
-                    job["progress_label"] = f"Qwen Edit · view {view_progress['completed'] + 1}/{count} · {label}"
+                    job["progress_label"] = f"{model_label} · view {view_progress['completed'] + 1}/{count} · {label}"
             else:
                 job["progress"] = max(1, min(99, int(pct)))
                 job["progress_label"] = label
@@ -6379,12 +6279,12 @@ async def _generate_cinema_image_studio_sheet(
         try:
             while time.monotonic() < deadline:
                 if job and job.get("status") == "cancelled":
-                    raise HTTPException(409, "The Qwen image render was stopped")
+                    raise HTTPException(409, "The image render was stopped")
                 await asyncio.sleep(1.5)
                 history = (await comfy.history(prompt_id)).get(prompt_id) or {}
                 status = history.get("status") or {}
                 if status.get("status_str") == "error":
-                    raise HTTPException(502, "The Qwen image render failed in ComfyUI")
+                    raise HTTPException(502, "The image render failed in ComfyUI")
                 outputs = history.get("outputs") or {}
                 images = (outputs.get("70") or {}).get("images") or []
                 if source_name:
@@ -6397,7 +6297,7 @@ async def _generate_cinema_image_studio_sheet(
                     subfolder = Path(str(info.get("subfolder") or ""))
                     candidate = (COMFY_OUTPUT / subfolder / filename).resolve()
                     if not candidate.is_relative_to(COMFY_OUTPUT.resolve()) or not candidate.is_file():
-                        raise HTTPException(502, "Qwen image output not found")
+                        raise HTTPException(502, "Image output not found")
                     source = candidate
                     break
         finally:
@@ -6405,11 +6305,11 @@ async def _generate_cinema_image_studio_sheet(
             if ws_task is not None:
                 ws_task.cancel()
         if source is None:
-            raise HTTPException(504, "The Qwen image render did not finish within 45 minutes")
+            raise HTTPException(504, "The image render did not finish within 45 minutes")
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(502, f"H3 ComfyUI Qwen render failed: {exc}") from exc
+        raise HTTPException(502, f"H3 ComfyUI image render failed: {exc}") from exc
     REFS.mkdir(parents=True, exist_ok=True)
     sheet_source = REFS / f"h3_sheet_{uuid.uuid4().hex[:12]}.png"
     shutil.copy2(source, sheet_source)
@@ -6430,11 +6330,11 @@ async def _generate_cinema_image_studio_sheet(
     if sheet_source not in paths:
         _unlink_retry(sheet_source)
     if job and job.get("film_id") and str(job["film_id"]) != str(cinema.load().get("film_id") or ""):
-        raise HTTPException(409, "Film changed during Qwen generation")
+        raise HTTPException(409, "Film changed during image generation")
     if asset_id:
         previous = next((a for a in cinema.load().get(key, []) if str(a.get("id")) == str(asset_id)), None)
         if previous is None:
-            raise HTTPException(404, "Asset was deleted during Qwen generation")
+            raise HTTPException(404, "Asset was deleted during image generation")
     old_images = list((previous or {}).get("images") or [])
     auto_only = not old_images or all(
         str((x.get("file") if isinstance(x, dict) else x) or "").startswith("h3_sheet_")
@@ -6457,17 +6357,14 @@ async def _queue_cinema_sheet_job(
     name: str,
     notes: str = "",
     asset_id: Optional[str] = None,
-    duration: int = 5,
     quality: str = "736",
-    steps: int = 18,
     aspect: str = "16:9",
     style: Optional[str] = None,
     seed: int = -1,
     ref_image: Optional[str] = None,
     ref_images: Optional[list[str]] = None,
-    sheet_method: str = "standard",
 ) -> dict[str, Any]:
-    """Shared sheet queue used by Generate visual + JSON import."""
+    """Queue a silent 4 s H3 clip whose last frame becomes the card still; the video is deleted."""
     kind_raw = str(kind or "character").lower()
     kind, _ = cinema.asset_kind_key(kind_raw)
     name = (name or "").strip()
@@ -6488,22 +6385,6 @@ async def _queue_cinema_sheet_job(
         refs.insert(0, one)
     refs = refs[:3]
     has_ref = bool(refs)
-    if sheet_method not in ("standard", "look_sheets"):
-        raise ValueError("Unknown sheet method")
-    if sheet_method == "look_sheets":
-        if not refs:
-            raise ValueError("Look Sheets requires a source reference image")
-        if len(refs) > 2 or (len(refs) == 2 and kind != "character"):
-            raise ValueError("Use one source reference, plus an optional clothing reference for characters")
-        for filename in refs:
-            if Path(filename).name != filename or not any((root / filename).is_file() for root in (REFS, COMFY_INPUT)):
-                raise ValueError("Source reference image is missing")
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for node in look_sheets.REQUIRED_NODES:
-                response = await client.get(f"{comfy.base_url}/object_info/{node}")
-                response.raise_for_status()
-                if node not in response.json():
-                    raise ValueError("Install Film Tools in Pinokio and restart ComfyUI to use H3 Look Sheets")
     prompt = cinema.sheet_prompt_for_kind(
         kind, name, notes, style_line=style_line, has_ref=has_ref,
     )
@@ -6512,17 +6393,11 @@ async def _queue_cinema_sheet_job(
          if asset_id and str(x.get("id") or "") == str(asset_id)),
         None,
     )
-    if sheet_method == "look_sheets":
-        old = list((previous_asset or {}).get("images") or [])
-        manual = [im for im in old if not str((im.get("file") if isinstance(im, dict) else im) or "").startswith("h3_sheet_")]
-        if manual and len(old) + look_sheets.view_count(kind) > cinema.MAX_ASSET_IMAGES:
-            raise ValueError("Not enough image slots for Look Sheets; remove existing card images first")
-        prompt = look_sheets.prompt(kind, notes, style_line, outfit=len(refs) == 2)
     asset_payload: dict[str, Any] = {
         **(previous_asset or {}),
         "name": name,
         "notes": notes,
-        "sheet_method": sheet_method,
+        "sheet_method": "standard",
     }
     if asset_id:
         asset_payload["id"] = asset_id
@@ -6533,7 +6408,6 @@ async def _queue_cinema_sheet_job(
     # Minimax asset capture uses one predictable draft preset regardless of the
     # active Director video-step control; only the final still is retained.
     steps_n = 20
-    dur = int(duration) if duration and int(duration) > 0 else 5
     # An asset only needs a representative final still. Four seconds is the
     # shortest native H3 video render supported by the temporal frame grid.
     dur = 4
@@ -6552,12 +6426,12 @@ async def _queue_cinema_sheet_job(
         "sheet_spectrum_full": True,
     }
     still = still_catalog_spec()
-    if sheet_method == "standard" and still and spec_ready(still):
+    if still and spec_ready(still):
         gen_kwargs["lora_id"] = still.get("id") or ""
         gen_kwargs["lora_name"] = still.get("file") or ""
         gen_kwargs["lora_strength"] = still.get("strength") or 1.0
     if has_ref:
-        if kind == "character" and sheet_method == "standard":
+        if kind == "character":
             gen_kwargs["mode"] = "face"
             gen_kwargs["ref_images"] = refs
             gen_kwargs["ref_image_size"] = "max"
@@ -6574,7 +6448,7 @@ async def _queue_cinema_sheet_job(
         if str(j.get("id")) == jid:
             j["sheet_asset_id"] = asset.get("id")
             j["sheet_kind"] = kind
-            j["sheet_method"] = sheet_method
+            j["sheet_method"] = "standard"
             j["sheet_name"] = name
             j["sheet_ephemeral"] = True
             j["sheet_has_ref"] = has_ref
@@ -6749,8 +6623,7 @@ async def _queue_sheets_for_cinema(
                     steps=steps,
                     style=style,
                     ref_image=asset.get("source_ref") or None,
-                    production_method="sheet" if cine.get("image_provider") == "look_sheets" else (
-                        "qwen" if cine.get("image_provider") == "image_studio" else "h3"),
+                    production_method="h3" if cine.get("image_provider") in ("minimax", "look_sheets") else "qwen",
                 ))
                 queued.append(
                     {
@@ -7182,37 +7055,11 @@ async def cinema_produce(body: CinemaProduceBody):
         lib0["quality"] = normalize_quality(body.quality)
         lib0["steps"] = body.steps if body.steps and body.steps > 0 else 20
         cinema.save(lib0)
-        if body.image_provider == "image_studio":
-            source = cinema.load()
-            setup = source.get("setup") or {}
-            style = setup.get("style") if setup.get("style") not in (None, "", "auto") else None
-            mentioned = _mentioned_sheet_names(source)
-            sheets = []
-            for kind, key in (("character", "characters"), ("creature", "creatures"), ("vehicle", "vehicles"), ("location", "locations")):
-                allow = {_norm_asset_name(x) for x in (mentioned.get(kind) or [])}
-                for asset in source.get(key) or []:
-                    if not isinstance(asset, dict):
-                        continue
-                    if allow and not _sheet_name_allow(kind, asset, {kind: list(allow)}):
-                        continue
-                    if not allow and not body.force_sheets:
-                        # No call-list hits — only force regenerates everything
-                        continue
-                    if not _asset_needs_sheet(asset, force=bool(body.force_sheets)):
-                        continue
-                    result = await _queue_cinema_qwen_sheet_job(
-                        kind=kind, name=str(asset.get("name") or ""),
-                        notes=str(asset.get("notes") or ""), asset_id=asset.get("id"),
-                        quality=body.quality, steps=body.steps, aspect=body.aspect,
-                        style=style,
-                    )
-                    sheets.append({"kind": kind, "name": asset.get("name"), "job_id": (result.get("job") or {}).get("id")})
-        else:
-            sheets = await _queue_sheets_for_cinema(
-                cinema.load(),
-                force=bool(body.force_sheets),
-                mentioned_only=not bool(body.force_sheets),
-            )
+        sheets = await _queue_sheets_for_cinema(
+            {**cinema.load(), "image_provider": body.image_provider},
+            force=bool(body.force_sheets),
+            mentioned_only=not bool(body.force_sheets),
+        )
         if sheets:
             lib0 = cinema.load()
             payload = body.model_dump()
@@ -10336,6 +10183,23 @@ def _queue_has_prompt(pid: str, items: list) -> bool:
     return False
 
 
+def _track_continuum_chunk(job: dict, step: int, step_max: int) -> None:
+    """Count Continuum sections from sampler restarts; saved prefix sections are not resampled."""
+    total = len(job.get("continuum_prompts") or []) if job.get("continuum_run") else 0
+    if total < 2 or step_max < int(job.get("steps") or 1):
+        return
+    # Some samplers report more ticks than steps (8 steps → 16); lock onto the first sampler run.
+    locked = job.setdefault("_continuum_step_max", step_max)
+    if step_max != locked:
+        return
+    last = job.get("_continuum_last_step")
+    if last is None or step < last:
+        current = job.get("continuum_chunk") or int(job.get("continuum_prefix_chunks") or 0)
+        job["continuum_chunk"] = min(total, int(current) + 1)
+    job["_continuum_last_step"] = step
+    job["continuum_chunk_total"] = total
+
+
 async def _run_job(job: dict):
     # Keep future repeats independent of subsequent global acceleration changes.
     job.setdefault('acceleration_settings', h3_acceleration.load_settings())
@@ -10365,7 +10229,7 @@ async def _run_job_impl(job: dict):
     if job.get("mode") == "qwen_sheet":
         job["status"] = "running"
         job["started_at"] = time.time()
-        job["progress_label"] = "Preparing Qwen image"
+        job["progress_label"] = "Preparing image"
         _save_jobs()
         await _free_llm_for_production()
         result = await _generate_cinema_image_studio_sheet(**(job.get("qwen_sheet_args") or {}), job=job)
@@ -10709,6 +10573,8 @@ async def _run_job_impl(job: dict):
     stop_ws = asyncio.Event()
     saw_running = False
     absent_ticks = 0
+    for key in ("continuum_chunk", "_continuum_last_step", "_continuum_step_max"):
+        job.pop(key, None)
 
     async def _on_prog(pct: int, label: str, meta: Optional[dict] = None):
         """Comfy WS progress — always win over soft/fake %."""
@@ -10722,6 +10588,8 @@ async def _run_job_impl(job: dict):
             job["comfy_step"] = int(meta["comfy_step"])
         if meta.get("comfy_step_max") is not None:
             job["comfy_step_max"] = int(meta["comfy_step_max"])
+        if meta.get("comfy_step") is not None:
+            _track_continuum_chunk(job, int(meta["comfy_step"]), int(meta.get("comfy_step_max") or 0))
         if meta.get("source"):
             job["progress_source"] = meta["source"]
         _save_jobs_throttled(0.8)

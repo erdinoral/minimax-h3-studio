@@ -76,7 +76,7 @@ test('Produce all queues both chapters; chapter production queues only its chapt
     },
     tt: String, tf: String, toast: x => errors.push(x),
     setProdLane: noop, refreshJobs: async () => {},
-    stopImageStudioQueuePoll: noop, waitForDraftLora: async () => {},
+    stopImageStudioQueuePoll: noop, startImageStudioQueuePoll: noop, waitForDraftLora: async () => {},
     confirmCinemaLint: async () => true,
   };
   vm.createContext(context);

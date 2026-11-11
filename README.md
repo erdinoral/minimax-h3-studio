@@ -702,13 +702,25 @@ The private toolkit is required because `torch/utils/cpp_extension.py` **raises*
 
 | Item | Effect |
 |---|---|
-| **Start** | Launch ComfyUI |
+| **Start** | Launch ComfyUI and H3 Studio |
 | **Download Models** | Fetch any variant not currently on disk |
 | **Manage Disk Space** | Delete either transformer independently (21 GB each), re-downloadable later |
-| **Update** | `git pull` ComfyUI + Manager, reinstall deps, restore cu130 torch |
+| **Update** | Pull the latest launcher and Studio, then sync the backend: `git pull` ComfyUI + custom nodes, apply the pinned node versions, reinstall ComfyUI and Studio packages, restore cu130 torch |
+| **Switch version** | Move to an earlier release (or back to the latest) and sync the backend for it |
+| **Auto-update on Start** | Off by default. When On, Start pulls launcher updates before launching |
 | **Reset** | Delete ComfyUI and its venv. **Weights are kept** — they live on a Pinokio virtual drive, so a reset does not re-download 63 GB |
 
 Weights are stored on a virtual drive under `PINOKIO_HOME/drive/drives/peers/`, linked into `app/models/`. Any peer ComfyUI install shares the same files rather than duplicating them.
+
+### Updates and earlier versions
+
+Start does not change the installed version unless **Auto-update on Start** is switched on, so a working setup stays as it is until you choose **Update**.
+
+New code never runs on an old backend. Whenever the scripts that pin ComfyUI, custom nodes or packages changed since the last sync (after an update, a version switch, Pinokio's own version switch or an auto-update), Start runs the backend sync once before launching. A Studio-only change starts right away.
+
+**Switch version** lists releases from v9.4 on (the first one that includes the switcher) and keeps `studio/data` (films, gallery, settings) and the downloaded models. ComfyUI itself is not pinned, so an earlier release still runs on the newest ComfyUI. **Update** returns to the latest version.
+
+Moving Pinokio to another drive: copy or reinstall, then copy `studio/data` into the new install. Each install only changes its own folder.
 
 ---
 

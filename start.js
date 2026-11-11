@@ -4,10 +4,11 @@ module.exports = {
   },
   daemon: true,
   run: [
-    // 0) Lightweight launcher sync — Studio/UI scripts only (~1s when already current).
-    //    Does NOT pull ComfyUI / custom nodes / pip (use Update for that).
+    // 0) Optional launcher pull — only when "Auto-update on Start" is switched on
+    //    (the .auto-update file). Off by default so a working version stays put.
     //    Soft-fail if offline or local git changes block ff-only.
     {
+      when: "{{exists('.auto-update')}}",
       method: "shell.run",
       params: {
         shell: "{{which('bash')}}",
@@ -16,6 +17,25 @@ module.exports = {
           // "untracked files would be overwritten" so local work cannot block launch.
           "git pull --ff-only >.git/h3-pull.log 2>&1 || echo '[H3 Studio] launcher update check skipped (offline or local changes — use Update if needed)'"
         ]
+      }
+    },
+    // 0b) New code must not run on an old backend: if the scripts that pin ComfyUI,
+    //     custom nodes or packages changed since the last sync (or a sync never
+    //     ran here), sync first. Otherwise just record the current commit.
+    {
+      method: "shell.run",
+      params: {
+        shell: "{{which('bash')}}",
+        message: [
+          "head=$(git rev-parse HEAD); synced=$(cat .h3-synced 2>/dev/null); if [ \"$head\" != \"$synced\" ]; then if [ -n \"$synced\" ] && git diff --quiet \"$synced\" \"$head\" -- install.js update.js sync.js film-tools.js torch.js workflows.js studio/requirements.txt 2>/dev/null; then echo \"$head\" > .h3-synced; else touch .h3-sync-needed; fi; fi"
+        ]
+      }
+    },
+    {
+      when: "{{exists('.h3-sync-needed')}}",
+      method: "script.start",
+      params: {
+        uri: "sync.js"
       }
     },
     // 1) ComfyUI backend only — no browser auto-launch. Lives only while start.js runs;

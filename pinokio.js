@@ -9,8 +9,11 @@ module.exports = {
       install: info.running("install.js"),
       start: info.running("start.js"),
       update: info.running("update.js"),
+      version: info.running("version.js"),
+      sync: info.running("sync.js"),
       reset: info.running("reset.js")
     }
+    let autoUpdate = info.exists(".auto-update")
     let downloading = [
       "download/shared.js",
       "download/film-loras.js",
@@ -115,6 +118,20 @@ module.exports = {
           icon: "fa-solid fa-terminal",
           text: "Updating",
           href: "update.js",
+        }]
+      } else if (running.version) {
+        return [{
+          default: true,
+          icon: "fa-solid fa-terminal",
+          text: "Switching version",
+          href: "version.js",
+        }]
+      } else if (running.sync) {
+        return [{
+          default: true,
+          icon: "fa-solid fa-terminal",
+          text: "Syncing backend",
+          href: "sync.js",
         }]
       } else if (running.reset) {
         return [{
@@ -319,6 +336,18 @@ module.exports = {
         icon: "fa-solid fa-plug",
         text: "Update",
         href: "update.js",
+      }, {
+        icon: "fa-solid fa-code-branch",
+        text: "Switch version",
+        href: "version.js",
+      }, {
+        icon: autoUpdate ? "fa-solid fa-toggle-on" : "fa-solid fa-toggle-off",
+        text: `Auto-update on Start: ${autoUpdate ? "On" : "Off"}`,
+        href: "auto-update.js",
+        params: {
+          enable: !autoUpdate
+        },
+        mode: "refresh"
       }, {
         icon: "fa-solid fa-plug",
         text: "Install",

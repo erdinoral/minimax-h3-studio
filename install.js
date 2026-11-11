@@ -171,6 +171,14 @@ module.exports = {
         ]
       }
     },
-    { method: "script.start", params: { uri: "film-tools.js" } }
+    { method: "script.start", params: { uri: "film-tools.js" } },
+    // Start compares against this to know the backend already matches the code.
+    {
+      method: "shell.run",
+      params: {
+        shell: "{{which('bash')}}",
+        message: "git rev-parse HEAD > .h3-synced"
+      }
+    }
   ]
 }

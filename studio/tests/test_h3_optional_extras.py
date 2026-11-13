@@ -4,23 +4,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib import h3_enhancements, h3_models, flow_refine
+from lib import h3_enhancements, h3_models
 
 
 class OptionalExtrasTests(unittest.TestCase):
-    def test_flow_bypasses_spectrum_without_dropping_lora_or_changing_ordinary_graph(self):
-        original = {
-            'lora': {'class_type':'LoraLoaderModelOnly','inputs':{'model':['base',0]}},
-            'spectrum': {'class_type':'SpectrumApplyMiniMaxH3','inputs':{'model':['lora',0]}},
-            '16': {'class_type':'BasicGuider','inputs':{'model':['spectrum',0]}},
-            '9': {'class_type':'BasicScheduler','inputs':{'model':['spectrum',0]}},
-        }
-        graph = flow_refine.without_spectrum(copy.deepcopy(original))
-        self.assertNotIn('spectrum', graph)
-        self.assertEqual(graph['16']['inputs']['model'], ['lora',0])
-        self.assertEqual(graph['9']['inputs']['model'], ['lora',0])
-        self.assertIn('spectrum', original)
-
     def graph(self):
         return {
             'encode': {'class_type': 'MiniMaxH3ReferenceToVideo', 'inputs': {'vae': ['base', 0]}},

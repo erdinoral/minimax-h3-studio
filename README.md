@@ -20,7 +20,7 @@ Director references now use fixed Continuum slots, new reference preprocessing d
 
 ## 9.3.0 — Experimental video workflows and sponsors
 
-Continuum and H3 Refine are available as experimental options, alongside the detailed Scene/Director guide and an intermittent sponsor banner. Refine requires a source generated with capture enabled and saves a separate Gallery result. See [9.3.0 release notes](docs/releases/v9.3.0.md).
+Continuum is available as an experimental option, alongside the detailed Scene/Director guide and an intermittent sponsor banner. H3 Refine shipped in this release and has since been removed. See [9.3.0 release notes](docs/releases/v9.3.0.md).
 
 [![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-Support_Erdin-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/erdindev)
 
@@ -174,6 +174,31 @@ with open('reference.mp4', 'rb') as media:
 curl "$BASE_URL/api/loras/guidance?file=YOUR_LORA.safetensors"
 curl -X POST "$BASE_URL/api/loras/guidance" -H "Content-Type: application/json" \
   -d '{"file":"YOUR_LORA.safetensors","triggers":"trigger","guide":"Creator usage notes"}'
+```
+
+### Model downloads in Settings
+
+**Settings → Models & downloads** lists every downloadable weight: the base packs (shared encoder + VAEs, FL2VA, Ref2VA, H3-Image), the optional INT8 text encoder and Singularity engine, and every catalog LoRA. Missing items have an **Install** button and installed items a **Delete** button. **Install all** queues everything missing and shows the total size and free disk space first. Downloads run one at a time and resume from the `.part` file if interrupted. If one item fails (for example disk space or a Civitai LoRA without a key), the queue moves on to the next. Civitai LoRAs are left out of Install all until a Civitai key is saved. Deleting is refused while a generation or download is running, or when a queued job uses the file. Deleting the active Singularity engine switches back to MiniMax.
+
+```bash
+curl "$BASE_URL/api/models/downloads"                       # items, installed state, progress, free space
+curl -X POST "$BASE_URL/api/models/downloads/install" -H "Content-Type: application/json" -d '{"ids":["ref2va"]}'
+curl -X POST "$BASE_URL/api/models/downloads/install" -H "Content-Type: application/json" -d '{"all":true}'
+curl -X POST "$BASE_URL/api/models/downloads/cancel"        # stop; the partial file is kept for resume
+curl -X POST "$BASE_URL/api/models/downloads/delete" -H "Content-Type: application/json" -d '{"id":"encoder-int8"}'
+```
+
+```javascript
+const state = await (await fetch(`${BASE_URL}/api/models/downloads`)).json();
+const missing = state.items.filter(item => !item.installed).map(item => item.id);
+await fetch(`${BASE_URL}/api/models/downloads/install`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ids: missing})});
+```
+
+```python
+import httpx
+state = httpx.get(f'{BASE_URL}/api/models/downloads').json()
+print(state['missing'], 'missing,', state['free_bytes'] // 10**9, 'GB free')
+httpx.post(f'{BASE_URL}/api/models/downloads/install', json={'all': True}).raise_for_status()
 ```
 
 ### Still images: H3-Image, plus H3 Studio for Director cards

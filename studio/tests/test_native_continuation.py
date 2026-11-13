@@ -15,7 +15,7 @@ class NativeContinuation(unittest.TestCase):
                     duration=5, seed=42, steps=18, h3_models=DEFAULT_MODELS,
                     continuum_prompts=['The knight rises', 'The knight walks'], silent_audio=False)
 
-    def test_capture_does_not_change_sampling_or_enable_refine(self):
+    def test_capture_does_not_change_sampling(self):
         with patch('lib.comfy.apply_spectrum', side_effect=lambda g, **kw: g):
             graph = build_t2v_prompt(text='Knight', length=124)
         before = copy.deepcopy(graph)
@@ -26,7 +26,6 @@ class NativeContinuation(unittest.TestCase):
         self.assertEqual(graph['10']['inputs']['samples'], ['studio_tail', 0])
         self.assertEqual(graph['23']['inputs']['samples'], ['studio_tail', 0])
         self.assertEqual(job['continuation_state_frames'], 39)
-        self.assertNotIn('prepare_refine', job)
 
     def test_each_section_carries_native_state_and_trims_overlap(self):
         job = self.job()

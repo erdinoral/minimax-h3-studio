@@ -45,6 +45,7 @@ class MotionContinuumEndpoint(unittest.TestCase):
                 patch.object(server, "REF_VIDEOS", Path(tmp)), \
                 patch.object(server, "_ref_video_path", return_value=Path(tmp) / "src.mp4"), \
                 patch.object(server.motion_long, "probe_seconds", return_value=seconds), \
+                patch.object(server.video_labels, "probe", return_value={"width": 1080, "height": 1920}), \
                 patch.object(server.motion_long, "slice_reference",
                              side_effect=lambda src, out, start, sec: slices.append((start, sec)) or out), \
                 patch.object(server.comfy, "upload_video", new_callable=AsyncMock, return_value="mcont-up.mp4"), \
@@ -61,8 +62,14 @@ class MotionContinuumEndpoint(unittest.TestCase):
                          ("v2v", "continuum", 5, 3))
         self.assertTrue(run.continuum_video_follow)
         self.assertEqual(run.ref_videos, ["mcont-up.mp4"])
+        self.assertEqual(run.aspect, "9:16")
         self.assertEqual((run.v2v_role, run.ref_images, run.lane), ("face_swap", ["me.png"], "motion"))
+        self.assertEqual(run._motion_original_audio, "src.mp4")
         self.assertEqual(slices, [(0.0, 15.0)])
+
+    def test_generated_audio_is_kept_when_original_audio_is_disabled(self):
+        _, run, _ = self.queue(15.0, include_video_audio=False)
+        self.assertIsNone(run._motion_original_audio)
 
     def test_chunk_count_rounds_to_the_nearest_five_seconds(self):
         _, run, slices = self.queue(16.0)

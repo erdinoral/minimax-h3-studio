@@ -6,6 +6,7 @@ import asyncio
 import atexit
 import contextvars
 import json
+import logging
 import math
 import os
 import re
@@ -23,14 +24,14 @@ import psutil  # Moved from _acquire_single_instance for consistency
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 # Optional progress sink for /api/director/chat/stream (thinking deltas)
 _director_progress: contextvars.ContextVar = contextvars.ContextVar(
     "director_progress", default=None
 )
 
-from lib import h3_enhancements, continuum, flow_refine, video_refine, video_labels, native_continuation, motion_long, face_crop
+from lib import h3_enhancements, continuum, video_labels, native_continuation, motion_long, face_crop
 from lib import h3_acceleration, render_control, diagnostics
 from lib import motionbricks
 from lib import sketch
@@ -54,6 +55,7 @@ from lib import look_sheets
 from lib import h3_models, optional_models
 from lib import lora_access
 from lib import model_storage
+from lib import model_downloads
 from lib.lora_guidance import guidance, guidance_block, save_guidance
 from lib import qwen_still
 from lib import h3_image
@@ -349,6 +351,22 @@ COMFY_URL = _normalize_http_url(os.environ.get("COMFY_URL") or "", "http://127.0
 OLLAMA_URL = _normalize_http_url(os.environ.get("OLLAMA_URL") or "", "http://127.0.0.1:11434")
 HOST = os.environ.get("STUDIO_HOST", "127.0.0.1")
 PORT = int(os.environ.get("STUDIO_PORT", "8787"))
+
+
+class _QuietSuccessfulGets(logging.Filter):
+    """The UI polls jobs/system/health every few seconds; keep failures and writes in the log."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and args[1] == "GET":
+            try:
+                return int(args[4]) >= 400
+            except (TypeError, ValueError):
+                return True
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietSuccessfulGets())
 # One Studio process per installation — shared jobs.json must not have two queue loops.
 LOCK_FILE = DATA / "studio.lock"
 _lock_fh = None
@@ -1169,7 +1187,7 @@ def _archive_job_to_gallery(job: dict) -> None:
         "aspect": job.get("aspect"),
         "quality": job.get("quality"),
         **{key:job.get(key) for key in ("h3_models", "steps", "sampler", "scheduler", "lora_name", "lora_strength", "lora_strengths", "effective_lora_name", "effective_lora_strength", "effective_spectrum", "character_manifest")},
-        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","prepare_refine","refine_source_id","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size","continuum_resume","continuity_method","native_context_chunks","continuum_ref_video")},
+        **{k:job.get(k) for k in ("continuum_run","continuum_prompts","continuum_chunk_seconds","first_frame_name","ref_images","continuum_base_graph","continuum_model_link","continuum_sigma_link","continuum_context","continuum_continuity","continuum_ref_assignments","continuum_reference_size","continuum_resume","continuity_method","native_context_chunks","continuum_ref_video")},
         **{k:job.get(k) for k in ('continuation_state_key','continuation_state_frames',
                                   'continuation_source_key','continuation_context_frames')},
         "batch_index": job.get("batch_index"),
@@ -1344,6 +1362,7 @@ def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
 
 
 class GenerateBody(BaseModel):
+    _motion_original_audio: Optional[str] = PrivateAttr(default=None)
     continuation_method: str = "standard"
     continuum_chunks: int = Field(1, ge=1, le=16)
     continuum_segment_prompts: list[str] | None = None
@@ -1353,7 +1372,6 @@ class GenerateBody(BaseModel):
     continuum_extendable: bool = True
     # Motion Transfer through Continuum: the single reference video guides each chunk in turn.
     continuum_video_follow: bool = False
-    prepare_refine: bool = False
     scene_audio_file: Optional[str] = None
     scene_audio_mode: str = "reference"
     asset_auto_match: bool = False
@@ -2775,9 +2793,6 @@ async def asset_reference_preview(body: AssetReferencePreviewBody):
 
 @app.post("/api/generate")
 async def generate(body: GenerateBody):
-    # Refinement is an explicit operation on a completed video. Ignore stale
-    # browsers/API clients requesting capture during ordinary production.
-    body.prepare_refine = False
     if body.duration not in ALLOWED_DURATIONS:
         raise HTTPException(400, f"duration must be one of {ALLOWED_DURATIONS}")
     if str(body.quality) not in QUALITY_SHORT_EDGE:
@@ -3066,6 +3081,8 @@ async def generate(body: GenerateBody):
                           'continuum_prefix_chunks':len(previous)}
         if follow_video:
             continuum_data['continuum_ref_video'] = ref_videos[0]
+            if body._motion_original_audio:
+                continuum_data['motion_original_audio'] = body._motion_original_audio
         if parent:
             continuum_data.update({key:parent[key] for key in (
                 'continuum_base_graph','continuum_model_link','continuum_sigma_link') if key in parent})
@@ -3108,7 +3125,9 @@ async def generate(body: GenerateBody):
         "first_frame_name": first_frame,
         "last_frame_name": last_frame,
         "ref_images": ref_images,
-        "reference_manifest": reference_plan["rows"] if reference_plan else None,
+        "reference_manifest": reference_plan["rows"] if reference_plan and (
+            (body.v2v_role or "").strip().lower() != "face_swap" or reference_plan["hits"]
+        ) else None,
         "ref_videos": ref_videos,
         "scene_audio_file": body.scene_audio_file,
         "scene_audio_mode": body.scene_audio_mode if body.scene_audio_file else None,
@@ -3136,7 +3155,6 @@ async def generate(body: GenerateBody):
         "sheet_job": bool(getattr(body, "sheet_job", False)),
         "sheet_spectrum_full": bool(body.sheet_job and body.sheet_spectrum_full),
         **continuum_data,
-        "prepare_refine": body.prepare_refine,
         **lora_applied,
     }
     async with _lock:
@@ -3195,6 +3213,16 @@ async def motion_transfer_long(body: MotionTransferLongBody):
     seconds = await asyncio.to_thread(motion_long.probe_seconds, source)
     if not motion_long.MIN_SECONDS - 0.05 <= seconds <= motion_long.MAX_SECONDS + 0.5:
         raise HTTPException(400, f"Motion video is {seconds:.1f} s — it must be 4–30 s")
+    if (body.v2v_role or "").strip().lower() == "face_swap":
+        try:
+            source_info = await asyncio.to_thread(video_labels.probe, source)
+            ratio = source_info["width"] / source_info["height"]
+        except (OSError, RuntimeError, ValueError, KeyError, ZeroDivisionError) as exc:
+            raise HTTPException(400, "Could not read the source video dimensions for FaceSwap") from exc
+        aspect = min(ASPECT_PRESETS, key=lambda key: abs(math.log(ratio / (
+            ASPECT_PRESETS[key][0] / ASPECT_PRESETS[key][1]
+        ))))
+        body = body.model_copy(update={"aspect": aspect})
     if body.join_method == "continuum":
         return await _motion_transfer_continuum(body, source, seconds)
     if body.join_method != "parts":
@@ -3217,6 +3245,7 @@ async def motion_transfer_long(body: MotionTransferLongBody):
         part = body.model_copy(deep=True)
         part.prompt = prompts[index]
         part.mode = "v2v"
+        part.continuation_method = "standard"
         part.ref_videos = [name]
         part.duration = window["duration"]
         part.seed = seed
@@ -3270,6 +3299,8 @@ async def _motion_transfer_continuum(body: MotionTransferLongBody, source: Path,
     run.continuum_chunks = chunks
     run.continuum_segment_prompts = None
     run.continuum_video_follow = True
+    if body.include_video_audio:
+        run._motion_original_audio = source.name
     run.continue_from_job_id = None
     run.lane = "motion"
     job = await generate(run)
@@ -8209,14 +8240,6 @@ async def workflow_capabilities():
     return {'continuum_ready': all(n in available for n in (
                 continuum.SAMPLER, 'H3ContinuumAssembleSeamV35')),
             'native_tail_ready': all(n in available for n in native_continuation.REQUIRED_NODES),
-            'refine_ready': all(n in available for n in (
-                'H3TrajectoryCapture','H3FlowAlignedRegenerate','H3StudioSaveFlowState','H3StudioLoadFlowState',
-                'MinimaxH3LatentUpscaler3DProvider')) and
-                (COMFY_ROOT / 'models/latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors').is_file(),
-            'video_refine_ready': all(n in available for n in (
-                'LoadVideo','GetVideoComponents','VAEEncodeTiled','MinimaxH3LatentUpscaler3D',
-                'VAEDecodeTiled','ImageFromBatch','CreateVideo','SaveVideo')) and
-                (COMFY_ROOT / 'models/latent_upscale_models/minimax_h3_latent_upscaler_3d_bf16.safetensors').is_file(),
             'continuum_max_chunks':16}
 
 
@@ -8259,63 +8282,6 @@ async def label_clip(clip_id: str, body: LabelsBody):
         _save_jobs()
     _archive_job_to_gallery(job)
     slog.info('clip labels burned', source=clip_id[:8], id=label_id[:8], labels=len(info['labels']))
-    return job
-
-
-class RefineBody(BaseModel):
-    quality: str
-    method: str = 'video'
-
-
-@app.post('/api/clips/{clip_id}/refine')
-async def refine_clip(clip_id: str, body: RefineBody):
-    source = _clip_record(clip_id)
-    if not source:
-        raise HTTPException(404, 'Clip not found')
-    method = getattr(body, 'method', 'video')
-    if method not in ('video', 'flow'):
-        raise HTTPException(400, 'Unknown refinement method')
-    caps = await workflow_capabilities()
-    if not caps.get('video_refine_ready' if method == 'video' else 'refine_ready'):
-        raise HTTPException(409, 'Video enhancement tools are not loaded' if method == 'video' else 'Flow tools are not loaded')
-    if method == 'flow' and (not source.get('prepare_refine') or not (flow_refine.STORE / (clip_id + '.json')).is_file() or not (COMFY_ROOT / 'output' / 'H3_Studio_Flow' / (clip_id + '.pt')).is_file()):
-        raise HTTPException(409, 'This legacy Flow method needs a saved trajectory. Use video enhancement for an existing MP4.')
-    meta = None
-    if method == 'video':
-        if source.get('status') != 'done':
-            raise HTTPException(409, 'The video render must finish first')
-        path = await _ensure_job_video(source)
-        try:
-            meta = await asyncio.to_thread(video_refine.probe, path)
-        except (ValueError, RuntimeError) as exc:
-            raise HTTPException(409, str(exc)) from exc
-    if str(body.quality) not in QUALITY_SHORT_EDGE:
-        raise HTTPException(400, 'Unsupported resolution')
-    quality = normalize_quality(body.quality)
-    original = meta or source
-    scale = QUALITY_SHORT_EDGE[quality] / min(int(original['width']),int(original['height']))
-    width, height = snap_h3_size(int(original['width'])*scale, int(original['height'])*scale)
-    if min(width,height) <= min(int(original['width']),int(original['height'])):
-        raise HTTPException(400, 'Choose a resolution above the source clip')
-    if meta:
-        try:
-            video_refine.validate_memory(meta, width, height)
-        except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
-    job = {key:value for key,value in source.items() if key in (
-        'prompt','duration','aspect','seed','steps','sampler','scheduler','h3_models',
-        'lora_name','lora_strength','lora_strengths','silent_audio','purpose','ref_images','first_frame_name')}
-    job.update(id=str(uuid.uuid4()), status='queued', progress=0, progress_label='queued · H3 Refine',
-               mode='video_refine' if method == 'video' else 'flow_refine', lane='scene', quality=quality, width=width, height=height,
-               created_at=time.time(), output=None, error=None, refine_source_id=clip_id,
-               continue_from=None, prepare_refine=False)
-    if meta:
-        job.update(refine_source_meta=meta, duration=meta['duration'], silent_audio=False,
-                   h3_models=source.get('h3_models') or h3_models.resolve(),
-                   steps=0, sampler='', scheduler='', refine_method='h3_latent_3d')
-    async with _lock:
-        _jobs.append(job)
-        _save_jobs()
     return job
 
 
@@ -8397,15 +8363,37 @@ class ModelDeleteBody(BaseModel):
     file: str
 
 
-def _protected_weight_files():
-    names=set(h3_models.defaults().values())
-    for graph in ("fl2va","ref2va"):
-        names.update(h3_models.resolve(graph).values())
+def _job_weight_files():
+    names=set()
     for job in _jobs:
         if job.get("status") in ("queued","running"):
             names.update((job.get("h3_models") or {}).values())
             names.update(str(job.get("lora_name") or "").split("|"))
     return names
+
+
+def _protected_weight_files():
+    names=set(h3_models.defaults().values())
+    for graph in ("fl2va","ref2va"):
+        names.update(h3_models.resolve(graph).values())
+    return names | _job_weight_files()
+
+
+def _weight_downloads_busy():
+    return _lora_dl_status.get("busy") or model_downloads.busy() or any(m.get("busy") for m in optional_models.catalog())
+
+
+async def _ensure_weights_idle():
+    if any(j.get("status") == "running" for j in _jobs) or _weight_downloads_busy():
+        raise HTTPException(409,{"code":"storage.busy"})
+    try:
+        queue=await comfy.queue_status()
+    except Exception:
+        raise HTTPException(409,{"code":"storage.queueUnknown"})
+    if queue.get("queue_running") or queue.get("queue_pending"):
+        raise HTTPException(409,{"code":"storage.busy"})
+    if _weight_downloads_busy():
+        raise HTTPException(409,{"code":"storage.busy"})
 
 
 @app.get("/api/models/storage")
@@ -8416,16 +8404,7 @@ async def model_storage_get():
 @app.post("/api/models/storage/delete")
 async def model_storage_delete(body: ModelDeleteBody):
     async with _lock:
-        if any(j.get("status") == "running" for j in _jobs) or _lora_dl_status.get("busy") or any(m.get("busy") for m in optional_models.catalog()):
-            raise HTTPException(409,{"code":"storage.busy"})
-        try:
-            queue=await comfy.queue_status()
-        except Exception:
-            raise HTTPException(409,{"code":"storage.queueUnknown"})
-        if queue.get("queue_running") or queue.get("queue_pending"):
-            raise HTTPException(409,{"code":"storage.busy"})
-        if _lora_dl_status.get("busy") or any(m.get("busy") for m in optional_models.catalog()):
-            raise HTTPException(409,{"code":"storage.busy"})
+        await _ensure_weights_idle()
         try:
             size=model_storage.remove(h3_models.MODELS_ROOT,body.folder,body.file,_protected_weight_files())
         except FileNotFoundError:
@@ -8435,6 +8414,48 @@ async def model_storage_delete(body: ModelDeleteBody):
         except OSError:
             raise HTTPException(409,{"code":"storage.fileBusy"})
     return {"ok":True,"removed_bytes":size}
+
+
+class ModelDownloadsBody(BaseModel):
+    ids: list[str] = []
+    all: bool = False
+
+
+class ModelDownloadDeleteBody(BaseModel):
+    id: str
+
+
+@app.get("/api/models/downloads")
+async def model_downloads_get():
+    return model_downloads.catalog()
+
+
+@app.post("/api/models/downloads/install")
+async def model_downloads_install(body: ModelDownloadsBody):
+    try:
+        return model_downloads.enqueue_all() if body.all else model_downloads.enqueue(body.ids)
+    except KeyError as exc:
+        raise HTTPException(404,{"code":"storage.notFound","id":str(exc.args[0])}) from exc
+
+
+@app.post("/api/models/downloads/cancel")
+async def model_downloads_cancel():
+    return model_downloads.cancel()
+
+
+@app.post("/api/models/downloads/delete")
+async def model_downloads_delete(body: ModelDownloadDeleteBody):
+    async with _lock:
+        await _ensure_weights_idle()
+        try:
+            result=model_downloads.remove(body.id,_job_weight_files())
+        except (KeyError, FileNotFoundError):
+            raise HTTPException(404,{"code":"storage.notFound"})
+        except ValueError as exc:
+            raise HTTPException(409,{"code":str(exc)})
+        except OSError:
+            raise HTTPException(409,{"code":"storage.fileBusy"})
+    return {"ok":True,**result}
 
 
 @app.post("/api/h3-models/engine")
@@ -10269,7 +10290,7 @@ async def _run_job_impl(job: dict):
             native_handoff = native_continuation.prepare(job, _clip_record(job['continue_from']), COMFY_ROOT)
         if not native_handoff:
             await continuum.prepare_director_handoff(job, _resolve_first_frame)
-        if (job.get("mode") or "").lower() not in ("multishot", "continuum", "flow_refine", "video_refine"):
+        if (job.get("mode") or "").lower() not in ("multishot", "continuum"):
             first = await _resolve_first_frame(job)
             if job.get("mode") == "continue" or job.get("continue_from"):
                 if not first:
@@ -10361,15 +10382,6 @@ async def _run_job_impl(job: dict):
         elif mode == "continuum":
             prompt = (native_continuation.build(job) if job.get('continuation_source_key')
                       else continuum.build(job))
-        elif mode == "flow_refine":
-            prompt = flow_refine.build(job)
-        elif mode == "video_refine":
-            source = _clip_record(job['refine_source_id'])
-            if not source:
-                raise RuntimeError('Source video not found')
-            path = await _ensure_job_video(source)
-            uploaded = await comfy.upload_video(path, name='h3_refine_' + job['id'] + '.mp4')
-            prompt = video_refine.build(job, uploaded)
         elif mode == "multishot":
             script = (job.get("script") or job.get("prompt") or "").strip()
             if not script:
@@ -10548,8 +10560,6 @@ async def _run_job_impl(job: dict):
         prompt = h3_enhancements.patch_graph(prompt, job)
         if job.get('save_continuation_tail'):
             prompt = native_continuation.capture(prompt, job, length)
-        if job.get('prepare_refine'):
-            prompt = flow_refine.capture(prompt, job)
         job['effective_spectrum'] = h3_acceleration.graph_settings(prompt)
         # Freeze inputs before output last-frame extraction mutates job fields.
         job['reproduction_snapshot'] = shot_reproduce.snapshot(job)
@@ -10663,9 +10673,6 @@ async def _run_job_impl(job: dict):
                     video_meta.get("type") or "output",
                     dest,
                 )
-                if job.get('mode') == 'video_refine':
-                    await asyncio.to_thread(video_refine.verify_output, dest,
-                        job['refine_source_meta'], job['width'], job['height'])
                 # Silent graph already skipped AudioVAE decode; strip only if a track slipped in
                 if (job.get("silent_audio") or job.get("music_id")) and not job.get(
                     "audio_stripped"
@@ -10681,6 +10688,12 @@ async def _run_job_impl(job: dict):
                     source = validate_source(job["scene_audio_file"], "original", REF_AUDIOS)
                     await asyncio.to_thread(replace_audio, dest, source)
                     job["original_audio_applied"] = True
+                if job.get("motion_original_audio"):
+                    from lib.scene_audio import replace_audio
+                    source = _ref_video_path(job["motion_original_audio"])
+                    if await asyncio.to_thread(motion_long.has_audio, source):
+                        await asyncio.to_thread(replace_audio, dest, source)
+                        job["original_audio_applied"] = True
                 job["output"] = {
                     "filename": video_meta["filename"],
                     "subfolder": video_meta.get("subfolder") or "",
@@ -10690,7 +10703,7 @@ async def _run_job_impl(job: dict):
                 job["local_path"] = str(dest)
                 if job.get('mode') == 'continuum':
                     job['duration'] = int(job['continuum_chunk_seconds']) * len(job['continuum_prompts'])
-                if int(job["duration"]) in (2, 3) and job.get("mode") not in ("multishot", "video_refine"):
+                if int(job["duration"]) in (2, 3) and job.get("mode") != "multishot":
                     await asyncio.to_thread(trim_short_clip, dest, int(job["duration"]))
                     job["short_clip_trimmed"] = True
                     job["generation_duration"] = 4

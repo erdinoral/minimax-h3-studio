@@ -2,7 +2,7 @@
   const banner = document.getElementById("sponsor-banner");
   if (!banner) return;
   const text = banner.querySelector("span");
-  let names = ["Diamond204a", "Corey"];
+  let names = ["Diamond204a", "Corey", "Jürgen"];
   let turn = 0;
   let hideTimer;
   const english = () => document.documentElement.lang !== "tr";
@@ -27,7 +27,7 @@
     turn++;
   }
   document.addEventListener("h3-donors", (event) => {
-    names = [...new Set(["Diamond204a", "Corey", ...(event.detail?.names || [])])];
+    names = [...new Set(["Diamond204a", "Corey", "Jürgen", ...(event.detail?.names || [])])];
   });
   document.addEventListener("h3-lang", () => {
     if (banner.classList.contains("is-showing")) { turn = Math.max(0, turn - 1); show(); }

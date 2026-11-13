@@ -133,7 +133,7 @@ def build(job):
     graph = build_t2v_prompt(text='', width=job['width'], height=job['height'], length=124,
                             seed=job['seed'], steps=job['steps'], models=job['h3_models'],
                             sampler=job.get('sampler') or 'res_multistep',
-                            scheduler=job.get('scheduler') or 'simple', sage_attention='disabled',
+                            scheduler=job.get('scheduler') or 'simple', sage_attention=job.get('sage_attention') or 'auto',
                             lora_name=job.get('lora_name'), lora_strength=job.get('lora_strength') or 0.75)
     # Spectrum's mutable binding cannot safely participate in persisted prefix
     # reuse (see below), so the user chooses speed or a run that can be extended.

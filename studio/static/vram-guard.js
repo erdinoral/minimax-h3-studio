@@ -63,7 +63,7 @@
     if (!result) return Promise.resolve(null);
     return new Promise((resolve) => {
       const modal = document.createElement("dialog");
-      modal.className = "h3-refine-dialog vram-guard-dialog";
+      modal.className = "h3-modal-dialog vram-guard-dialog";
       const form = document.createElement("form");
       form.method = "dialog";
       const title = document.createElement("h3");

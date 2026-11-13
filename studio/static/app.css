@@ -2365,12 +2365,13 @@ body:is(.ws-motion, .ws-game).mv-result .player-stage:is(.cleared, :not(.has-vid
 .job-list li.job-director-child { margin-left: 22px; border-left: 2px solid var(--accent); padding-left: 12px; }
 .cinema-shot.cinema-shot-child { margin-left: 24px; border-left: 2px solid var(--accent); }
 .director-chain-badge { display: inline-block; color: var(--accent); font-size: .72rem; margin-right: 8px; }
-.job-list li.job-running {
-  background: rgba(196, 92, 38, 0.12);
-  margin: 0 -8px;
-  padding-left: 8px;
-  padding-right: 8px;
-}
+.job-list li[class*="job-state-"] { padding-right: 8px; border-radius: 6px; }
+.job-list li[class*="job-state-"]:not(.job-director-child) { padding-left: 8px; }
+.job-list li.job-state-queued { background: rgba(40, 72, 150, 0.24); }
+.job-list li.job-state-running { background: rgba(88, 170, 235, 0.22); }
+.job-list li.job-state-done { background: rgba(64, 168, 96, 0.18); }
+.job-list li.job-state-cancelled { background: rgba(140, 96, 54, 0.26); }
+.job-list li.job-state-error { background: rgba(210, 64, 64, 0.20); }
 .job-list li button { font-size: 0.75rem; padding: 2px 8px; }
 .job-list .btn-job-stop { color: var(--accent-hot); border-color: color-mix(in srgb, var(--accent-hot) 48%, var(--border)); }
 .job-list .job-order { white-space: nowrap; color: var(--text-muted); }
@@ -5580,13 +5581,12 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 .studio-guide-section { padding:12px 0; border-bottom:1px solid var(--border); scroll-margin-top:16px; }
 .studio-guide-section p { max-width:85ch; }
 @media(max-width:600px) { .studio-guide-header { align-items:flex-start; } .studio-guide-header h2 { font-size:20px; } }
-.h3-refine-action { margin-left:auto; }
-.h3-refine-action small, .h3-workflow-card small { font-size:10px; border:1px solid #7976da; padding:2px 5px; border-radius:5px; margin-left:5px; }
+.h3-workflow-card small { font-size:10px; border:1px solid #7976da; padding:2px 5px; border-radius:5px; margin-left:5px; }
 .h3-workflow-card { padding:12px; border:1px solid #5d66a5; border-radius:14px; background:linear-gradient(120deg,#222f4d,#302b4a); margin-bottom:12px; }
 .h3-workflow-card p { margin:8px 0 0; }
 .h3-workflow-card input[type=number] { width:72px; }
-.h3-refine-dialog { background:#172438; color:#e4edfc; border:1px solid #6373a1; border-radius:16px; padding:24px; max-width:460px; }
-.h3-refine-dialog::backdrop { background:#0009; }
+.h3-modal-dialog { background:#172438; color:#e4edfc; border:1px solid #6373a1; border-radius:16px; padding:24px; max-width:460px; }
+.h3-modal-dialog::backdrop { background:#0009; }
 .video-labels-dialog { background:#172438; color:#e4edfc; border:1px solid #6373a1; border-radius:16px; padding:20px; width:min(920px, 94vw); max-height:94vh; overflow:auto; }
 .video-labels-dialog::backdrop { background:#000a; }
 .video-labels-dialog h3 { margin:0 0 6px; }

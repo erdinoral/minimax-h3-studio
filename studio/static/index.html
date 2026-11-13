@@ -281,7 +281,7 @@
             <button type="button" class="on" data-v2v-kind="motion" aria-pressed="true" data-i18n="v2v.tabMotion">Motion transfer</button>
             <button type="button" data-v2v-kind="swap" aria-pressed="false" data-i18n="v2v.tabSwap">Objects swap</button>
           </div>
-          <p class="muted mode-hint" id="v2v-hint-motion" data-i18n="hint.v2v">Motion Transfer: referans video sadece hareket, koreografi, zamanlama ve kamera içindir. Hedef karakter/ürün/görünüm için foto ekle; Studio &lt;Video 1&gt; = hareket, &lt;Picture 1&gt; = görünüm olarak bağlar. Prompt boş bırakılırsa videodaki ana yüz, görseldeki yüzle değiştirilir. Çıktı videonun tam süresi kadardır: 5 sn'lik parçalar sırayla üretilip tek videoda birleştirilir.</p>
+          <p class="muted mode-hint" id="v2v-hint-motion" data-i18n="hint.v2v">Motion Transfer: kaynak video hareket ve kamera için referanstır. FaceSwap açıkken yüz görseli, prompt yazsan da yüz değiştirmek için kullanılır.</p>
           <p class="muted mode-hint hidden" id="v2v-hint-swap" data-i18n="hint.v2vSwap">Objects swap: kaynak videodaki sahne, kamera ve hareket korunur; prompt’ta adını verdiğin kişi veya nesne eklediğin görseldekiyle değiştirilir. Character Swap LoRA otomatik açılır.</p>
           <label class="file-pick v2v-drop" id="v2v-video-pick">
             <input type="file" id="v2v-video-files" class="file-pick-input" accept="video/*" />
@@ -305,7 +305,8 @@
             <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="v2v-image-thumbs"></div>
-          <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span id="v2v-audio-label">Video’daki sesi de referans al</span></label>
+          <label class="check" id="v2v-face-swap-option"><input type="checkbox" id="v2v-face-swap" checked /> <span>FaceSwap</span></label>
+          <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span id="v2v-audio-label">Videonun orijinal sesini koru</span></label>
           <label class="check" data-i18n-title="v2v.continuumHint" title="Parçalar ayrı işler yerine tek Continuum çalışmasında üretilir; her parça öncekinin son karelerini bağlam olarak görür. Deneysel."><input type="checkbox" id="v2v-continuum" /> <span data-i18n="v2v.continuum">Parçaları Continuum ile birleştir (deneysel)</span></label>
         </div>
 
@@ -617,9 +618,8 @@
       <div class="player-actions">
         <button type="button" class="btn-secondary" id="btn-use-in-continue">Bu videodan devam</button>
         <a class="btn-secondary" id="btn-download" href="#" download>İndir</a>
-        <button type="button" class="btn-secondary hidden" id="btn-player-delete">Sil</button>
+        <button type="button" class="btn-secondary hidden" id="btn-player-delete" data-i18n="job.del">Sil</button>
         <button type="button" class="cta hidden" id="btn-open-prompt" title="Bu videonun üretim prompt’u" data-i18n-title="ui.btn-open-prompt.title">Prompt</button>
-        <button type="button" class="btn-secondary h3-refine-action" id="btn-h3-refine" disabled>H3 Refine <small>Experimental</small></button>
         <button type="button" class="btn-secondary" id="btn-video-labels" data-i18n="labels.open" disabled>Labels</button>
       </div>
       <div class="prod-info" id="prod-info">
@@ -1595,6 +1595,8 @@
         <p class="muted mode-hint" id="notify-settings-hint">Tik’ler otomatik kaydolur · AkiFactory aktar → Test → Telegram’a bak.</p>
 
 
+        <section id="model-downloads" style="margin-top:1.25rem"></section>
+
         <h3 class="llm-settings-title" id="settings-lora-title" style="margin-top:1.25rem">H3 LoRA’lar</h3>
         <label><span data-i18n="lora.civitaiKey">Civitai API key (optional)</span><input type="password" id="lora-civitai-key" autocomplete="off" /></label>
         <button type="button" class="btn-ghost" id="btn-lora-civitai-key" data-i18n="lora.saveKey">Save Civitai key</button>
@@ -1659,7 +1661,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=h3image5" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=motion-faceswap-audio" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182L" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
@@ -1667,9 +1669,10 @@
   <script src="/static/asset-references.js?v=4" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=h3image4" charset="utf-8"></script>
+  <script src="/static/app.js?v=motion-faceswap12" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=folders246L" charset="utf-8"></script>
+  <script src="/static/model-downloads.js?v=1" charset="utf-8"></script>
   <script src="/static/studio-guide.js?v=8" charset="utf-8"></script>
   <script src="/static/workflow-access.js?v=guide259L" charset="utf-8"></script>
 <script src="/static/h3-enhancements.js?v=4"></script>

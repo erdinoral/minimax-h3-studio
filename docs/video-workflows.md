@@ -21,30 +21,6 @@ available RAM/VRAM. Test at 480p before larger runs.
 
 Continuum's **Sequence grouping** can retain New-cut boundaries or process a whole chapter as one sequence. In chapter mode, each scene supplies its next chunk prompt; only the first scene's starting image is used. Intermediate guides are retained in the project but not applied. The 16-chunk / nine-reference limits remain. Across a split sequence, continuation uses a last-frame handoff rather than native motion/audio history. Running jobs show the complete planned sequence duration. See [9.3.2](releases/v9.3.2.md) for pause and diagnostic-report behavior.
 
-## H3 Refine
-
-Enable **Prepare H3 Refine recording** before a standard single-clip render.
-Preview and post-pass must be off. After completion, the player action at the
-right opens a target-resolution dialog. Only targets above the source short edge
-are offered; the API independently enforces this. Refinement creates a separate
-Gallery entry with `refine_source_id`; the source stays untouched.
-
-The integration captures a real H3 Flow trajectory plus joint AV latent and saves
-primitive metadata/CPU tensors atomically. Loading uses `weights_only=True` and
-UUID-keyed files restricted to Comfy's output directory. Original graph inputs
-are stored separately to reproduce source conditioning. Existing MP4s have no
-trajectory and are unavailable for native refinement.
-
-This version uses the H3-trained 3D latent upscaler followed by conservative
-Flow-guided resampling (denoise 0.20, direction 0.15; temporal blending off).
-Temporal geometry is preserved; the saved audio latent is masked out
-of resampling. Appearance/motion can change. Audio quality still needs listening
-tests; no speed or fidelity guarantee is implied.
-
-Recording is opt-in because trajectory history requires additional RAM/disk.
-Files live in `app/output/H3_Studio_Flow` and `studio/data/flow_graphs`. Keep those
-records with the corresponding Gallery videos if future refinement is required.
-
 ## Installation
 
 The existing Film tools installer installs missing packages without resetting
@@ -56,12 +32,6 @@ Pinned source revisions (upstream licenses retained):
 
 - Continuum: `ukr8b3g-cmyk/ComfyUI-H3-Continuum`, MIT,
   `e9b1294ccd08dfce972cd8e5a11703b3f616ee54`.
-- Flow: `xmarre/MiniMax-H3-Flow-Aligned-Regenerate`, Apache-2.0,
-  `2bc8247810f99ccf5f580bfab985b7defe26a620`.
-- Learned upscaler: `xmarre/Comfyui_Minimax_h3_latent_Upscaler-Plus`,
-  `1ddcc33e9b674aaabbccc3808fe36e1a47bdd36d`; checkpoint from
-  `LBH-123-AI/Minimax_h3_latent_Upscaler` at
-  `3f941d5d182014dd5c0a5e16330420ee2d4aa0c6` (690.6 MB).
 
 ## Scene Continuum controls
 

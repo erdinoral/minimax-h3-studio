@@ -38,13 +38,6 @@ existing installs to this revision. Enabled settings
 are not proof that forecasts executed: measure a matching run and inspect
 Spectrum diagnostics before claiming acceleration.
 
-Manual Gallery enhancement processes an existing MP4 through the learned H3
-latent upscaler. It requires no prior recording and performs no diffusion
-sampling, so Spectrum is not involved. Automatic capture/refinement during
-generation is disabled, including stale clients requesting capture.
-The legacy Flow API still accepts previously saved trajectories and bypasses
-Spectrum because its active-step provenance is incomplete for that integration.
-
 ## Meridian — prerequisites, not an installed Studio engine
 
 The official ComfyUI workflow needs **stock FL2VA BF16**, the teacher and turbo

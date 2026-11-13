@@ -6328,7 +6328,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     return productionOrderCmp(a, b);
   }
 
-  function showPlayerVideo(url, jobId, prompt, downloadName) {
+  function showPlayerVideo(url, jobId, prompt, downloadName, { autoplay = false } = {}) {
     const player = $("player");
     const stage = document.querySelector(".player-stage");
     if (!player || !url) return;
@@ -6341,6 +6341,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     $("btn-player-delete")?.classList.remove("hidden");
     const playUrl = url.split("?")[0];
     player.src = playUrl + (playUrl.includes("?") ? "&" : "?") + "t=" + Date.now();
+    if (autoplay) void player.play().catch((error) => {
+      if (error.name !== "AbortError") toast(error.message);
+    });
     const job =
       (jobId && state.jobs && state.jobs.find((j) => j.id === jobId)) ||
       (jobId && state.galleryItems && state.galleryItems.find((j) => j.id === jobId)) ||
@@ -8696,13 +8699,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     }
   }
 
-  function selectJob(job, { play = true, quiet = false } = {}) {
+  function selectJob(job, { play = true, quiet = false, autoplay = false } = {}) {
     state.selectedJobId = job.id;
     state.playerCleared = false;
     const meta = jobProductionMeta(job);
     setClipPrompt(job.prompt || "", meta, job.seed);
     if (play && job.output?.url) {
-      showPlayerVideo(job.output.url, job.id, job.prompt || "");
+      showPlayerVideo(job.output.url, job.id, job.prompt || "", undefined, { autoplay });
     }
     if (state.produceMode === "continue") {
       const sel = $("continue-source");
@@ -8987,6 +8990,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const li = document.createElement("li");
     li.className = "job-long";
     if (sum.state === "running") li.classList.add("job-running");
+    const rowState = { done: "done", running: "running", merging: "running", queued: "queued", waitingMerge: "queued",
+      failed: "error", mergeError: "error", incomplete: "error" }[sum.state];
+    if (rowState) li.classList.add("job-state-" + rowState);
     const left = document.createElement("div");
     const title = htmlEsc(String(first.scene_title || first.motion_long_prompt || first.prompt || "").slice(0, 60));
     const stClass = { done: "st-done", running: "st-run", merging: "st-run", failed: "st-err", mergeError: "st-err", incomplete: "st-err" }[sum.state] || "";
@@ -9039,7 +9045,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       play.textContent = tt("job.play");
       play.className = "btn-secondary job-action-main";
       play.onclick = () => {
-        selectJob(group.final);
+        selectJob(group.final, { autoplay: true });
         showMotionResult();
       };
       right.appendChild(play);
@@ -9299,6 +9305,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const li = document.createElement("li");
       if (j.director_parent_id) li.classList.add('job-director-child');
       if (j.status === "running") li.classList.add("job-running");
+      if (j.status) li.classList.add("job-state-" + j.status);
       const left = document.createElement("div");
       const st =
         j.status === "done" ? "st-done" : j.status === "running" ? "st-run" : j.status === "error" ? "st-err" : "";
@@ -9416,7 +9423,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           b.textContent = tt("job.play");
           b.className = "btn-secondary job-action-main";
           b.onclick = () => {
-            selectJob(j);
+            selectJob(j, { autoplay: true });
             showMotionResult();
           };
           right.appendChild(b);
@@ -9899,9 +9906,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         const live = state.jobs.find((x) => x.id === j.id && x.status === "done");
         const meta = `${j.duration != null ? jobVideoSeconds(j) + tt("sec") + " · " : ""}${j.width || "?"}×${j.height || "?"}`;
         if (live) {
-          selectJob(live);
+          selectJob(live, { autoplay: true });
         } else {
-          showPlayerVideo(url, j.id, j.prompt || "", j.download_name || "");
+          showPlayerVideo(url, j.id, j.prompt || "", j.download_name || "", { autoplay: true });
           setClipPrompt(j.prompt || "", meta, j.seed);
           toast(tf("gallery.archiveMeta", { meta }));
         }
@@ -10342,9 +10349,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   async function submitGenerate() {
     const typed = $("prompt")?.value.trim() || "";
-    const sectionPrompt = String(window.getContinuumMainPrompt?.() || "").trim();
+    const sectionPrompt = state.produceMode === "v2v" ? "" : String(window.getContinuumMainPrompt?.() || "").trim();
     const prompt = sectionPrompt || typed;
-    // Motion Transfer runs without a prompt as a main-face swap.
     if (!prompt && state.produceMode !== "v2v") {
       noteGenerate(tf("toast.writePrompt"));
       return false;
@@ -10387,12 +10393,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       noteGenerate(tf("toast.v2vNeedMedia"));
       return false;
     }
-    const autoFaceSwap = isV2v && !prompt;
-    if (autoFaceSwap && !state.v2vImages.length) {
-      noteGenerate(tf("toast.v2vFaceNeedImage"));
+    const isSwap = isV2v && state.v2vKind === "swap";
+    const faceSwapEnabled = isV2v && !isSwap && !!$("v2v-face-swap")?.checked;
+    const isFaceSwap = faceSwapEnabled && state.v2vImages.length > 0;
+    if (isV2v && !prompt && !isFaceSwap) {
+      noteGenerate(tf(faceSwapEnabled ? "toast.v2vFaceNeedImage" : "toast.writePrompt"));
       return false;
     }
-    const isSwap = isV2v && !autoFaceSwap && state.v2vKind === "swap";
     let swapLora = null;
     if (isSwap) {
       if (!state.v2vImages.length) {
@@ -10419,9 +10426,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         ? "Acceleration settings could not be saved; retry before generating."
         : "Hızlandırma ayarı kaydedilemedi; üretmeden önce tekrar deneyin.");
       await h3AccelerationLatestSave;
+      const faceLora = isFaceSwap ? readyLora("face-swap") : null;
+      if (isFaceSwap && !faceLora) {
+        noteGenerate(tf("toast.v2vFaceLora"));
+        return false;
+      }
       const faceLockOn = !!$("face-lock-chain")?.checked && state.faceImages.length > 0;
       const body = {
-        prompt: autoFaceSwap ? V2V_FACE_SWAP_PROMPT : withStyleLock(prompt),
+        prompt: isFaceSwap
+          ? [V2V_FACE_SWAP_PROMPT, prompt].filter(Boolean).join("\n\n")
+          : withStyleLock(prompt),
         ...window.getSceneAudioPayload?.(),
         ...sceneAssetReferences?.payload(),
         duration: state.duration,
@@ -10444,7 +10458,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
                   : "t2v",
         continue_from_job_id: isContinue ? state.continueFrom : null,
         audio_continuity: isContinue && !!$("continue-audio-continuity")?.checked,
-        ...window.getVideoWorkflowPayload?.(),
+        ...(isV2v ? {} : window.getVideoWorkflowPayload?.()),
         purpose: state.projectPurpose || null,
         silent_audio: state.projectSilent || state.projectPurpose === "music_video",
       };
@@ -10461,6 +10475,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.ref_images = state.v2vImages.map((x) => x.name);
         body.ref_image_size = state.refImageSize || "match";
         body.include_video_audio = !!$("v2v-include-audio")?.checked;
+        body.continuation_method = "standard";
+        body.join_method = "parts";
         if ($("v2v-continuum")?.checked) {
           if (window.isDirectorContinuumReady?.() === true) body.join_method = "continuum";
           else noteGenerate(tt("v2v.continuumOff"));
@@ -10469,10 +10485,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         body.purpose = null;
         body.silent_audio = false;
       }
-      if (autoFaceSwap) {
+      if (isFaceSwap) {
         body.v2v_role = "face_swap";
-        const faceLora = readyLora("face-swap");
-        if (faceLora) addLoraToBody(body, faceLora);
+        body.prompt_rewriter_enabled = false;
+        addLoraToBody(body, faceLora);
       }
       if (isSwap) {
         body.v2v_role = "swap";
@@ -10514,8 +10530,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data));
       state.pendingMotionLongId = data.motion_long_id || null;
-      // An automatic face swap keeps the box empty so the next run stays automatic.
-      if (!autoFaceSwap && data.prompt && (data.prompt_rewritten || !!$("prompt-rewriter-enabled")?.checked)) {
+      if (!isFaceSwap && data.prompt && (data.prompt_rewritten || !!$("prompt-rewriter-enabled")?.checked)) {
         $("prompt").value = data.prompt;
       }
       state.selectedJobId = data.id;
@@ -10660,7 +10675,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     updateLoraHint();
   }
 
-  const V2V_FACE_SWAP_PROMPT = "Replace the face of the main person with the face from <Picture 1>.";
+  const V2V_FACE_SWAP_PROMPT = "Edit <Video 1> on its original timeline. Apply the face, hairstyle, hairline and facial hair from <Picture 1> to one target person. "
+    + "Use the person specified in the prompt, or select the main person once when no target is specified. Track that same source identity through cuts, changes in camera angle and reflections. "
+    + "Preserve every other person's original face and hair, even in close-ups. When the target is absent or cannot be identified confidently, preserve the source shot. "
+    + "Match the target's original head pose, expressions, mouth shapes and lip timing to the source dialogue. Preserve the original gestures and keep hands and objects in front of the face where they cover it in the source. "
+    + "Match the original shots and cut times. Keep the framing, camera motion, lighting, people, animals, objects and scenery as they appear in each source frame. "
+    + "Add visual elements only when explicitly requested.";
 
   function readyLora(id) {
     return (state.loraCatalog || []).find((spec) => spec.id === id && spec.file && spec.ready) || null;
@@ -11626,6 +11646,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     });
     $("v2v-hint-motion")?.classList.toggle("hidden", swap);
     $("v2v-hint-swap")?.classList.toggle("hidden", !swap);
+    $("v2v-face-swap-option")?.classList.toggle("hidden", swap);
     for (const [id, key] of [["v2v-motion-label", swap ? "v2v.swapVideo" : "v2v.motion"], ["v2v-look-label", swap ? "v2v.swapLook" : "v2v.look"]]) {
       const label = $(id);
       if (!label) continue;

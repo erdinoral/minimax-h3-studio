@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace as NS
 from typing import Any, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib import asset_references, cinema, optional_models, h3_models
@@ -180,7 +180,7 @@ class SharedQueueTests(unittest.IsolatedAsyncioTestCase):
         env['cinema']=NS(load=lambda:lib, bound_character_portraits=cinema.bound_character_portraits)
         tree=ast.parse((Path(__file__).resolve().parents[1]/'server.py').read_text(encoding='utf-8'))
         classes=[n for n in tree.body if isinstance(n,ast.ClassDef) and n.name in ('GenerateBody','BatchBody')]
-        env.update(BaseModel=BaseModel,Field=Field,field_validator=field_validator,Optional=Optional,Any=Any)
+        env.update(BaseModel=BaseModel,Field=Field,PrivateAttr=PrivateAttr,field_validator=field_validator,Optional=Optional,Any=Any)
         exec(compile(ast.Module(body=classes,type_ignores=[]),'request-models','exec'),env)
         generate=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='generate')
         generate.decorator_list=[]

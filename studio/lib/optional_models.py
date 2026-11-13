@@ -119,6 +119,11 @@ async def _download():
     except Exception as exc:
         _status.update(phase="failed",error=str(exc))
 
+def cancel():
+    if _task and not _task.done():
+        _task.cancel()
+        _status.update(phase="", error=None)
+
 async def start(model_id):
     global _task
     if model_id != SINGULARITY["id"]: raise ValueError("Unknown optional model")

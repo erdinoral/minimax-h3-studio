@@ -10,6 +10,18 @@
     continuum_context:context, continuum_continuity:continuity, continuum_extendable:extendable, continuum_chunks:layout==='segments'?segments.length:chunks,
     ...(activeMethod()==='continuum' && layout==='segments'?{continuum_segment_prompts:segments.map(p=>p.trim())}:{})});
   window.getContinuumMainPrompt = () => activeMethod()==='continuum' && layout==='segments' ? segments[0]?.trim() : null;
+  window.openContinuumSections = (prompts = null) => {
+    if (prompts && (!prompts.length || prompts.length > 16)) return false;
+    if (prompts) {
+      segments = prompts.slice();
+    } else if (segments.length === 1 && !segments[0].trim()) {
+      segments = Array.from({ length: 6 }, (_, index) => index === 0 ? ($('prompt')?.value || '') : '');
+    }
+    method = 'continuum';
+    layout = 'segments';
+    render();
+    return true;
+  };
   window.getDirectorContinuumBackend = () => "continuum";
   window.isDirectorContinuumReady = () => caps.continuum_ready === true;
   window.canSetContinueReferences = () => !(method==='continuum' && sourceMeta?.continuum_run);

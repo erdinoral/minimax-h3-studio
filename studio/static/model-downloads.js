@@ -1,6 +1,7 @@
 (() => {
   const host=document.getElementById('model-downloads');
   if (!host) return;
+  const loraHost = document.getElementById('lora-downloads');
   let state=null; let timer=0; let installedIds=null;
   const en=()=>window.h3Lang?.() !== 'tr';
   const t=(tr,eng)=>en()?eng:tr;
@@ -28,7 +29,7 @@
   function status(item){
     if(item.active)return item.phase==='verifying'?t('Doğrulanıyor…','Verifying…'):t(`İniyor · %${item.progress}`,`Downloading · ${item.progress}%`);
     if(item.queued)return t('Sırada','Queued');
-    if(item.installed)return t('Kurulu','Installed');
+    if(item.installed)return '';
     if(item.error)return t('Hata: ','Error: ')+item.error;
     if(item.needs_key)return t('Civitai anahtarı gerekli','Civitai key required');
     return t('Kurulu değil','Not installed');
@@ -37,10 +38,12 @@
     const label=el('div',{style:'flex:1;min-width:0;overflow-wrap:anywhere'},
       el('strong',{textContent:en()?item.label_en:item.label_tr}),
       el('div',{className:'muted',style:'font-size:12px',textContent:[size(item.bytes),en()?item.note_en:item.note_tr,status(item)].filter(Boolean).join(' · ')}));
+    if(item.installed) label.append(el('span',{className:'model-state installed',textContent:t('Kurulu','Installed')}));
+    if(item.selected) label.append(el('span',{className:'model-state selected',textContent:t('Aktif','Active')}));
     if(item.error && !item.installed && !item.active)label.lastChild.style.color='var(--danger, #e66)';
     const button=el('button',{type:'button'});
     if(item.installed){
-      button.className='btn-ghost';button.textContent=t('Sil','Delete');button.disabled=state.busy;
+      button.className='btn-ghost';button.textContent=item.selected?t('Korumalı','Protected'):t('Sil','Delete');button.disabled=state.busy || item.selected;
       button.onclick=()=>{
         const name=en()?item.label_en:item.label_tr;
         if(!window.confirm(t(`${name} (${size(item.bytes)}) diskten silinsin mi? Gerekirse buradan yeniden kurabilirsin.`,`Delete ${name} (${size(item.bytes)}) from disk? You can reinstall it here later.`)))return;
@@ -79,15 +82,17 @@
     actions.append(el('span',{className:'muted',style:'font-size:12px',textContent:t('Boş alan: ','Free space: ')+size(state.free_bytes)}));
     host.append(actions);
     const list=el('div',{style:'margin-top:10px'});
+    const loraExpanded = loraHost?.querySelector('details')?.open;
     groups.forEach(([id,tr,eng])=>{
       const items=state.items.filter(item=>item.group===id);
       if(!items.length)return;
       const ready=items.filter(item=>item.installed).length;
-      const group=el('details',{className:'lora-category',open:first?id==='base':expanded.has(id)},
+      const group=el('details',{className:'lora-category',open:id==='lora' && loraHost ? !!loraExpanded : first?id==='base':expanded.has(id)},
         el('summary',{textContent:`${en()?eng:tr} · ${ready}/${items.length}`}),
         el('div',{className:'lora-category-items'},...items.map(row)));
       group.dataset.group=id;
-      list.append(group);
+      if (id === 'lora' && loraHost) loraHost.replaceChildren(group);
+      else list.append(group);
     });
     host.append(list);
   }
@@ -105,5 +110,6 @@
   }
   new MutationObserver(()=>render()).observe(document.documentElement,{attributes:true,attributeFilter:['lang']});
   window.addEventListener('h3-model-files-changed',()=>{if(!state?.busy)load();});
+  window.addEventListener('h3-model-selection-changed',load);
   load();
 })();

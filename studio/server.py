@@ -1365,6 +1365,7 @@ class GenerateBody(BaseModel):
     _motion_original_audio: Optional[str] = PrivateAttr(default=None)
     continuation_method: str = "standard"
     continuum_chunks: int = Field(1, ge=1, le=16)
+    continuum_predecode_unload: bool = False
     continuum_segment_prompts: list[str] | None = None
     continuum_context: str = Field("", max_length=8000)
     continuum_continuity: str = "balanced"
@@ -3079,6 +3080,12 @@ async def generate(body: GenerateBody):
                           'continuum_context':context, 'continuum_continuity':continuity_mode,
                           'continuum_extendable':bool(body.continuum_extendable),
                           'continuum_prefix_chunks':len(previous)}
+        if body.continuum_predecode_unload:
+            if 'VRAM_Debug' not in info:
+                raise HTTPException(409, 'Pre-VAE unload requires the KJNodes VRAM_Debug node')
+            if native_parent:
+                raise HTTPException(409, 'Pre-VAE unload is available for full Continuum runs')
+            continuum_data['continuum_predecode_unload'] = True
         if follow_video:
             continuum_data['continuum_ref_video'] = ref_videos[0]
             if body._motion_original_audio:
@@ -8372,11 +8379,13 @@ def _job_weight_files():
     return names
 
 
+def _selected_weight_files():
+    return {Path(name).name for graph in ("fl2va", "ref2va")
+            for name in h3_models.resolve(graph).values() if name}
+
+
 def _protected_weight_files():
-    names=set(h3_models.defaults().values())
-    for graph in ("fl2va","ref2va"):
-        names.update(h3_models.resolve(graph).values())
-    return names | _job_weight_files()
+    return _selected_weight_files() | _job_weight_files()
 
 
 def _weight_downloads_busy():
@@ -8398,7 +8407,9 @@ async def _ensure_weights_idle():
 
 @app.get("/api/models/storage")
 async def model_storage_get():
-    return {"files":model_storage.inventory(h3_models.MODELS_ROOT,_protected_weight_files())}
+    selected = _selected_weight_files()
+    files = model_storage.inventory(h3_models.MODELS_ROOT, selected | _job_weight_files())
+    return {"files": [{**file, "selected": file["file"] in selected} for file in files]}
 
 
 @app.post("/api/models/storage/delete")
@@ -8448,7 +8459,7 @@ async def model_downloads_delete(body: ModelDownloadDeleteBody):
     async with _lock:
         await _ensure_weights_idle()
         try:
-            result=model_downloads.remove(body.id,_job_weight_files())
+            result=model_downloads.remove(body.id, _protected_weight_files())
         except (KeyError, FileNotFoundError):
             raise HTTPException(404,{"code":"storage.notFound"})
         except ValueError as exc:

@@ -135,6 +135,7 @@ SETUP_HINTS: dict[str, dict[str, str]] = {
         "documentary": "documentary observational pacing",
         "explainer": "how-it-works explainer pacing, one mechanism per shot, clear cause-and-effect motion, uncluttered framing",
         "intro": "title-sequence / intro pacing",
+        "handmade": "workbench craft ASMR, hands and tools in fixed close framing, one visible material change per shot, synchronized workshop sounds, finished object at the end",
         "outro": "end-credits / outro pacing",
     },
 }

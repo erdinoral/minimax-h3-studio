@@ -5608,7 +5608,7 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 .support-featured-sponsor .mode-hint { margin-bottom: 0; }
 .sponsor-banner { display: block; position: relative; flex: 0 0 26px; height: 26px; min-width: 0; width: 100%; overflow: hidden; border-radius: 5px; background: #0b1019; text-decoration: none; }
 .sponsor-banner-message { position: absolute; inset: 0 auto 0 100%; display: flex; align-items: center; white-space: nowrap; color: #ff6262; font: 600 12px/26px ui-monospace, monospace; letter-spacing: .06em; text-shadow: 0 0 8px #ff303066; visibility: hidden; }
-.sponsor-banner.is-showing .sponsor-banner-message { visibility: visible; animation: sponsor-sign-pass 7s linear both; }
+.sponsor-banner.is-showing .sponsor-banner-message { visibility: visible; animation: sponsor-sign-pass var(--sponsor-duration, 7s) linear both; }
 @keyframes sponsor-sign-pass { from { transform: translateX(0); } to { transform: translateX(calc(-100% - var(--sponsor-travel, 1100px))); } }
 @media (prefers-reduced-motion: reduce) { .sponsor-banner.is-showing .sponsor-banner-message { animation: none; inset: 0 8px; overflow: hidden; text-overflow: ellipsis; } }
 .scene-generation-settings > #video-workflow-controls { grid-column: 1 / -1; margin-bottom: 0; }
@@ -5703,3 +5703,59 @@ body:not(.ws-director) #lora-hint { display: none !important; }
 #cinema-refmod-slot .h3-refmod-label { display:inline-flex; gap:8px; font-size:.8rem; margin:0; }
 #cinema-refmod-slot .h3-refmod-label input { margin:0; }
 .continuum-extendable small { display:block; margin-top:2px; font-size:.75rem; }
+
+#view-settings .settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 20px;
+}
+#view-settings .settings-tabs [aria-selected="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+#view-settings [role="tabpanel"] > label {
+  display: block;
+  margin-block: 10px;
+}
+#view-settings #hardware-profile .hardware-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+#hardware-onboarding {
+  width: min(640px, calc(100% - 32px));
+  max-height: 85vh;
+  padding: 24px;
+  color: var(--text);
+  background: var(--panel, #202127);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+#hardware-onboarding::backdrop { background: rgb(0 0 0 / 65%); }
+#hardware-onboarding .hardware-fields { display: grid; gap: 12px; margin-block: 16px; }
+#hardware-onboarding label { display: grid; gap: 4px; }
+.model-state {
+  display: inline-block;
+  margin-inline-start: 8px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.model-state.installed { background: #263e38; color: #b5ebcf; }
+.model-state.selected { background: #253e61; color: #c5ddff; }
+
+.sponsor-banner-message { gap: 3em; }
+@media (prefers-reduced-motion: reduce) {
+  .sponsor-banner.is-showing .sponsor-banner-message {
+    flex-wrap: wrap;
+    align-content: center;
+    column-gap: 1.2em;
+    row-gap: 0;
+    line-height: 1.15;
+    white-space: normal;
+  }
+  .sponsor-banner-message > span { white-space: nowrap; }
+}

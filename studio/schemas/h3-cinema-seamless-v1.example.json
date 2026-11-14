@@ -59,7 +59,9 @@
       "music": "N/A unless the user asked for score. This becomes non_diegetic_music.",
       "important": "Must-lock continuity (wardrobe, prop in hand). Short.",
       "opening_frame": "Visible composition at the start. On continue it equals the previous ending_frame.",
-      "ending_frame": "Visible composition at the end; the next continue section starts from it."
+      "ending_frame": "Visible composition at the end; the next continue section starts from it.",
+      "cinematic_reveals": "When useful, plan physical detail, held reaction, a clue, then a wide or over-the-shoulder reveal. Keep the reveal outside earlier frames. Use camera fields for shot size, height, side, movement and placement. Use important for prop positions, screen direction and lighting. Match audio to visible actions or distance. Use t2v for deliberate cuts and continue for the same rolling shot, carrying ending_frame into opening_frame.",
+      "production_purpose": "Use the selected Studio purpose to shape the sections: short_film, music_video, ad, trailer, social, documentary, explainer, handmade, intro or outro. Set the purpose in Studio. For handmade, show a single material change per section, consistent workspace and hands, and workshop sound. For explainer, show one mechanism and its visible cause and effect per section."
     },
     "cast_guide": {
       "characters": "Invent unique names from about. notes = ENGLISH appearance, age, wardrobe (identity lock). voice optional English. trigger = same as name. lora_id empty. No images.",
@@ -145,7 +147,8 @@
       "The story follows the human's scenario and scene count.",
       "All visual fields are English; dialogue_lang matches the dialogue.",
       "_instructions and _user are deleted; the answer is only valid JSON."
-    ]
+    ],
+    "studio_skill": "../skills/h3-studio-authoring/SKILL.md (relative to this template in the repository)"
   },
   "_user": {
     "READ_ME_HUMAN": "Fill scenes + about here, or just write the scene count, topic and scenario in your chat message. Then send this WHOLE file to an AI.",

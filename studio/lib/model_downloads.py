@@ -37,6 +37,12 @@ PACKS = [
      "note": ("Görsel üretimi ve karakter sayfaları.", "Image generation and character sheets."),
      "files": [("diffusion_models", "minimax_h3_image_pruned_int8_convrot.safetensors", _hf(H3_IMAGE, "diffusion_models/minimax_h3_image_pruned_int8_convrot.safetensors")),
                ("vae", "minimax_h3_image_vae_fp16.safetensors", _hf(H3_IMAGE, "vae/minimax_h3_image_vae_fp16.safetensors"))]},
+    {"id": "fl2va-int4", "group": "optional", "bytes": int(11.3 * GB),
+     "label": ("FL2VA INT4 · düşük bellek", "FL2VA INT4 · lower memory"),
+     "note": ("Daha küçük video modeli. İndirdikten sonra Gelişmiş · H3 modelleri bölümünde FL2VA olarak seç. Ortak metin kodlayıcı ve VAE'ler gerekli.",
+              "Smaller video model. After downloading, select it as FL2VA under Advanced H3 models. Requires the shared text encoder and VAEs."),
+     "files": [("diffusion_models", "minimax_h3_fl2va_pruned_int4_convrot.safetensors",
+                _hf("Merserk/MiniMax-H3-INT4-ConvRot", "minimax_h3_fl2va_pruned_int4_convrot.safetensors"))]},
     {"id": "encoder-int8", "group": "optional", "bytes": int(27.1 * GB),
      "label": ("INT8 metin kodlayıcı", "INT8 text encoder"),
      "note": ("NVFP4 desteklemeyen GPU'lar için alternatif.", "Alternative for GPUs without NVFP4 support."),
@@ -113,15 +119,19 @@ def busy():
 
 def catalog():
     has_key = bool(lora_access.key())
+    selected = {Path(name).name for graph in ("fl2va", "ref2va")
+                for name in h3_models.resolve(graph).values() if name}
     rows = []
     for item in _items().values():
         installed = _installed(item)
         active = _current["id"] == item["id"]
-        on_disk = sum(path.stat().st_size for path in _files_on_disk(item)) if installed else 0
+        paths = _files_on_disk(item) if installed else []
+        on_disk = sum(path.stat().st_size for path in paths)
+        names = {name for _, name, _ in item["files"]} if item["kind"] == "pack" else {path.name for path in paths}
         rows.append({"id": item["id"], "group": item["group"],
             "label_tr": item["label"][0], "label_en": item["label"][1],
             "note_tr": item["note"][0], "note_en": item["note"][1],
-            "bytes": on_disk or item["bytes"], "installed": installed,
+            "bytes": on_disk or item["bytes"], "installed": installed, "selected": bool(names & selected),
             "queued": item["id"] in _queue and not active, "active": active,
             "phase": _current["phase"] if active else "",
             "progress": round(min(99.0, 100 * _current["done"] / item["bytes"]), 1) if active and item["bytes"] else 0,

@@ -1,0 +1,49 @@
+#view-music-video {
+  grid-template-areas: "scene player ayar" "prompt prod ayar";
+  overflow: auto;
+}
+.music-video form { display: contents; }
+.music-video .zone { padding: 12px; overflow: auto; }
+.music-video .file-pick { margin-bottom: 10px; }
+.music-video .player-stage { min-height: 180px; }
+.music-video .player-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.music-video [hidden] { display: none !important; }
+.music-video .zone-prompt { gap: 8px; }
+.music-video textarea { width: 100%; box-sizing: border-box; min-height: 65px; resize: vertical; }
+.music-video-wave {
+  position: relative;
+  min-height: 72px;
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+.music-video-wave:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
+.music-video-wave:has(input:enabled) { cursor: crosshair; }
+.music-video-wave canvas { width: 100%; height: 100%; position: absolute; inset: 0; }
+.music-video-wave input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }
+.music-video-range-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-top: 8px; }
+.music-video-range-row label { display: flex; align-items: center; gap: 6px; }
+.music-video-range-row input { width: 76px; }
+.music-video output { font-variant-numeric: tabular-nums; }
+#music-video-status { overflow-wrap: anywhere; }
+#music-video-wave-status { margin: 4px 0 0; }
+#music-video-wave-status:empty { display: none; }
+@media (max-width: 950px) {
+  #view-music-video {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas: "scene player" "prompt prod" "ayar ayar";
+    align-content: start;
+  }
+}
+@media (max-width: 620px) {
+  #view-music-video {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas: "scene" "player" "prod" "prompt" "ayar";
+  }
+  .music-video .zone-scene { height: auto; }
+}

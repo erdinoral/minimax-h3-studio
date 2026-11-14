@@ -207,10 +207,11 @@
     "social",
     "documentary",
     "explainer",
+    "handmade",
     "intro",
     "outro",
   ];
-  const CINEMA_PURPOSE_KEYS = ["short_film", "music_video", "ad", "explainer", "intro", "outro"];
+  const CINEMA_PURPOSE_KEYS = ["short_film", "music_video", "ad", "explainer", "handmade", "intro", "outro"];
   // Kept as inert compatibility values while old saved settings are loaded.
   // The public UI no longer exposes this mode.
   const ADULT_LORA_ID = "erosmax-4step";
@@ -4324,6 +4325,7 @@
     modal.setAttribute("aria-hidden", "false");
     const story = $("cinema-ai-story");
     if (!story.value.trim()) story.value = ensureCinema().role_script || "";
+    if (ensureCinema().setup?.purpose === "handmade") $("cinema-ai-total").value = "30";
     $("cinema-ai-status").textContent = "";
     syncCinemaAiCount();
     story.focus();
@@ -4951,7 +4953,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (state.studioWorkspace !== "director") {
       state.studioWorkspace = "director";
       document.body.classList.add("ws-director");
-      document.body.classList.remove("ws-scene", "ws-motion", "ws-game");
+      document.body.classList.remove("ws-scene", "ws-motion", "ws-game", "ws-music");
+      $("view-studio")?.classList.remove("hidden");
+      $("view-music-video")?.classList.add("hidden");
+      $("music-video-result")?.pause();
+      $("music-video-source")?.pause();
+      $("music-video-original")?.pause();
       document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
         const on = btn.dataset.ws === "director";
         btn.classList.toggle("on", on);
@@ -6717,8 +6724,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function syncDirectorBriefFromResponse(data) {
-    applyCinemaFromDirector(data);
+    if (!handmadeSceneWorkflow()) applyCinemaFromDirector(data);
     const brief = data && data.brief;
+    if (data?.ready) fillHandmadeSections(brief);
     const shots = brief && Array.isArray(brief.shots) ? brief.shots : [];
     if (shots.length) {
       state.directorBrief = brief;
@@ -7682,6 +7690,31 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (bs && state.projectStyle) bs.value = state.projectStyle;
   }
 
+  function applyHandmadeDefaults() {
+    const cinema = ensureCinema();
+    cinema.duration = 5;
+    cinema.quality = "480";
+    cinema.steps = 8;
+    setAspect("9:16");
+    setDuration(cinema.duration);
+    setQuality(cinema.quality);
+    prepareDraftLora("draft");
+    setCinemaStudioMode("seamless", { persist: false });
+    renderCinemaKnobs();
+    if (state.studioWorkspace === "scene") window.openContinuumSections?.();
+  }
+
+  function handmadeSceneWorkflow() {
+    return state.projectPurpose === "handmade" && state.studioWorkspace === "scene";
+  }
+
+  function fillHandmadeSections(brief) {
+    if (!handmadeSceneWorkflow()) return false;
+    const prompts = (brief?.shots || []).map(shot => String(shot.h3Prompt || shot.prompt || "").trim());
+    return prompts.length > 0 && prompts.every(Boolean) &&
+      window.openContinuumSections?.(prompts);
+  }
+
   function selectProjectChip(btn, opts) {
     if (!btn || btn.disabled) return;
     const g = btn.dataset.group;
@@ -7692,6 +7725,12 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       state.projectPurpose = state.projectPurpose === p ? null : p;
       // Music video = silent visual only; all other purposes keep MiniMax audio
       state.projectSilent = state.projectPurpose === "music_video";
+      if (state.projectPurpose === "handmade") {
+        ensureCinema().setup.purpose = "handmade";
+        applyHandmadeDefaults();
+      } else if (ensureCinema().setup.purpose === "handmade") {
+        ensureCinema().setup.purpose = state.projectPurpose || "auto";
+      }
       syncProjectChips();
       const label = purposeLabel(state.projectPurpose) || "—";
       if (!state.projectPurpose) {
@@ -7741,6 +7780,17 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function directorChatRequest(message, onProgress) {
+    const sections = handmadeSceneWorkflow()
+      ? window.getVideoWorkflowPayload?.().continuum_segment_prompts : null;
+    if (sections?.length) {
+      const existing = sections.map((prompt, i) => prompt ? `Section ${i + 1}: ${prompt}` : "").filter(Boolean);
+      message += `\n\nScene Continuum: ${sections.length} cards, ${state.duration || 5} seconds each. ` +
+        "Use the current card count unless I explicitly request a new duration. " +
+        "Return one finished English h3Prompt per card in brief.shots, in order, up to 16 cards. " +
+        "Keep one continuous craft action per card and advance the material from the previous card. " +
+        "Use the same hands, tools, workbench and lighting. Use workshop sounds only.";
+      if (existing.length) message += "\nCurrent card drafts (use as context):\n" + existing.join("\n");
+    }
     const payload = {
       lora_names: (collectLoraPayload().lora_name || "").split("|").filter(Boolean),
       session_id: state.directorSessionId,
@@ -7750,8 +7800,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       visual_style: state.projectStyle,
       silent_audio: state.projectSilent || state.projectPurpose === "music_video",
       clip_duration: state.duration || 5,
-      cinema_studio:
-        !!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden"),
+      cinema_studio: !handmadeSceneWorkflow() &&
+        (!!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden")),
       prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
     };
     // Prefer SSE stream so thinking shows in the same assistant row
@@ -8543,6 +8593,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function applyBrief(queue) {
+    if (handmadeSceneWorkflow()) {
+      if (!fillHandmadeSections(state.directorBrief)) {
+        toast(tt("dir.handmadeSectionsMissing"));
+        return;
+      }
+      if (queue) {
+        setDirectorOpen(false);
+        await submitGenerate();
+      } else {
+        tToast("toast.shotListTransfer");
+      }
+      return;
+    }
     if (!state.directorSessionId) {
       tToast("toast.directorTalkFirst");
       return;
@@ -8785,13 +8848,16 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function setStudioWorkspace(ws) {
-    const next = normLane(ws);
+    const next = ws === "music" ? ws : normLane(ws);
     const changed = state.studioWorkspace !== next;
     state.studioWorkspace = next;
     document.body.classList.toggle("ws-director", next === "director");
     document.body.classList.toggle("ws-scene", next === "scene");
     document.body.classList.toggle("ws-motion", next === "motion");
     document.body.classList.toggle("ws-game", next === "game");
+    document.body.classList.toggle("ws-music", next === "music");
+    $("view-studio")?.classList.toggle("hidden", next === "music");
+    $("view-music-video")?.classList.toggle("hidden", next !== "music");
     document.dispatchEvent(new CustomEvent("h3-workspace", { detail: { workspace: next } }));
     document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
       const on = btn.dataset.ws === next;
@@ -8806,7 +8872,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (next === "motion" && state.produceMode !== "v2v") setProduceMode("v2v");
     if (next === "scene" && (state.produceMode === "v2v" || state.produceMode === "cinema")) setProduceMode("t2v");
     if (changed) {
-      setProdLane(next);
+      setProdLane(next === "music" ? "scene" : next);
       if (next === "director") {
         void openCinemaStudio();
       } else if (!$("view-cinema")?.classList.contains("hidden")) {
@@ -10351,6 +10417,13 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const typed = $("prompt")?.value.trim() || "";
     const sectionPrompt = state.produceMode === "v2v" ? "" : String(window.getContinuumMainPrompt?.() || "").trim();
     const prompt = sectionPrompt || typed;
+    if (handmadeSceneWorkflow()) {
+      const sections = window.getVideoWorkflowPayload?.().continuum_segment_prompts;
+      if (sections?.some(section => !section)) {
+        noteGenerate(tt("dir.handmadeSectionsMissing"));
+        return;
+      }
+    }
     if (!prompt && state.produceMode !== "v2v") {
       noteGenerate(tf("toast.writePrompt"));
       return false;
@@ -11139,6 +11212,8 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errDetail(data) || tt("settings.h3Fail"));
       await loadH3Models();
+      localStorage.removeItem("h3.hardwarePendingModel");
+      window.dispatchEvent(new Event("h3-model-selection-changed"));
       toast(reset ? tt("settings.h3ResetOk") : tt("settings.h3Saved"));
       if (status) status.textContent = reset ? tt("settings.h3ResetOk") : tt("settings.h3Saved");
     } catch (e) {
@@ -12273,6 +12348,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
         }
         state.projectPurpose = id === "auto" ? null : id;
         state.projectSilent = id === "music_video";
+        if (id === "handmade") applyHandmadeDefaults();
         syncProjectChips();
       }
       pill.classList.remove("open");
@@ -13323,6 +13399,185 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     exitGalleryMergeMode();
     $("view-gallery")?.classList.add("hidden");
   });
+  const settingsTabs = [...document.querySelectorAll("#view-settings [role=tab]")];
+  function selectSettingsTab(tab, focus = false) {
+    for (const item of settingsTabs) {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", String(selected));
+      item.tabIndex = selected ? 0 : -1;
+      $(item.getAttribute("aria-controls")).hidden = !selected;
+    }
+    if (focus) tab.focus();
+  }
+  settingsTabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => selectSettingsTab(tab));
+    tab.addEventListener("keydown", event => {
+      const last = settingsTabs.length - 1;
+      const target = { ArrowLeft: index ? index - 1 : last,
+        ArrowRight: index === last ? 0 : index + 1, Home: 0, End: last }[event.key];
+      if (target === undefined) return;
+      event.preventDefault();
+      selectSettingsTab(settingsTabs[target], true);
+    });
+  });
+
+  const hardwareForm = $("hardware-profile");
+  const hardwareSummary = $("hardware-summary");
+  function hardwareRecommendation() {
+    const ram = Number($("hardware-ram").value);
+    const vram = Number($("hardware-vram").value);
+    if (!$("hardware-gpu").value || !(ram > 0 && vram > 0)) return null;
+    if (vram < 12 || ram < 24) return { quality: "480", lowMemory: true };
+    if (vram < 20 || ram < 40) return { quality: "736", lowMemory: false };
+    return { quality: "768", lowMemory: false };
+  }
+
+  function showHardwareRecommendation() {
+    const profile = hardwareRecommendation();
+    hardwareSummary.textContent = profile
+      ? tf("settings.hardwareRecommendation", { quality: profile.quality }) +
+        (profile.lowMemory ? " " + tt("settings.hardwareInt4") : "")
+      : tt("settings.hardwareEnter");
+  }
+
+  hardwareForm.addEventListener("input", showHardwareRecommendation);
+  document.addEventListener("h3-lang", showHardwareRecommendation);
+  showHardwareRecommendation();
+  function selectHardwareCapacity(select, measuredGb) {
+    if (!(measuredGb > 0)) return;
+    // Drivers can report a little less than the advertised capacity.
+    const size = [...select.options].reverse().find(option =>
+      Number(option.value) > 0 && Number(option.value) <= measuredGb + 0.5);
+    select.value = size?.value || "";
+  }
+
+  $("hardware-detect").addEventListener("click", async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const response = await fetch("/api/system", { cache: "no-store" });
+      if (!response.ok) throw Error(tt("settings.hardwareDetectFail"));
+      const system = await response.json();
+      const gpu = $("hardware-gpu");
+      const name = String(system.gpu_name || "").toUpperCase().replace(/\s+/g, " ").trim();
+      const detected = [...gpu.options]
+        .map(option => option.value)
+        .filter(value => value.startsWith("RTX "))
+        .sort((a, b) => b.length - a.length)
+        .find(value => {
+          const label = value.toUpperCase();
+          return (" " + name + " ").includes(" " + label + " ");
+        });
+      if (name) gpu.value = detected || "other";
+      selectHardwareCapacity($("hardware-ram"), system.ram_total_gb);
+      selectHardwareCapacity($("hardware-vram"), system.vram_total_gb);
+      showHardwareRecommendation();
+      if (!(system.vram_total_gb > 0)) hardwareSummary.textContent = tt("settings.hardwareDetectFail");
+    } catch {
+      hardwareSummary.textContent = tt("settings.hardwareDetectFail");
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  const hardwareSetup = $("hardware-onboarding");
+  const hardwarePendingKey = "h3.hardwarePendingModel";
+  async function activateHardwareModel() {
+    const filename = localStorage.getItem(hardwarePendingKey);
+    if (!filename) return false;
+    const catalog = await fetch("/api/h3-models");
+    if (!catalog.ok) throw Error(tt("settings.h3Fail"));
+    const { options } = await catalog.json();
+    if (!options?.unet?.includes(filename)) return false;
+    const downloads = await fetch("/api/models/downloads");
+    if (!downloads.ok) throw Error(tt("settings.h3Fail"));
+    if (!(await downloads.json()).items.some(item => item.id === "shared" && item.installed)) return false;
+    if (localStorage.getItem(hardwarePendingKey) !== filename) return false;
+    const response = await fetch("/api/h3-models", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unet: filename }),
+    });
+    const result = await response.json();
+    if (!response.ok || result.resolved?.fl2va?.unet !== filename) throw Error(tt("settings.h3Fail"));
+    if (localStorage.getItem(hardwarePendingKey) === filename) localStorage.removeItem(hardwarePendingKey);
+    void loadH3Models();
+    window.dispatchEvent(new Event("h3-model-selection-changed"));
+    return true;
+  }
+
+  let hardwareActivation;
+  function syncHardwareModel() {
+    if (hardwareActivation) return hardwareActivation;
+    hardwareActivation = activateHardwareModel().finally(() => { hardwareActivation = null; });
+    return hardwareActivation;
+  }
+  window.addEventListener("h3-model-files-changed", () => {
+    void syncHardwareModel().catch(error => { hardwareSummary.textContent = error.message; });
+  });
+
+  hardwareSetup.addEventListener("close", () => {
+    $("settings-profiles").append(hardwareForm);
+    localStorage.setItem("h3.hardwareSetupSeen", "1");
+  });
+  $("hardware-later").addEventListener("click", () => hardwareSetup.close());
+
+  hardwareForm.addEventListener("submit", async event => {
+    event.preventDefault();
+    const profile = hardwareRecommendation();
+    if (!profile) return;
+    const button = event.submitter;
+    if (button) button.disabled = true;
+    try {
+      const introspection = await fetch("/api/models/downloads");
+      if (!introspection.ok) throw Error(tt("settings.h3Fail"));
+      const downloads = await introspection.json();
+      const id = profile.lowMemory ? "fl2va-int4" : "fl2va";
+      const filename = profile.lowMemory ? "minimax_h3_fl2va_pruned_int4_convrot.safetensors"
+        : "minimax_h3_fl2va_pruned_int8_convrot.safetensors";
+      const ids = ["shared", id];
+      if (!ids.every(key => downloads.items.some(item => item.id === key))) {
+        throw Error(tt("settings.hardwareCatalogMissing"));
+      }
+      const missing = downloads.items.filter(item => ids.includes(item.id) && !item.installed);
+      const response = await fetch("/api/models/downloads/install", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: missing.map(item => item.id) }),
+      });
+      if (!response.ok) throw Error(tt("settings.h3Fail"));
+      localStorage.setItem(hardwarePendingKey, filename);
+      if (!missing.some(item => item.id === "shared")) await syncHardwareModel();
+      window.dispatchEvent(new Event("h3-model-files-changed"));
+      const modelNote = missing.length ? tt("settings.hardwareQueued") : tt("settings.hardwareModelReady");
+      setDuration(5);
+      setQuality(profile.quality);
+      $("steps").value = "20";
+      document.querySelectorAll("#speed-chips [data-speed]").forEach(chip => {
+        chip.classList.remove("on");
+        chip.setAttribute("aria-pressed", "false");
+      });
+      autosaveProductionSettings();
+      hardwareSummary.textContent = [tf("settings.hardwareApplied", { quality: profile.quality }), modelNote].filter(Boolean).join(" ");
+      if (hardwareSetup.open) {
+        hardwareSetup.close();
+        $("btn-settings").click();
+        selectSettingsTab($("settings-tab-weights"));
+      }
+    } catch (error) {
+      hardwareSummary.textContent = error.message;
+    } finally {
+      if (button) button.disabled = false;
+    }
+  });
+
+  async function offerHardwareSetup() {
+    if (localStorage.getItem("h3.hardwareSetupSeen") || localStorage.getItem(PRODUCTION_LS_KEY)) return;
+    const response = await fetch("/api/production");
+    if (!response.ok || (await response.json()).saved || localStorage.getItem("h3.hardwareSetupSeen")) return;
+    $("hardware-onboarding-fields").append(hardwareForm);
+    hardwareSetup.showModal();
+  }
+  void offerHardwareSetup().catch(() => {});
+  void syncHardwareModel().catch(() => {});
   void loadH3Models();
   $("btn-settings")?.addEventListener("click", () => {
     setDirectorLlmOpen(false);

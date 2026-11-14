@@ -2,36 +2,38 @@
   const banner = document.getElementById("sponsor-banner");
   if (!banner) return;
   const text = banner.querySelector("span");
-  let names = ["Diamond204a", "Corey", "Jürgen"];
-  let turn = 0;
-  let hideTimer;
-  const english = () => document.documentElement.lang !== "tr";
+  const defaults = ["Diamond204a", "Corey", "Jürgen"];
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let names = defaults;
+  let supportTurn = false;
+
   function show() {
-    if (document.hidden) return;
-    banner.style.setProperty("--sponsor-travel", `${banner.clientWidth}px`);
-    const position = turn % (names.length + 1);
-    const sponsorTurn = position < names.length;
-    const name = names[position];
-    text.textContent = sponsorTurn
-      ? name === "Diamond204a"
-        ? english() ? "THANK YOU · Diamond204a · Our first sponsor · $25 support" : "TEŞEKKÜRLER · Diamond204a · İlk sponsorumuz · $25 destek"
-        : name === "Corey"
-          ? english() ? "THANK YOU · Corey · $5 support" : "TEŞEKKÜRLER · Corey · $5 destek"
-          : `${english() ? "THANK YOU" : "TEŞEKKÜRLER"} · ${name}`
-      : english() ? "Support H3 Studio · Become a sponsor on Buy me a coffee ☕" : "H3 Studio’ya destek ol · Buy me a coffee üzerinden sponsor olun ☕";
+    if (document.hidden || !banner.clientWidth) {
+      setTimeout(show, 1000);
+      return;
+    }
+    const turkish = window.h3Lang?.() === "tr";
     banner.classList.remove("is-showing");
-    void banner.offsetWidth;
+    if (supportTurn) {
+      text.textContent = turkish ? "Buy Me a Coffee üzerinden destek olun" : "Support us on Buy Me a Coffee";
+    } else {
+      text.replaceChildren(...names.map(name => {
+        const credit = document.createElement("span");
+        credit.textContent = turkish ? name + " · Teşekkürler" : name + " · Thank you";
+        return credit;
+      }));
+    }
+    const duration = reducedMotion.matches ? 7000 :
+      Math.max(6000, Math.round((banner.clientWidth + text.scrollWidth) / 104 * 1000));
+    banner.style.setProperty("--sponsor-travel", banner.clientWidth + "px");
+    banner.style.setProperty("--sponsor-duration", duration + "ms");
     banner.classList.add("is-showing");
-    clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => banner.classList.remove("is-showing"), 7000);
-    turn++;
+    supportTurn = !supportTurn;
+    setTimeout(show, duration + 250);
   }
-  document.addEventListener("h3-donors", (event) => {
-    names = [...new Set(["Diamond204a", "Corey", "Jürgen", ...(event.detail?.names || [])])];
-  });
-  document.addEventListener("h3-lang", () => {
-    if (banner.classList.contains("is-showing")) { turn = Math.max(0, turn - 1); show(); }
+
+  document.addEventListener("h3-donors", event => {
+    names = [...new Set([...defaults, ...(event.detail?.names || [])])];
   });
   setTimeout(show, 1000);
-  setInterval(show, 10000);
 })();

@@ -72,7 +72,9 @@
       "camera_speed": "slow, fast, or empty for normal.",
       "camera_target": "Subject toward which the camera moves.",
       "transition": "hard cut or reverse angle on t2v; continuous on continue.",
-      "beats": "Timed visible beats at 0s, 2s and 4s; consistent with action."
+      "beats": "Timed visible beats at 0s, 2s and 4s; consistent with action.",
+      "cinematic_reveals": "When useful, plan physical detail, held reaction, a clue, then a wide or over-the-shoulder reveal. Keep the reveal outside earlier frames. Use camera fields for shot size, height, side, movement and placement. Use important for prop positions, screen direction and lighting. Match audio to visible actions or distance. Use t2v for deliberate cuts and continue for the same rolling shot, carrying ending_frame into opening_frame.",
+      "production_purpose": "Use the selected Studio purpose to shape the sections: short_film, music_video, ad, trailer, social, documentary, explainer, handmade, intro or outro. Set the purpose in Studio. For handmade, show a single material change per section, consistent workspace and hands, and workshop sound. For explainer, show one mechanism and its visible cause and effect per section."
     },
     "strict_section_contract": {
       "why": "Studio does NOT guess character or location calls from prose inside prompt/action. It binds cards only from the exact section keys below.",
@@ -190,7 +192,8 @@
       "The story follows the human's scenario and scene count.",
       "All visual fields are English; dialogue_lang matches the dialogue.",
       "_instructions and _user are deleted; the answer is only valid JSON."
-    ]
+    ],
+    "studio_skill": "../skills/h3-studio-authoring/SKILL.md (relative to this template in the repository)"
   },
   "_user": {
     "READ_ME_HUMAN": "Fill scenes + about here, or just write the scene count, topic and scenario in your chat message. Then send this WHOLE file to an AI.",

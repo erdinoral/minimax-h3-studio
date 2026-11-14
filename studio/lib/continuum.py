@@ -196,7 +196,19 @@ def build(job):
         inputs['reference_images']=['c_refs',0]
     graph['c_sample']=dict(class_type=SAMPLER,inputs=inputs)
     graph['c_video']=dict(class_type='VAEDecode',inputs={'samples':['c_sample',0],'vae':['11',0]})
+    if job.get('continuum_predecode_unload'):
+        graph['c_predecode_unload'] = dict(class_type='VRAM_Debug', inputs={
+            'any_input': ['c_sample', 0], 'unload_all_models': True,
+            'empty_cache': True, 'gc_collect': True,
+        })
+        graph['c_video']['inputs']['samples'] = ['c_predecode_unload', 0]
     graph['c_audio']=dict(class_type='VAEDecodeAudio',inputs={'samples':['c_sample',1],'vae':['24',0]})
+    if job.get('continuum_predecode_unload'):
+        graph['c_audio']['inputs']['samples'] = ['c_predecode_audio', 0]
+        graph['c_predecode_audio'] = dict(class_type='VRAM_Debug', inputs={
+            'any_input': ['c_sample', 1], 'image_pass': ['c_video', 0],
+            'unload_all_models': False, 'empty_cache': False, 'gc_collect': False,
+        })
     graph['c_finish']=dict(class_type='H3ContinuumAssembleSeamV35',inputs={
         'images':['c_video',0],'audio':['c_audio',0],'assembly_plan':['c_sample',2],
         'exact_total_duration':True,'audio_seam':'Auto','video_seam':'Analyze Only',

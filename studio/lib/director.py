@@ -59,6 +59,7 @@ ALLOWED_PURPOSES = (
     "social",
     "documentary",
     "explainer",
+    "handmade",
     "intro",
     "outro",
 )
@@ -101,6 +102,7 @@ def normalize_purpose(value: Any = None, raw: str = "") -> str:
         return v
     blob = f"{v} {raw or ''}".lower()
     pairs = (
+        ("handmade", ("handmade", "el yapımı", "tezgah asmr", "tezgâh asmr")),
         ("explainer", ("nasıl çalışır", "how it works", "how_it_works", "explainer", "açıklayıcı",
                        "comment ça marche", "cómo funciona", "wie funktioniert")),
         ("music_video", ("müzik klibi", "music_video")),
@@ -2217,7 +2219,7 @@ def opening_message(lang: Any = None) -> str:
             "→ then each shot is written as a full **cinematic SCENE** one by one "
             "(character card, micro-action, camera — not keyword soup).\n"
             "**music video** = silent picture + song mux at the end.\n"
-            "Type: short film / ad / trailer / social / documentary / how it works / intro / outro.\n"
+            "Type: short film / ad / trailer / social / documentary / how it works / handmade / intro / outro.\n"
             "Look: realistic, anime, disney, game, 3D CGI, comic, illustration, oil paint, clay, found footage.\n"
             "Give duration + story + character/location; say when the idea is locked.\n"
             "The **Plan** tab lets you read and edit every shot.\n\n"
@@ -2230,7 +2232,7 @@ def opening_message(lang: Any = None) -> str:
         "→ sonra her shot’u **tek tek** sinematik SCENE olarak yazarım "
         "(karakter kartı, mikro eylem, kamera — keyword soup yok).\n"
         "**müzik klibi** = sessiz görüntü + finalde şarkı mux.\n"
-        "Tür: kısa film / reklam / trailer / sosyal / belgesel / nasıl çalışır / intro / outro.\n"
+        "Tür: kısa film / reklam / trailer / sosyal / belgesel / nasıl çalışır / el yapımı / intro / outro.\n"
         "Tarz: gerçekçi, anime, disney, oyun, 3D CGI, çizgi roman, illüstrasyon, yağlı boya, kil, found footage.\n"
         "Süre + hikâye + karakter/lokasyon ver; “tamam / N shot / fikrimiz bu” de.\n"
         "**Plan** sekmesinde tüm shot metinlerini görüp düzenleyebilirsin.\n\n"

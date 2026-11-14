@@ -119,7 +119,7 @@ test("an explicit Play reveals Result only inside the Motion tab", () => {
   const scene = harness({ motion: false });
   scene.context.showMotionResult();
   assert.equal(scene.state.motionView, "workspace");
-  assert.match(source, /selectJob\(j\);\s*showMotionResult\(\);/, "job list Play reveals Result");
+  assert.match(source, /selectJob\(j, \{ autoplay: true \}\);\s*showMotionResult\(\);/, "job list Play reveals Result");
 });
 
 test("the view switch is an accessible tab list bound to the player stage", () => {

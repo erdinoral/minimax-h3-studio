@@ -14,6 +14,15 @@ Living product notes. Items move from **Idea → Spec → Build → Shipped**.
 
 ---
 
+## Cross-workspace production upgrades
+
+1. **Camera technique library.** Show previews from H3 renders and editable prompts. Apply a technique to Scene or one Continuum card. Give Director the same catalog and save reusable camera, lens, lighting and color settings.
+2. **Director storyboard.** Extend existing still approvals with a chapter overview. Review starting frames side by side and reuse approved H3-Image or Studio stills.
+3. **Motion target selection.** Mark a face or object on a frame, preview its tracked mask and allow reselection after cuts. Composite the edited region over the source footage and verify surrounding faces, timing and background.
+4. **Gallery edits.** Send a clip to trim, reframe or color match. Evaluate generative relighting separately.
+5. **Continuum review.** Show what each card inherits. Compare takes with the same inputs and one chosen setting changed. Extend the existing reference card workflow across workspaces.
+
+
 ## Next up
 
 ### Reference cards (pose / motion / costume)
@@ -120,6 +129,7 @@ See "Next up" above.
 
 ## Later
 
+- [ ] **AI Influencer workspace.** Add a dedicated top-level menu inspired by Higgsfield's AI Influencer Studio. The workspace should cover character creation and reuse, photo and video formats, editable shot plans, and preview before generation. Build on the existing character references, storyboard and video tools. Start with a feasibility test that checks whether one saved character keeps the same identity across separate videos with different wardrobe and locations.
 - [ ] Character costume variants as named stills under one character card (UI flow)
 - [ ] Clearer scene-card call list (characters / locations / creatures / vehicles / refs)
 - [ ] Optional: reference role presets in the create form (pose / motion / costume)

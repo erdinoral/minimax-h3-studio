@@ -2,9 +2,29 @@
 
 Living product notes. Items move from **Idea → Spec → Build → Shipped**.
 
+## Current priorities
+
+### High
+
+1. **Continuum reliability.** Verify recovery from the last confirmed segment, regeneration from a selected segment, and face, framing and audio continuity on a long project.
+2. **Director and storyboard.** Show chapter frames side by side, generate only approved shots, choose takes for continuation, and add pose, motion and costume reference cards.
+3. **Motion target selection.** Select a face or object in the source clip, preview tracking, and allow reselection after cuts.
+
+### Medium
+
+1. **Music Video.** Extend single performance clips into editable multi-scene music videos.
+2. **AI Influencer.** The preview tab is in place. Verify character identity across outfits and locations before building the full workflow.
+
+### Low
+
+1. **Editing workspace.** After the higher priorities, test Gallery import, trimming and reordering, music, MP4 export, and reopening saved edits.
+
 ---
 
 ## Now / recently shipped
+
+- [x] Prompt Library fundamentals (categories, preview cards, and local saves)
+- [ ] Prompt Library community contributions (account-free submissions, private review, and approved catalog)
 
 - [x] Chapter-scoped produce (active chapter only)
 - [x] Continue last-frame chain (`mode_locked`, parent after mid-chapter New)
@@ -19,7 +39,7 @@ Living product notes. Items move from **Idea → Spec → Build → Shipped**.
 1. **Camera technique library.** Show previews from H3 renders and editable prompts. Apply a technique to Scene or one Continuum card. Give Director the same catalog and save reusable camera, lens, lighting and color settings.
 2. **Director storyboard.** Extend existing still approvals with a chapter overview. Review starting frames side by side and reuse approved H3-Image or Studio stills.
 3. **Motion target selection.** Mark a face or object on a frame, preview its tracked mask and allow reselection after cuts. Composite the edited region over the source footage and verify surrounding faces, timing and background.
-4. **Gallery edits.** Send a clip to trim, reframe or color match. Evaluate generative relighting separately.
+4. **Gallery edits.** Covered by the low-priority editing workspace. Include trim, reframing and color match in its scope review.
 5. **Continuum review.** Show what each card inherits. Compare takes with the same inputs and one chosen setting changed. Extend the existing reference card workflow across workspaces.
 
 

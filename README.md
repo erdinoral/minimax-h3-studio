@@ -751,6 +751,22 @@ Moving Pinokio to another drive: copy or reinstall, then copy `studio/data` into
 
 ## Troubleshooting
 
+### ComfyUI fails to start with `NameError: name 'List' is not defined`
+
+If the traceback ends in `comfy_kitchen/backends/eager/conv3d.py`, stop Studio and run **Update** in Pinokio to sync ComfyUI and its dependencies. If the same traceback persists, `comfy-kitchen` 0.2.40 is a reported workaround. Run the command from the Studio launcher directory and restart Studio afterward. A later Pinokio update may restore the version requested by ComfyUI.
+
+```powershell
+uv pip install --python app/env/Scripts/python.exe comfy-kitchen==0.2.40
+```
+
+```bash
+uv pip install --python app/env/bin/python comfy-kitchen==0.2.40
+```
+
+### Where is Face Swap in v9.4.0?
+
+Open **Motion → Motion Transfer**, add the source video and a clear photo of the target face, then leave the prompt empty and generate. The empty prompt activates Face Swap in v9.4.0. In builds with the **Face Swap** checkbox, enable it under **Motion Transfer**. Those builds also let you enter a prompt while Face Swap is enabled.
+
 ### Web UI is blank inside the Pinokio app, but works in an external browser
 
 Not a launcher fault — Pinokio's HTTPS reverse proxy (**Caddy**) is missing. Caddy is what serves the `http://localhost:<PORT>` → `https://<PORT>.localhost` endpoints that Pinokio's *embedded* browser loads. Without it the webview has nothing to fetch, while `http://127.0.0.1:<PORT>` keeps working fine in a normal browser.

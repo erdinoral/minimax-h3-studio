@@ -1,0 +1,155 @@
+[
+  {
+    "id": "cathedral-tracking",
+    "title": "Gothic Cathedral Tracking Shot",
+    "category": "camera",
+    "prompt": "[SCENE START] A continuous, hypnotic forward tracking shot glides through the infinite, vaulted corridor of a dark gothic obsidian cathedral. The walls are etched with pulsating, bioluminescent crimson runes that castflickering, hellish shadows across the polished volcanic stone floor. The camera maintains a relentless, smooth velocity, passing through identicalarchways that create a perfect, seamless loop. The atmosphere is thick with swirling, ethereal dark mist and a cold, oppressivesilence. The lighting transitions from deep shadow to the rhythmic, rhythmic glow of the runes, ensuring the final frame perfectly aligns with the initialcomposition for a flawless, infinite transition. Cinematic, 8k, photorealistic, dark fantasy aesthetic. [SCENE END]\n\nVisual style lock: photorealistic live-action cinematography, natural skin texture, realistic reflections, film grain. Stay in this look for the whole shot.\n\nSILENT VISUAL ONLY for music video: no spoken dialogue, no singing lipsync, no generated music, no sound effects, no diegetic audio description. Picture-only cinematic performance; final song will be muxed later. One continuous shot, no cuts, no dialogue, silent.",
+    "video": "/static/prompt-previews/cathedral-tracking.mp4"
+  },
+  {
+    "id": "emerald-light",
+    "title": "Emerald Light Sweep",
+    "category": "lighting",
+    "prompt": "A four-second premium automotive software splash background, one continuous locked-off shot, perfectly centered symmetrical composition. Deep near-black forest green seamless background, subtle emerald volumetric glow. A fine brushed-silver outline of a modern generic car seen from the front materializes in the upper center from a single restrained emerald light sweep. Two slim headlight strokes softly illuminate, elegant thin contour lines, minimalist sophisticated brand motion design, clean dark negative space in the lower center for software branding added separately. First second almost dark, second second the light sweeps across the outline, third second the outline resolves crisply, fourth second holds the same elegant final composition. Flat frontal view of an abstract automotive emblem, not a real showroom and not a moving vehicle. Restrained glow, no fast motion, no camera movement, no text, no letters, no logos, no people, no lens flare, no narration, silent.\n\nSILENT VISUAL ONLY for music video: no spoken dialogue, no singing lipsync, no generated music, no sound effects, no diegetic audio description. Picture-only cinematic performance; final song will be muxed later. One continuous shot, no cuts, no dialogue, silent.",
+    "video": "/static/prompt-previews/emerald-light.mp4"
+  },
+  {
+    "id": "logo-reveal",
+    "title": "Cinematic Logo Reveal",
+    "category": "effects",
+    "prompt": "A cinematic studio-logo reveal. Huge, bold, extruded letters spelling exactly “H3 STUDIO” stand against a deep dark turquoise background. The letters are solid, precisely shaped and arranged on one line.\n\nBegin extremely close to the letter surfaces, so the full title is not yet visible. Moving cinematic imagery appears INSIDE the letter faces, clipped perfectly to their boundaries: an astronaut beneath a star-filled sky, a futuristic city in the rain, and a knight facing a burning castle. These original fictional scenes flow across the letters while the surrounding background remains dark and clean.\n\nThe camera slowly pulls backward, revealing more of the same lettering. During the final second, settle on a partial view of the title, ready for the pullback to continue in the next clip. Keep the letters, their positions and their geometry unchanged throughout.\n\nPremium cinematic lighting, realistic depth, polished metallic amber edges, turquoise shadows. One continuous camera move. No additional text, no subtitles, no existing logos, no recognizable movie characters.\n\nAudio: an original cinematic orchestral build with low percussion, still rising at the end. No dialogue.",
+    "video": "/static/prompt-previews/logo-reveal.mp4"
+  },
+  {
+    "id": "rain-chase",
+    "title": "Rainy Alley Chase",
+    "category": "action",
+    "prompt": "One continuous rear tracking shot through a rain-soaked alley at night. A courier runs toward a closed gate, plants a foot against the wall, vaults the gate and lands running. Keep the courier full-body in frame through the vault. Preserve direction, jacket and stride through the landing. Rain splashes naturally underfoot. No cuts, no slow motion."
+  },
+  {
+    "id": "quiet-portrait",
+    "title": "Quiet Character Portrait",
+    "category": "character",
+    "prompt": "A naturalistic medium close-up of a tired train conductor by a window at dawn. They notice a distant light, blink once, then relax their shoulders. Keep their hair, face and uniform consistent across the shot. Soft window light, realistic skin texture, steady camera, no dialogue."
+  },
+  {
+    "id": "camera-static",
+    "title": "Static Shot",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera holds a static shot from a fixed tripod. Framing stays identical as the tram crosses.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-static.mp4"
+  },
+  {
+    "id": "camera-push-in",
+    "title": "Push In",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera pushes in slowly toward the tram, physically advancing at a fixed focal length. Foreground cobbles expand with visible parallax.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-push-in.mp4"
+  },
+  {
+    "id": "camera-pull-out",
+    "title": "Pull Out",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera pulls out slowly from the tram at a fixed focal length, revealing the courtyard and foreground pillars through visible parallax.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-pull-out.mp4"
+  },
+  {
+    "id": "camera-zoom-in",
+    "title": "Zoom In",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera zooms in smoothly toward the tram from a fixed tripod. The focal length increases while the camera stays in place.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-zoom-in.mp4"
+  },
+  {
+    "id": "camera-zoom-out",
+    "title": "Zoom Out",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera zooms out smoothly from the tram from a fixed tripod. The focal length decreases while the camera stays in place.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-zoom-out.mp4"
+  },
+  {
+    "id": "camera-pan-left",
+    "title": "Pan Left",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera pans left slowly from a fixed tripod, turning horizontally to reveal the stone arch on the left.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-pan-left.mp4"
+  },
+  {
+    "id": "camera-pan-right",
+    "title": "Pan Right",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera pans right slowly from a fixed tripod, turning horizontally to reveal the stone arch on the right.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-pan-right.mp4"
+  },
+  {
+    "id": "camera-tilt-up",
+    "title": "Tilt Up",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera tilts up smoothly from the cobblestones and tram toward the clock tower, pivoting vertically from a fixed tripod.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-tilt-up.mp4"
+  },
+  {
+    "id": "camera-tilt-down",
+    "title": "Tilt Down",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera tilts down smoothly from the clock tower toward the tram and cobblestones, pivoting vertically from a fixed tripod.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-tilt-down.mp4"
+  },
+  {
+    "id": "camera-truck-left",
+    "title": "Truck Left",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera trucks left smoothly along a straight horizontal rail. Nearby pillars slide across the distant clock tower with clear parallax.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-truck-left.mp4"
+  },
+  {
+    "id": "camera-truck-right",
+    "title": "Truck Right",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera trucks right smoothly along a straight horizontal rail. Nearby pillars slide across the distant clock tower with clear parallax.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-truck-right.mp4"
+  },
+  {
+    "id": "camera-pedestal-up",
+    "title": "Pedestal Up",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera pedestals up smoothly, lifting the entire camera vertically while the lens keeps its initial angle. The courtyard opens up above the foreground.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-pedestal-up.mp4"
+  },
+  {
+    "id": "camera-pedestal-down",
+    "title": "Pedestal Down",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera pedestals down smoothly, lowering the entire camera vertically while the lens keeps its initial angle. The cobblestones rise into the foreground.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-pedestal-down.mp4"
+  },
+  {
+    "id": "camera-arc",
+    "title": "Arc Shot",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera arcs smoothly clockwise around the tram at medium distance, moving along a curved path while keeping the tram framed. The clock tower shifts behind it.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-arc.mp4"
+  },
+  {
+    "id": "camera-tracking",
+    "title": "Tracking Shot",
+    "category": "camera",
+    "previewAspect": "1:1",
+    "prompt": "integrated_multimodal_description: [Shot 1] A photorealistic miniature red tram glides slowly across a cobblestone courtyard with a clock tower in the distance and two sandstone pillars in the foreground. Warm late-afternoon light, clean shapes, small realistic details. Start from the supplied image as the exact opening frame. The tram eases forward along the existing rails. Keep the tram, pillars, clock tower and lighting consistent. One continuous shot, no cuts. The camera tracks the moving tram in parallel at matching speed and steady distance. The tram holds its place in frame as the background moves sideways.\n\noverall_soundscape: N/A\n\nnon_diegetic_music: N/A",
+    "video": "/static/prompt-previews/camera-tracking.mp4"
+  }
+]

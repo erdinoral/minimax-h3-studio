@@ -1048,7 +1048,7 @@
     $("btn-open-prompt")?.classList.toggle("hidden", !has);
   }
 
-  function openPromptView(text, meta, seed, jobId) {
+  function openPromptView(text, meta, seed, jobId, videoUrl) {
     if (text !== undefined) setClipPrompt(text, meta, seed);
     const t = (state.clipPrompt || "").trim();
     if (!t) {
@@ -1059,6 +1059,11 @@
     if (pre) pre.textContent = t;
     const report = $('clip-diagnostics-link');
     const reportJobId = jobId || (text === undefined ? state.selectedJobId : null);
+    const save = $("btn-save-library-prompt");
+    if (save) {
+      const preview = videoUrl || state.jobs.find((job) => job.id === reportJobId)?.output?.url;
+      save.onclick = () => window.h3PromptLibrary.openEditor({ prompt: t, video: preview });
+    }
     if (report) {
       report.classList.toggle('hidden', !reportJobId);
       report.href = reportJobId ? `/api/jobs/${encodeURIComponent(reportJobId)}/diagnostics` : '';
@@ -4956,6 +4961,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       document.body.classList.remove("ws-scene", "ws-motion", "ws-game", "ws-music");
       $("view-studio")?.classList.remove("hidden");
       $("view-music-video")?.classList.add("hidden");
+      $("view-influencer")?.classList.add("hidden");
       $("music-video-result")?.pause();
       $("music-video-source")?.pause();
       $("music-video-original")?.pause();
@@ -6454,17 +6460,38 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       session.messages = session.messages || [];
       session.messages.push(msg);
     }
-    const div = document.createElement("div");
-    div.className = `dir-msg ${role}`;
-    const who = role === "user" ? tt("dir.you") : tt("dir.who");
-    div.innerHTML = `<span class="who">${who}</span>`;
-    div.appendChild(document.createTextNode(text || tt("dir.empty")));
-    log.appendChild(div);
+    log.appendChild(createDirectorMessage(role, text));
     log.scrollTop = log.scrollHeight;
   }
 
   function dirThinkPhases() {
     return [tt("dir.think0"), tt("dir.think1"), tt("dir.think2"), tt("dir.think3")];
+  }
+
+  function createDirectorMessage(role, text) {
+    const message = document.createElement("div");
+    message.className = `dir-msg ${role}`;
+    const who = document.createElement("span");
+    who.className = "who";
+    who.textContent = role === "user" ? tt("dir.you") : tt("dir.who");
+    message.append(who);
+    const content = text || tt("dir.empty");
+    if (role === "user") {
+      message.append(document.createTextNode(content));
+      return message;
+    }
+    const parts = String(content).split(/(\*\*[^*\n]+\*\*)/g);
+    for (let index = 0; index < parts.length; index++) {
+      const part = parts[index];
+      if (index % 2) {
+        const emphasis = document.createElement("strong");
+        emphasis.textContent = part.slice(2, -2);
+        message.append(emphasis);
+      } else if (part) {
+        message.append(document.createTextNode(part));
+      }
+    }
+    return message;
   }
   let _dirThinkTimer = null;
   let _dirThinkStarted = 0;
@@ -8719,6 +8746,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   async function pollSystem() {
     try {
       const s = await fetch("/api/system").then((r) => r.json());
+      for (const [id, percent] of [
+        ["cpu", s.cpu_percent], ["ram", s.ram_percent],
+        ["gpu", s.gpu_util], ["vram", s.vram_percent],
+      ]) {
+        const meter = $(`sys-${id}-meter`);
+        if (!meter) continue;
+        meter.hidden = !Number.isFinite(percent);
+        if (!meter.hidden) meter.value = Math.min(100, Math.max(0, percent));
+      }
       $("sys-cpu").textContent = `${s.cpu_percent ?? "—"}%`;
       $("sys-ram").textContent =
         s.ram_used_gb != null
@@ -8848,7 +8884,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function setStudioWorkspace(ws) {
-    const next = ws === "music" ? ws : normLane(ws);
+    const next = ws === "music" || ws === "influencer" ? ws : normLane(ws);
     const changed = state.studioWorkspace !== next;
     state.studioWorkspace = next;
     document.body.classList.toggle("ws-director", next === "director");
@@ -8856,8 +8892,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     document.body.classList.toggle("ws-motion", next === "motion");
     document.body.classList.toggle("ws-game", next === "game");
     document.body.classList.toggle("ws-music", next === "music");
-    $("view-studio")?.classList.toggle("hidden", next === "music");
+    $("view-studio")?.classList.toggle("hidden", next === "music" || next === "influencer");
     $("view-music-video")?.classList.toggle("hidden", next !== "music");
+    $("view-influencer")?.classList.toggle("hidden", next !== "influencer");
     document.dispatchEvent(new CustomEvent("h3-workspace", { detail: { workspace: next } }));
     document.querySelectorAll("#workspace-switch .chip[data-ws]").forEach((btn) => {
       const on = btn.dataset.ws === next;
@@ -8872,7 +8909,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (next === "motion" && state.produceMode !== "v2v") setProduceMode("v2v");
     if (next === "scene" && (state.produceMode === "v2v" || state.produceMode === "cinema")) setProduceMode("t2v");
     if (changed) {
-      setProdLane(next === "music" ? "scene" : next);
+      if (next !== "influencer") setProdLane(next === "music" ? "scene" : next);
       if (next === "director") {
         void openCinemaStudio();
       } else if (!$("view-cinema")?.classList.contains("hidden")) {
@@ -9940,7 +9977,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
           openPromptView(
             j.prompt,
             jobProductionMeta(j),
-            j.seed, j.id
+            j.seed, j.id, url
           );
         };
       }
@@ -13616,12 +13653,47 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   const OC_SLUG = "minimax-h3-studio";
 
+  const roadmapDialog = $("view-roadmap");
+  $("btn-roadmap")?.addEventListener("click", () => {
+    roadmapDialog?.showModal();
+    window.startRoadmapMap?.();
+  });
+  roadmapDialog?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") event.stopPropagation();
+  });
+
+  (() => {
+    const button = $("sys-toggle");
+    const panel = $("sys-drawer-panel");
+    if (!button || !panel) return;
+
+    let closeTimer;
+    function setExpanded(expanded) {
+      clearTimeout(closeTimer);
+      button.setAttribute("aria-expanded", String(expanded));
+      panel.inert = !expanded;
+      if (expanded) closeTimer = setTimeout(() => setExpanded(false), 6000);
+    }
+
+    button.addEventListener("click", () => {
+      setExpanded(button.getAttribute("aria-expanded") !== "true");
+    });
+  })();
+
   function setDonorRoll(names) {
     const bar = $("donor-ticker");
     const track = $("donor-ticker-track");
     const list = $("support-donors-list");
     const empty = $("support-donors-empty");
-    const clean = (names || []).map((n) => String(n || "").trim()).filter(Boolean);
+    const clean = [];
+    const seen = new Set();
+    for (const value of names || []) {
+      const name = String(value || "").trim();
+      const key = name.normalize("NFC").toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      clean.push(name);
+    }
     if (!clean.length) {
       document.body.classList.remove("has-donors");
       bar?.classList.add("hidden");
@@ -13771,12 +13843,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       const role = m.role === "user" ? "user" : "assistant";
       const text = (m.content == null ? "" : String(m.content)).trimEnd();
       if (!text && role === "assistant") return;
-      const div = document.createElement("div");
-      div.className = `dir-msg ${role}`;
-      const who = role === "user" ? tt("dir.you") : tt("dir.who");
-      div.innerHTML = `<span class="who">${who}</span>`;
-      div.appendChild(document.createTextNode(text || tt("dir.empty")));
-      log.appendChild(div);
+      log.appendChild(createDirectorMessage(role, text));
     });
     log.scrollTop = log.scrollHeight;
   }

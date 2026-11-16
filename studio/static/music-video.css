@@ -5,6 +5,22 @@
 .music-video form { display: contents; }
 .music-video .zone { padding: 12px; overflow: auto; }
 .music-video .file-pick { margin-bottom: 10px; }
+.music-video .zone-scene { display: flex; flex-direction: column; align-items: stretch; }
+.music-video-development {
+  flex: 1 0 52px;
+  display: grid;
+  place-items: center;
+}
+.music-video-development span {
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-amber) 45%, var(--border));
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--accent-amber);
+  font-size: .78rem;
+  font-weight: 600;
+  text-align: center;
+}
 .music-video .player-stage { min-height: 180px; }
 .music-video .player-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .music-video [hidden] { display: none !important; }

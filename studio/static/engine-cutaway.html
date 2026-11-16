@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="tr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>H3 Studio · Dört zamanlı motor kesiti</title>
+<style>
+  body{margin:0;background:#0e1420;color:#eef4fa;font:16px system-ui,sans-serif}
+  main{max-width:760px;margin:auto;padding:24px}
+  h1{font-size:clamp(22px,5vw,34px);margin:8px 0}
+  a{color:#8ed8ff} p{color:#bccadd}
+  canvas{display:block;width:100%;height:auto;border:1px solid #394760;border-radius:12px}
+  .controls{display:flex;gap:12px;align-items:center;margin:14px 0}
+  input{flex:1;min-width:60px;accent-color:#53cbef}
+  button{background:#243650;color:white;border:1px solid #587091;border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+  nav{display:flex;gap:8px;flex-wrap:wrap}
+  button[aria-current=true]{border-color:#74dfff;background:#174355}
+</style>
+<main>
+  <a href="/">H3 Studio</a>
+  <h1>Dört zamanlı benzinli motor</h1>
+  <p>Tek silindir · Yandan kesit · 30 saniyeye yavaşlatılmış çevrim</p>
+  <canvas id="cutaway" width="720" height="560" aria-label="Piston, supaplar, buji, biyel ve krank mili kesiti"></canvas>
+  <div class="controls">
+    <button id="play">Oynat</button>
+    <input id="time" type="range" min="0" max="30" step=".01" value="0" aria-label="Çevrim zamanı">
+    <output id="clock">0,0 sn</output>
+  </div>
+  <nav id="stages" aria-label="Motor zamanları"></nav>
+  <p><button id="export">30 saniyelik videoyu indir</button> <span id="export-status" role="status"></span></p>
+  <p id="detail"></p>
+  <p>Şemada supap geçişleri ve gaz akışı sadeleştirilmiştir. <a href="https://stage.energy.gov/cmei/vehicles/articles/internal-combustion-engine-basics">Dört zamanlı çevrim referansı</a></p>
+</main>
+<script>
+"use strict";
+const duration = 30;
+const strokeTime = duration / 4;
+const crankRadius = 57;
+const rodLength = 133;
+const stages = [
+  ["Emme", "Emme supabı açık. Piston iner ve hava-yakıt karışımı sol kanaldan silindire girer."],
+  ["Sıkıştırma", "İki supap kapalı. Piston yükselir ve karışımın hacmi küçülür."],
+  ["Güç", "Buji karışımı ateşler. Genleşen gaz pistonu aşağı iter ve biyel krankı döndürür."],
+  ["Egzoz", "Egzoz supabı açık. Yükselen piston yanmış gazı sağ kanaldan dışarı iter."]
+];
+
+function engineAt(time) {
+  const cycle = Math.max(0, Math.min(time, duration));
+  const phase = Math.min(3, Math.floor(cycle / strokeTime));
+  const progress = cycle / strokeTime - phase;
+  const angle = cycle / duration * 4 * Math.PI;
+  const pinX = crankRadius * Math.sin(angle);
+  const pinY = 445 - crankRadius * Math.cos(angle);
+  const wristY = pinY - Math.sqrt(rodLength ** 2 - pinX ** 2);
+  const lift = Math.min(1, progress * 10, (1 - progress) * 10) * 17;
+  return {
+    phase, progress, pinX, pinY, wristY,
+    intake: phase === 0 ? lift : 0,
+    exhaust: phase === 3 ? lift : 0,
+    spark: phase === 2 && progress < .045
+  };
+}
+
+const ctx = document.querySelector("#cutaway").getContext("2d");
+const slider = document.querySelector("#time");
+const play = document.querySelector("#play");
+const detail = document.querySelector("#detail");
+const clock = document.querySelector("#clock");
+let time = 0;
+let frame = null;
+
+function line(points, color, width) {
+  ctx.beginPath();
+  ctx.moveTo(...points[0]);
+  for (const point of points.slice(1)) ctx.lineTo(...point);
+  ctx.lineWidth = width;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = color;
+  ctx.stroke();
+}
+
+function disk(x, y, radius, color) {
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, 2 * Math.PI);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function box(x, y, w, h, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, w, h);
+}
+
+function arrow(points, color) {
+  line(points, color, 4);
+  const [x, y] = points.at(-1);
+  const [px, py] = points.at(-2);
+  const angle = Math.atan2(y - py, x - px);
+  line([
+    [x - 13 * Math.cos(angle - .52), y - 13 * Math.sin(angle - .52)],
+    [x, y],
+    [x - 13 * Math.cos(angle + .52), y - 13 * Math.sin(angle + .52)]
+  ], color, 4);
+}
+
+function draw(t) {
+  const s = engineAt(t);
+  const pistonTop = s.wristY - 27;
+  box(0, 0, 720, 560, "#101a2b");
+  const metal = ctx.createLinearGradient(245, 0, 475, 0);
+  metal.addColorStop(0, "#59768b");
+  metal.addColorStop(.45, "#dfedf5");
+  metal.addColorStop(1, "#6d879a");
+  const left = [[139, 85], [224, 85], [306, 139]];
+  const right = [[414, 139], [496, 85], [581, 85]];
+  for (const port of [left, right]) {
+    line(port, metal, 52);
+    line(port, "#17263a", 34);
+  }
+  box(265, 130, 190, 243, metal);
+  box(282, 145, 156, 228, "#17263a");
+  const gas = ["#24799d", "#2689b4", "#b95c2a", "#68778b"][s.phase];
+  box(282, 145, 156, pistonTop - 145, gas);
+  line([[282, 145], [438, 145]], "#d4e1eb", 4);
+
+  if (s.intake > 1) arrow([...left, [313, 160]], "#61ddff");
+  if (s.exhaust > 1) arrow([[409, 160], ...right], "#d0dae5");
+  for (const [x, lift] of [[312, s.intake], [408, s.exhaust]]) {
+    line([[x, 54 + lift], [x, 143 + lift]], "#a0bacb", 9);
+    line([[x - 17, 144 + lift], [x + 17, 144 + lift]], "#e6eef4", 7);
+  }
+  line([[360, 66], [360, 140]], "#ede3ba", 12);
+  line([[360, 138], [360, 153]], "#ecae63", 5);
+  if (s.spark) {
+    disk(360, 160, 20, "#ffd575");
+    line([[353, 150], [365, 157], [355, 162], [366, 171]], "white", 4);
+  }
+
+  disk(360, 445, 81, "#26394f");
+  disk(360, 445, 68, "#364d64");
+  line([[360, 445], [360 + s.pinX, s.pinY]], "#89a8ba", 28);
+  line([[360, s.wristY], [360 + s.pinX, s.pinY]], "#c6dae5", 24);
+  disk(360, 445, 11, "#a3bdd0");
+  disk(360 + s.pinX, s.pinY, 12, "#24374b");
+  box(284, pistonTop, 152, 50, metal);
+  box(284, pistonTop + 8, 152, 4, "#354b5e");
+  box(284, pistonTop + 16, 152, 4, "#354b5e");
+  disk(360, s.wristY, 8, "#46627a");
+  ctx.fillStyle = "#d2dfee";
+  ctx.font = "16px system-ui";
+  ctx.fillText("Emme kanalı", 81, 40);
+  ctx.fillText("Egzoz kanalı", 522, 40);
+  ctx.fillText("Krank mili", 322, 546);
+
+  slider.value = t;
+  clock.value = t.toFixed(1).replace(".", ",") + " sn";
+  detail.textContent = stages[s.phase][1];
+  stageButtons.forEach((button, i) => button.setAttribute("aria-current", String(i === s.phase)));
+}
+
+function stop() {
+  if (frame !== null) cancelAnimationFrame(frame);
+  frame = null;
+  play.textContent = "Oynat";
+}
+function seek(value) {
+  stop();
+  time = value;
+  draw(time);
+}
+const stageButtons = stages.map(([name], i) => {
+  const button = document.createElement("button");
+  button.textContent = name;
+  button.onclick = () => seek(i * strokeTime + .3);
+  document.querySelector("#stages").append(button);
+  return button;
+});
+slider.oninput = () => seek(Number(slider.value));
+play.onclick = () => {
+  if (frame !== null) {
+    stop();
+    return;
+  }
+  if (time >= duration) time = 0;
+  const started = performance.now() - time * 1000;
+  play.textContent = "Duraklat";
+  function advance(now) {
+    time = Math.min(duration, (now - started) / 1000);
+    draw(time);
+    if (time < duration) frame = requestAnimationFrame(advance);
+    else stop();
+  }
+  frame = requestAnimationFrame(advance);
+};
+const exportButton = document.querySelector("#export");
+const exportStatus = document.querySelector("#export-status");
+exportButton.onclick = async () => {
+  const canvas = ctx.canvas;
+  if (!canvas.captureStream || !window.MediaRecorder) {
+    exportStatus.textContent = "Bu tarayıcı video kaydını desteklemiyor.";
+    return;
+  }
+  seek(0);
+  const controls = [exportButton, slider, play, ...stageButtons];
+  controls.forEach(button => { button.disabled = true; });
+  let stream;
+  let recorder;
+  let timer;
+  try {
+    stream = canvas.captureStream(30);
+    const mp4 = MediaRecorder.isTypeSupported("video/mp4");
+    const mimeType = mp4 ? "video/mp4" : "video/webm";
+    recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4000000 });
+    const chunks = [];
+    const recorded = new Promise((resolve, reject) => {
+      recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+      recorder.onerror = event => reject(event.error);
+    });
+    exportStatus.textContent = "Studio videoyu kaydediyor. Bu sekmeyi açık tut.";
+    recorder.start();
+    const started = performance.now();
+    timer = setInterval(() => {
+      const elapsed = (performance.now() - started) / 1000;
+      draw(Math.min(duration, elapsed));
+      if (elapsed >= duration) {
+        clearInterval(timer);
+        recorder.stop();
+      }
+    }, 1000 / 30);
+    const video = await recorded;
+    if (!video.size) throw new Error("Video kaydı boş.");
+    const url = URL.createObjectURL(video);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "dort-zamanli-motor." + (mp4 ? "mp4" : "webm");
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    exportStatus.textContent = "Video hazır.";
+  } catch (error) {
+    exportStatus.textContent = "Video kaydedilemedi. " + error.message;
+  } finally {
+    clearInterval(timer);
+    if (stream) stream.getTracks().forEach(track => track.stop());
+    controls.forEach(button => { button.disabled = false; });
+    seek(0);
+  }
+};
+draw(0);
+</script>
+</html>

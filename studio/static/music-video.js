@@ -17,6 +17,7 @@
   const labels = {
     tr: {
       title: "Müzik Klibi", song: "Şarkı seç", start: "Başlangıç (sn)",
+      development: "Geliştirme aşamasında",
       timeline: "Şarkı zaman çizelgesi", none: "Seçilmedi", noPreview: "Henüz önizleme yok",
       loadingWave: "Ses dalgası hazırlanıyor…", badWave: "Ses dalgası okunamadı. Başlangıç saniyesini elle seçebilirsin.",
       listen: "5 saniyeyi dinle", character: "Karakter görseli", direction: "Sahne tarifi",
@@ -31,6 +32,7 @@
     },
     en: {
       title: "Music Video", song: "Choose song", start: "Start (s)",
+      development: "In development",
       timeline: "Song timeline", none: "No file selected", noPreview: "No preview yet",
       loadingWave: "Reading waveform…", badWave: "Could not read the waveform. You can still enter a start time.",
       listen: "Play 5-second selection", character: "Character image", direction: "Scene direction",

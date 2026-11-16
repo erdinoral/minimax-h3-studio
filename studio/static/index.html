@@ -16,12 +16,13 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=sponsor6" />
+  <link rel="stylesheet" href="/static/app.css?v=roadmap-paths" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/film-workspace.css?v=queue-dialog303" />
-  <link rel="stylesheet" href="/static/music-video.css?v=2" />
+  <link rel="stylesheet" href="/static/music-video.css?v=3" />
+  <link rel="stylesheet" href="/static/prompt-library.css?v=4" />
 </head>
 <body>
   <header class="topbar">
@@ -32,16 +33,10 @@
       <button type="button" class="chip" data-ws="motion" id="ws-motion" role="tab" aria-selected="false">Motion</button>
       <button type="button" class="chip" data-ws="music" id="ws-music" role="tab" aria-selected="false" aria-controls="view-music-video">Müzik Klibi</button>
       <button type="button" class="chip" data-ws="game" id="ws-game" role="tab" aria-selected="false">Oyun / Sprites</button>
+      <button type="button" class="chip" data-ws="influencer" id="ws-influencer" role="tab" aria-selected="false" aria-controls="view-influencer">AI Influencer</button>
     </nav>
-    <div class="sysbar" id="sysbar" title="Sistem performansı">
-      <div class="sys-item"><span>CPU</span><b id="sys-cpu">—</b></div>
-      <div class="sys-item"><span>RAM</span><b id="sys-ram">—</b></div>
-      <div class="sys-item"><span>GPU</span><b id="sys-gpu">—</b></div>
-      <div class="sys-item"><span>VRAM</span><b id="sys-vram">—</b></div>
-      <div class="sys-item"><span>Disk</span><b id="sys-disk">—</b></div>
-      <div class="sys-item" id="sys-comfy-item"><span>Comfy</span><b id="sys-comfy">—</b></div>
-    </div>
     <nav class="menu">
+      <button type="button" class="menu-btn" id="btn-roadmap" aria-haspopup="dialog" aria-controls="view-roadmap" data-i18n="roadmap.title">Yol Haritası</button>
       <div class="lang-switch" id="lang-switch">
         <button type="button" class="lang-toggle" id="lang-toggle" aria-haspopup="menu" aria-expanded="false" aria-controls="lang-menu" aria-label="Language">
           <span class="lang-burger" aria-hidden="true"><i></i><i></i><i></i></span>
@@ -56,11 +51,27 @@
         </div>
       </div>
       <button type="button" id="btn-gallery" class="menu-btn" title="Üretilen videolar">Galeri</button>
+      <button type="button" id="ws-prompts" class="menu-btn" aria-haspopup="dialog" aria-controls="view-prompt-library" data-pl="title">Prompt Kütüphanesi</button>
+      <button type="button" class="menu-btn sys-toggle" id="sys-toggle" aria-expanded="false" aria-controls="sys-drawer-panel">
+        <span data-i18n="sys.title">Sistem performansı</span>
+      </button>
       <button type="button" id="btn-settings" class="menu-btn">Ayarlar</button>
       <button type="button" id="btn-support" class="menu-btn support-rainbow-btn" title="Sponsor / sorun bildir">Destek</button>
       <button type="button" id="btn-workflow-guide" class="menu-btn">Guide</button>
       <span class="comfy-pill" id="comfy-pill" title="Comfy arka uç — Pinokio Stop ile kapanır" data-i18n-title="ui.comfy-pill.title">Comfy …</span>
     </nav>
+    <div class="sys-drawer-panel" id="sys-drawer-panel" inert>
+      <div class="sys-drawer-content">
+        <div class="sysbar" id="sysbar" title="Sistem performansı">
+          <div class="sys-item"><span>CPU</span><b id="sys-cpu">—</b><meter id="sys-cpu-meter" max="100" value="0" aria-hidden="true" hidden></meter></div>
+          <div class="sys-item"><span>RAM</span><b id="sys-ram">—</b><meter id="sys-ram-meter" max="100" value="0" aria-hidden="true" hidden></meter></div>
+          <div class="sys-item"><span>GPU</span><b id="sys-gpu">—</b><meter id="sys-gpu-meter" max="100" value="0" aria-hidden="true" hidden></meter></div>
+          <div class="sys-item"><span>VRAM</span><b id="sys-vram">—</b><meter id="sys-vram-meter" max="100" value="0" aria-hidden="true" hidden></meter></div>
+          <div class="sys-item"><span>Disk</span><b id="sys-disk">—</b></div>
+          <div class="sys-item" id="sys-comfy-item"><span>Comfy</span><b id="sys-comfy">—</b></div>
+        </div>
+      </div>
+    </div>
   </header>
 
   <main class="workspace" id="view-studio">
@@ -308,7 +319,7 @@
             <span class="file-pick-name" data-i18n-empty="pick.none">Seçilmedi</span>
           </label>
           <div class="ref-thumbs" id="v2v-image-thumbs"></div>
-          <label class="check" id="v2v-face-swap-option"><input type="checkbox" id="v2v-face-swap" checked /> <span>FaceSwap</span></label>
+          <label class="check" id="v2v-face-swap-option"><input type="checkbox" id="v2v-face-swap" checked /> <span>Face Swap</span></label>
           <label class="check"><input type="checkbox" id="v2v-include-audio" checked /> <span id="v2v-audio-label">Videonun orijinal sesini koru</span></label>
           <label class="check" data-i18n-title="v2v.continuumHint" title="Parçalar ayrı işler yerine tek Continuum çalışmasında üretilir; her parça öncekinin son karelerini bağlam olarak görür. Deneysel."><input type="checkbox" id="v2v-continuum" /> <span data-i18n="v2v.continuum">Parçaları Continuum ile birleştir (deneysel)</span></label>
         </div>
@@ -775,32 +786,41 @@
       <p class="muted mode-hint" id="llm-prod-hint" data-i18n="ayar.llmHint">API anahtarları sağ üst Ayarlar’da. Üretim (Comfy/H3) bundan etkilenmez.</p>
     </div>
     <div class="director-scroll" id="director-scroll">
-      <div class="chips wrap director-chips" id="director-chips" role="group" aria-label="Proje tarzı" data-i18n-aria-label="ui.director-chips.aria-label">
-        <button type="button" class="chip" data-group="purpose" data-purpose="short_film" data-chip="kısa film" aria-pressed="false">kısa film</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-chip="müzik klibi" data-silent="1" aria-pressed="false" title="Sessiz görüntü; şarkı finalde">müzik klibi</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="ad" data-chip="reklam" aria-pressed="false">reklam</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="trailer" data-chip="trailer" aria-pressed="false">trailer</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="social" data-chip="sosyal" aria-pressed="false">sosyal</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="documentary" data-chip="belgesel" aria-pressed="false">belgesel</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="explainer" data-chip="nasıl çalışır" aria-pressed="false">nasıl çalışır</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="handmade" data-chip="El Yapımı" aria-pressed="false">El Yapımı</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
-        <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
-        <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
-        <button type="button" class="chip" data-group="style" data-style="anime" data-chip="anime tarz" aria-pressed="false">anime</button>
-        <button type="button" class="chip" data-group="style" data-style="disney" data-chip="disney 3D tarz" aria-pressed="false">disney</button>
-        <button type="button" class="chip" data-group="style" data-style="game" data-chip="oyun sinematik tarz" aria-pressed="false">oyun</button>
-        <button type="button" class="chip" data-group="style" data-style="cgi_3d" data-chip="3D CGI tarz" aria-pressed="false">3D CGI</button>
-        <button type="button" class="chip" data-group="style" data-style="comic" data-chip="çizgi roman tarz" aria-pressed="false">çizgi roman</button>
-        <button type="button" class="chip" data-group="style" data-style="illustration" data-chip="illüstrasyon tarz" aria-pressed="false">illüstrasyon</button>
-        <button type="button" class="chip" data-group="style" data-style="oil_paint" data-chip="yağlı boya tarz" aria-pressed="false">yağlı boya</button>
-        <button type="button" class="chip" data-group="style" data-style="clay" data-chip="kil animasyon tarz" aria-pressed="false">kil</button>
-        <button type="button" class="chip" data-group="style" data-style="found_footage" data-chip="found footage tarz" aria-pressed="false">found footage</button>
-        <button type="button" class="chip" data-group="clip" data-clip="4" data-chip="4 sn klipler" aria-pressed="false">4 sn</button>
-        <button type="button" class="chip" data-group="clip" data-clip="5" data-chip="5 sn klipler" aria-pressed="false">5 sn</button>
-        <button type="button" class="chip" data-group="clip" data-clip="6" data-chip="6 sn klipler" aria-pressed="false">6 sn</button>
-        <button type="button" class="chip" data-group="clip" data-clip="8" data-chip="8 sn klipler" aria-pressed="false">8 sn</button>
-        <button type="button" class="chip" data-group="clip" data-clip="10" data-chip="10 sn klipler" aria-pressed="false">10 sn</button>
+      <div class="director-chips" id="director-chips">
+        <div class="director-choice-group" role="group" aria-labelledby="director-purpose-title">
+          <span id="director-purpose-title" data-i18n="scene.purpose">Üretim türü</span>
+          <button type="button" class="chip" data-group="purpose" data-purpose="short_film" data-chip="kısa film" aria-pressed="false">kısa film</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-chip="müzik klibi" data-silent="1" aria-pressed="false" title="Sessiz görüntü; şarkı finalde">müzik klibi</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="ad" data-chip="reklam" aria-pressed="false">reklam</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="trailer" data-chip="trailer" aria-pressed="false">trailer</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="social" data-chip="sosyal" aria-pressed="false">sosyal</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="documentary" data-chip="belgesel" aria-pressed="false">belgesel</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="explainer" data-chip="nasıl çalışır" aria-pressed="false">nasıl çalışır</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="handmade" data-chip="El Yapımı" aria-pressed="false">El Yapımı</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
+          <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
+        </div>
+        <div class="director-choice-group" role="group" aria-labelledby="director-style-title">
+          <span id="director-style-title" data-i18n="scene.style">Görsel tarz</span>
+          <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
+          <button type="button" class="chip" data-group="style" data-style="anime" data-chip="anime tarz" aria-pressed="false">anime</button>
+          <button type="button" class="chip" data-group="style" data-style="disney" data-chip="disney 3D tarz" aria-pressed="false">disney</button>
+          <button type="button" class="chip" data-group="style" data-style="game" data-chip="oyun sinematik tarz" aria-pressed="false">oyun</button>
+          <button type="button" class="chip" data-group="style" data-style="cgi_3d" data-chip="3D CGI tarz" aria-pressed="false">3D CGI</button>
+          <button type="button" class="chip" data-group="style" data-style="comic" data-chip="çizgi roman tarz" aria-pressed="false">çizgi roman</button>
+          <button type="button" class="chip" data-group="style" data-style="illustration" data-chip="illüstrasyon tarz" aria-pressed="false">illüstrasyon</button>
+          <button type="button" class="chip" data-group="style" data-style="oil_paint" data-chip="yağlı boya tarz" aria-pressed="false">yağlı boya</button>
+          <button type="button" class="chip" data-group="style" data-style="clay" data-chip="kil animasyon tarz" aria-pressed="false">kil</button>
+          <button type="button" class="chip" data-group="style" data-style="found_footage" data-chip="found footage tarz" aria-pressed="false">found footage</button>
+        </div>
+        <div class="director-choice-group" role="group" aria-labelledby="director-clip-title">
+          <span id="director-clip-title" data-i18n="scene.duration">Süre</span>
+          <button type="button" class="chip" data-group="clip" data-clip="4" data-chip="4 sn klipler" aria-pressed="false">4 sn</button>
+          <button type="button" class="chip" data-group="clip" data-clip="5" data-chip="5 sn klipler" aria-pressed="false">5 sn</button>
+          <button type="button" class="chip" data-group="clip" data-clip="6" data-chip="6 sn klipler" aria-pressed="false">6 sn</button>
+          <button type="button" class="chip" data-group="clip" data-clip="8" data-chip="8 sn klipler" aria-pressed="false">8 sn</button>
+          <button type="button" class="chip" data-group="clip" data-clip="10" data-chip="10 sn klipler" aria-pressed="false">10 sn</button>
+        </div>
       </div>
       <div class="director-post-pass">
         <span class="muted" id="director-post-label">Kare hızı</span>
@@ -933,6 +953,7 @@
         <h2>Videonun prompt’u</h2>
         <span class="muted gallery-order-hint" id="clip-prompt-meta"></span>
         <button type="button" class="btn-secondary" id="btn-copy-prompt">Kopyala</button>
+        <button type="button" class="btn-secondary" id="btn-save-library-prompt" data-pl="save">Kütüphaneye kaydet</button>
         <button type="button" class="btn-secondary" id="btn-use-prompt">Prompt’a al</button>
           <a class="btn-secondary hidden" id="clip-diagnostics-link" download data-i18n="clip.diagnostics">Tanılama raporu</a>
         <button type="button" class="menu-btn" id="btn-clip-prompt-close">Kapat</button>
@@ -954,6 +975,88 @@
     </div>
   </div>
 
+  <dialog id="view-roadmap" class="panel roadmap-dialog" aria-labelledby="roadmap-title">
+    <header class="roadmap-header">
+      <h2 id="roadmap-title" data-i18n="roadmap.title">Yol Haritası</h2>
+      <form method="dialog">
+        <button type="submit" class="menu-btn" data-i18n="roadmap.close" autofocus>Kapat</button>
+      </form>
+    </header>
+    <section class="roadmap-group" aria-labelledby="roadmap-high">
+      <h3 id="roadmap-high" data-i18n="roadmap.high">Yüksek öncelik</h3>
+      <canvas class="roadmap-map" width="320" height="112" aria-hidden="true"></canvas>
+      <p class="roadmap-carnival" data-i18n="roadmap.carnival" hidden>Patikadaki tüm işler tamamlandı</p>
+      <ul>
+        <li data-completed="true"><strong data-i18n="roadmap.prompts">Prompt Kütüphanesi</strong><p data-i18n="roadmap.promptsDetail">İlk sürüm tamamlandı. Kategoriler, önizleme kartları ve yerel kayıt.</p></li>
+        <li><strong data-i18n="roadmap.continuum">Continuum güvenilirliği</strong><p data-i18n="roadmap.continuumDetail">Son doğrulanan parçadan devam etme ve uzun üretimlerde görüntü ile ses tutarlılığı.</p></li>
+        <li><strong data-i18n="roadmap.director">Direktör ve storyboard</strong><p data-i18n="roadmap.directorDetail">Onaylı çekimler, take seçimi ve poz, hareket, kostüm referans kartları.</p></li>
+        <li><strong data-i18n="roadmap.motion">Motion hedef seçimi</strong><p data-i18n="roadmap.motionDetail">Yüzü veya nesneyi kareden seçme ve takibi önizleme.</p></li>
+      </ul>
+    </section>
+    <section class="roadmap-group" aria-labelledby="roadmap-medium">
+      <h3 id="roadmap-medium" data-i18n="roadmap.medium">Orta öncelik</h3>
+      <canvas class="roadmap-map" width="320" height="112" aria-hidden="true"></canvas>
+      <p class="roadmap-carnival" data-i18n="roadmap.carnival" hidden>Patikadaki tüm işler tamamlandı</p>
+      <ul>
+        <li><strong data-i18n="roadmap.music">Müzik Klibi</strong><p data-i18n="roadmap.musicDetail">Tek performans klibinden düzenlenebilir çok sahneli kliplere geçiş.</p></li>
+        <li><strong data-i18n="roadmap.influencer">AI Influencer</strong><p data-i18n="roadmap.influencerDetail">Aynı karakteri farklı kıyafet ve mekânlarda tutarlı kullanma.</p></li>
+      </ul>
+    </section>
+    <section class="roadmap-group" aria-labelledby="roadmap-low">
+      <h3 id="roadmap-low" data-i18n="roadmap.low">Düşük öncelik</h3>
+      <canvas class="roadmap-map" width="320" height="112" aria-hidden="true"></canvas>
+      <p class="roadmap-carnival" data-i18n="roadmap.carnival" hidden>Patikadaki tüm işler tamamlandı</p>
+      <ul>
+        <li><strong data-i18n="roadmap.editing">Kurgu</strong><p data-i18n="roadmap.editingDetail">Galeri kliplerini kırpma, sıralama, müzik ekleme ve dışa aktarma.</p></li>
+      </ul>
+    </section>
+  </dialog>
+
+  <dialog id="view-prompt-library" class="panel prompt-library" aria-labelledby="pl-title">
+      <header class="prompt-library-header">
+        <h2 id="pl-title" data-pl="title">Prompt Kütüphanesi</h2>
+        <div class="prompt-library-actions">
+          <button type="button" class="btn-secondary" id="pl-new" data-pl="add">Yeni prompt</button>
+          <button type="button" class="menu-btn" id="pl-close" data-pl="close" autofocus>Kapat</button>
+        </div>
+      </header>
+      <div id="pl-folders" class="prompt-library-grid"></div>
+      <div id="pl-folder" hidden>
+        <header class="prompt-library-folder-header">
+          <button type="button" class="btn-secondary" id="pl-back" data-pl="back">← Kategoriler</button>
+          <h2 id="pl-folder-title" tabindex="-1"></h2>
+        </header>
+        <div class="prompt-library-filters">
+          <label><span data-pl="collection">Koleksiyon</span><select id="pl-collection">
+            <option value="all" data-pl="all">Tümü</option>
+            <option value="catalog" data-pl="catalog">Hazır prompt’lar</option>
+            <option value="mine" data-pl="mine">Kaydettiklerim</option>
+          </select></label>
+          <label><span data-pl="search">Ara</span><input type="search" id="pl-search" /></label>
+        </div>
+        <p id="pl-status" role="status"></p>
+        <div id="pl-cards" class="prompt-library-grid"></div>
+      </div>
+  </dialog>
+
+  <dialog id="pl-dialog" class="prompt-library-dialog panel" aria-labelledby="pl-dialog-title">
+    <form id="pl-form">
+      <h2 id="pl-dialog-title" data-pl="save">Kütüphaneye kaydet</h2>
+      <label><span data-pl="name">Başlık</span><input id="pl-name" required maxlength="100" /></label>
+      <label><span data-pl="category">Kategori</span><select id="pl-edit-category" required></select></label>
+      <label><span>Prompt</span><textarea id="pl-text" rows="7" maxlength="20000" required></textarea></label>
+      <p id="pl-form-status" role="status"></p>
+      <div class="prompt-library-actions">
+        <button type="submit" class="cta" data-pl="save">Kütüphaneye kaydet</button>
+        <button type="button" class="btn-secondary" id="pl-cancel" data-pl="cancel">Vazgeç</button>
+      </div>
+    </form>
+  </dialog>
+
+  <main id="view-influencer" class="workspace influencer-preview hidden" role="tabpanel" aria-labelledby="ws-influencer">
+    <h1 data-i18n="influencer.inDevelopment">Geliştirme aşamasında</h1>
+  </main>
+
   <main id="view-music-video" class="workspace music-video hidden" role="tabpanel" aria-labelledby="ws-music">
     <form id="music-video-form">
       <section class="zone zone-scene panel scene">
@@ -968,6 +1071,9 @@
           <span class="file-pick-btn" data-music-text="character">Karakter görseli seç</span>
           <span class="file-pick-name" id="music-video-character-name" data-music-text="none">Seçilmedi</span>
         </label>
+        <div class="music-video-development">
+          <span data-music-text="development">Geliştirme aşamasında</span>
+        </div>
       </section>
       <section class="zone zone-player panel player">
         <h2 data-music-text="preview">Performans Önizlemesi</h2>
@@ -1516,10 +1622,6 @@
         </div>
         <section class="support-donors" id="support-donors">
           <h3 data-i18n="support.donorsTitle">Destekleyenler</h3>
-          <article class="support-featured-sponsor">
-            <strong>Diamond204a</strong> <span class="muted">· $25</span>
-            <p class="mode-hint" data-i18n="support.firstSponsor">İlk sponsorumuz. $25 desteği ve geri bildirimleriyle uygulamanın gelişimine katkıda bulunuyor. Teşekkürler!</p>
-          </article>
           <p class="muted mode-hint" id="support-donors-empty" data-i18n="support.donorsEmpty">İlk bağış senin adını buraya yazar.</p>
           <p class="support-donors-list hidden" id="support-donors-list" hidden></p>
         </section>
@@ -1759,7 +1861,7 @@
     </div>
   </div>
 
-  <script src="/static/i18n.js?v=settings-hardware3" charset="utf-8"></script>
+  <script src="/static/i18n.js?v=roadmap-status" charset="utf-8"></script>
   <script src="/static/film-workspace.js?v=cinema182L" charset="utf-8"></script>
   <script src="/static/plan-review.js?v=1" charset="utf-8"></script>
   <script src="/static/media-trim.js?v=1" charset="utf-8"></script>
@@ -1767,8 +1869,10 @@
   <script src="/static/asset-references.js?v=4" charset="utf-8"></script>
   <script src="/static/director-chains.js?v=sequences294-1" charset="utf-8"></script>
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
-  <script src="/static/app.js?v=settings-hardware3" charset="utf-8"></script>
-  <script src="/static/music-video.js?v=2" charset="utf-8"></script>
+  <script src="/static/prompt-library.js?v=4" charset="utf-8"></script>
+  <script src="/static/roadmap-map.js?v=3" charset="utf-8"></script>
+  <script src="/static/app.js?v=roadmap-pixel1" charset="utf-8"></script>
+  <script src="/static/music-video.js?v=3" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=hardware3" charset="utf-8"></script>
   <script src="/static/model-downloads.js?v=3" charset="utf-8"></script>

@@ -1,0 +1,115 @@
+.prompt-library {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: min(1560px, calc(100% - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  margin: auto;
+  padding: clamp(16px, 3vw, 32px);
+  color: inherit;
+  overflow: auto;
+}
+
+.prompt-library::backdrop { background: rgb(0 0 0 / .65); }
+
+.prompt-library-header,
+.prompt-library-filters,
+.prompt-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+
+.prompt-library-header {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.prompt-library-filters label,
+.prompt-library-dialog label {
+  display: grid;
+  gap: 5px;
+}
+
+.prompt-library-filters label:last-child { flex: 1 1 180px; }
+
+.prompt-library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
+  align-items: start;
+  gap: 16px;
+}
+
+.prompt-library-grid article {
+  overflow: hidden;
+  border: 1px solid var(--border, #444);
+  border-radius: 12px;
+}
+
+.prompt-library-folder-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.prompt-library-folder-header h2 { margin: 0; }
+
+.prompt-library-folder {
+  min-height: 88px;
+  text-align: start;
+  padding: 16px;
+}
+
+.prompt-library-folder::before {
+  content: "";
+  display: inline-block;
+  width: 20px;
+  height: 15px;
+  margin-inline-end: 10px;
+  vertical-align: middle;
+  background: currentColor;
+  clip-path: polygon(0 0, 40% 0, 50% 22%, 100% 22%, 100% 100%, 0 100%);
+}
+
+.prompt-library-preview {
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  background: #11151c;
+  color: #aeb7c3;
+}
+
+.prompt-library-preview video {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.prompt-library-preview.is-square { aspect-ratio: 1; }
+
+.prompt-library-content { padding: 14px; }
+.prompt-library-content h2 { margin: 6px 0; }
+.prompt-library-content p {
+  max-height: 10rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.prompt-library-dialog {
+  width: min(560px, calc(100% - 24px));
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 20px;
+  color: inherit;
+}
+
+.prompt-library-dialog::backdrop { background: rgb(0 0 0 / .65); }
+.prompt-library-dialog form { display: grid; gap: 12px; }
+.prompt-library-dialog textarea { resize: vertical; }

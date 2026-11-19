@@ -8,7 +8,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi import HTTPException
-from lib import asset_references, cinema, continuum, native_continuation
+from lib import asset_references, cinema, continuum, native_continuation, local_quality
 
 
 SPIDER = {'id': 's', 'name': 'Spider-Man', 'kind': 'character', 'notes': 'Red and gold suit.'}
@@ -21,7 +21,7 @@ class ContinuumReferenceManifest(unittest.IsolatedAsyncioTestCase):
         nodes = [n for n in tree.body if getattr(n, 'name', '') == '_queue_cinema_seamless']
         async def capabilities(): return {'continuum_ready': True}
         ns = dict(Any=Any, Optional=Optional, HTTPException=HTTPException, continuum=continuum,
-                  asset_references=asset_references,
+                  asset_references=asset_references, local_quality=local_quality,
                   cinema=cinema, workflow_capabilities=capabilities, detect_multishot_pack=lambda r: True,
                   COMFY_ROOT='.', MULTISHOT_MAX_SHOTS=4, resolve_size=lambda a, q: (864, 480),
                   normalize_quality=lambda q: q, _lora_src_for_shot=lambda b, h, m: (None, None),

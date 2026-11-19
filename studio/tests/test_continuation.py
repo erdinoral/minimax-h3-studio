@@ -10,7 +10,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib import cinema
+from lib import cinema, local_quality
 from lib.comfy import add_h3_first_frame_guide, build_ref2va_prompt, build_t2v_prompt, enhance_ref_prompt
 
 
@@ -20,7 +20,7 @@ class ContinuationTests(unittest.IsolatedAsyncioTestCase):
         fn = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'batch')
         fn.decorator_list = []
         jobs = [{'id':'source','status':'done','width':864,'height':480,'aspect':'16:9'}]
-        env = dict(h3_enhancements=NS(settings=lambda:{"refmod_enabled":False}), BatchBody=object, HTTPException=RuntimeError, ALLOWED_DURATIONS=[5], QUALITY_SHORT_EDGE={'736':736},
+        env = dict(local_quality=local_quality, h3_enhancements=NS(settings=lambda:{"refmod_enabled":False}), BatchBody=object, HTTPException=RuntimeError, ALLOWED_DURATIONS=[5], QUALITY_SHORT_EDGE={'736':736},
             _asset_plan=lambda text, bindings, lib, *a, **kw: {'prompt':text,'rows':[{'file':'portrait.png'}],
                 'hits':[1],'ref_images':['portrait.png'],'has_character':True,'has_location':False},
             comfy=NS(healthy=AsyncMock(return_value=True)), _free_llm_for_production=AsyncMock(),

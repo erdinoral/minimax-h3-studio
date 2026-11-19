@@ -59,7 +59,12 @@ class NativeContinuation(unittest.TestCase):
         with patch('lib.comfy.apply_spectrum', side_effect=lambda g, **kw: g):
             graph = native_continuation.build(job)
         self.assertTrue(graph['n0_104']['inputs']['prompt'].endswith('\n\n<Picture 1> rises'))
-        self.assertNotIn('n0_201', graph)
+        first_images = [node['inputs']['image'] for key, node in graph.items()
+                        if key.startswith('n0_') and node['class_type'] == 'LoadImage']
+        second_images = [node['inputs']['image'] for key, node in graph.items()
+                         if key.startswith('n1_') and node['class_type'] == 'LoadImage']
+        self.assertEqual(first_images, ['knight.png'])
+        self.assertEqual(second_images, ['knight.png', 'queen.png'])
         self.assertTrue(graph['n1_104']['inputs']['prompt'].endswith('\n\n<Picture 2> greets <Picture 1>'))
 
     def test_reference_sections_forbid_pasting_reference_photographs(self):

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 from fastapi import HTTPException
-from lib import continuum
+from lib import continuum, asset_references, local_quality
 from lib.comfy import DEFAULT_MODELS, build_t2v_prompt
 
 
@@ -121,7 +121,7 @@ class DirectorContinuumQueue(unittest.IsolatedAsyncioTestCase):
         fn=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='_queue_cinema_seamless')
         queued=[]
         body=SimpleNamespace(seamless_backend='continuum',continuum_max_chunks=16,duration=5,quality='480',aspect='16:9',steps=12,seed=7,sampler='res_multistep',scheduler='simple')
-        ns={'CinemaProduceBody':SimpleNamespace,'Optional':Optional,'HTTPException':HTTPException,'workflow_capabilities':capabilities,
+        ns={'asset_references':asset_references,'local_quality':local_quality,'CinemaProduceBody':SimpleNamespace,'Optional':Optional,'HTTPException':HTTPException,'workflow_capabilities':capabilities,
             'continuum':continuum,'cinema':SimpleNamespace(group_seamless_takes=lambda parsed,prompts,pack:[(parsed,prompts)]),
             'resolve_size':lambda *a:(864,480),'normalize_quality':lambda q:q,'time':time,'uuid':uuid,
             '_lora_src_for_shot':lambda *a:({},None),'_with_lora_preset':lambda src,steps,sampler,scheduler,graph:(steps,sampler,scheduler),

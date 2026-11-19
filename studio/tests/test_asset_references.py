@@ -179,7 +179,7 @@ class SharedQueueTests(unittest.IsolatedAsyncioTestCase):
         env['_asset_plan']=lambda text,bindings,lib,*a,**kw: asset_references.resolve(text,bindings,lib,lambda f:True,*a,continuation=kw.get('continuation',False))
         env['cinema']=NS(load=lambda:lib, bound_character_portraits=cinema.bound_character_portraits)
         tree=ast.parse((Path(__file__).resolve().parents[1]/'server.py').read_text(encoding='utf-8'))
-        classes=[n for n in tree.body if isinstance(n,ast.ClassDef) and n.name in ('GenerateBody','BatchBody')]
+        classes=[n for n in tree.body if isinstance(n,ast.ClassDef) and n.name in ('MusicVideoJobInfo','GenerateBody','BatchBody')]
         env.update(BaseModel=BaseModel,Field=Field,PrivateAttr=PrivateAttr,field_validator=field_validator,Optional=Optional,Any=Any)
         exec(compile(ast.Module(body=classes,type_ignores=[]),'request-models','exec'),env)
         generate=next(n for n in tree.body if isinstance(n,ast.AsyncFunctionDef) and n.name=='generate')

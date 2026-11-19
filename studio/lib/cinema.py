@@ -796,6 +796,7 @@ _STRUCTURED_KEYS = (
     "character",
     "action",
     "dialogue",
+    "speaker",
     "dialogue_lang",
     "camera",
     "visual_style",
@@ -931,7 +932,7 @@ def compose_h3_prompt(structured: Any, look_id: str = "") -> str:
         parts.append(f"End composition: {s['ending_frame']}")
     if s.get("dialogue"):
         lang = _dialogue_lang_label(s)
-        who = s.get("character") or "The speaker (S1)"
+        who = s.get("speaker") or (s.get("character") or "").split(",", 1)[0].strip() or "The speaker (S1)"
         # Prefer identity + dialogue in multimodal body
         if "(S1)" in who or "(S2)" in who:
             parts.append(f"{who} {_wrap_dialogue_block(s['dialogue'], lang)}")
@@ -3047,7 +3048,7 @@ def _section_from_shot(shot: Any) -> dict[str, Any]:
         if structured.get("action"):
             row["prompt"] = structured["action"]
         # Preserve optional advanced values when an older project has them.
-        for key in ("dialogue", "dialogue_lang", "camera", "visual_style", "audio", "music", "important", "reference_subjects", "reference_environment", "opening_frame", "ending_frame", "camera_framing", "camera_angle", "camera_movement", "camera_amplitude", "camera_speed", "camera_target", "transition", "beats"):
+        for key in ("dialogue", "speaker", "dialogue_lang", "camera", "visual_style", "audio", "music", "important", "reference_subjects", "reference_environment", "opening_frame", "ending_frame", "camera_framing", "camera_angle", "camera_movement", "camera_amplitude", "camera_speed", "camera_target", "transition", "beats"):
             val = structured.get(key) or ""
             if val and not (key == "dialogue_lang" and val.lower() == "auto"):
                 row[key] = val

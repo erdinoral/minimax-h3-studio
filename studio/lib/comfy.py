@@ -134,18 +134,31 @@ def enhance_video_ref_prompt(text: str, *, n_videos: int, role: str = "motion", 
         re.search(rf"<\s*video\s+{i}\s*>", prompt, flags=re.IGNORECASE)
         for i in range(1, n_videos + 1)
     )
-    if has_tags:
-        return prompt
     pics = ", ".join(f"<Picture {i}>" for i in range(1, n_images + 1)) or "the reference picture"
     if role == "face_swap":
+        lock = (
+            f"Source timeline lock: preserve {tags} from its first frame through its last frame. "
+            f"Change only the selected person's facial identity to the face in {pics}. "
+            f"{pics} supplies facial identity only. All composition, appearance outside the face "
+            f"and motion come from {tags}. "
+            "Track that same source person through every angle and cut. "
+            "Match the source head pose, expression, mouth movement and lip timing. "
+            "Preserve the source hairstyle, hairline, body, clothing and objects covering the face. "
+            "Preserve every other person's identity and actions. "
+            "Preserve the source background and its full motion, camera path, framing, shot cuts "
+            "and timing. Preserve the source audio and its synchronization. "
+            "Match the replacement face to each source frame's lighting and shadows. "
+            "The selected face is the sole edited region."
+        )
+        if "Source timeline lock:" in prompt:
+            return prompt
         return (
-            f"{tags} {'is the source video' if n_videos == 1 else 'are the source videos'} to edit. "
-            "Keep everything unchanged: scene, background, camera movement, framing, timing, "
-            "lighting, body, clothing, hair and motion. Change only the face of the main person "
-            f"to the identity in {pics}, matching its facial features exactly while preserving "
-            "the original head pose, expressions and lip movement.\n\n"
-            f"{prompt}"
+            f"{lock}\n\n{prompt}" if prompt else
+            f"{lock}\n\nApply the face identity in {pics} to the main person, matching "
+            "the source head pose, expressions, mouth shapes and lip timing."
         ).strip()
+    if has_tags:
+        return prompt
     if role == "swap":
         return (
             f"{tags} {'is the source video' if n_videos == 1 else 'are the source videos'} to edit. "
@@ -1217,7 +1230,7 @@ def apply_sparse_attention(g: dict[str, Any]) -> dict[str, Any]:
         "selection": "sol-attn", "selection.tau": 1.3,
         "start_percent": 0.2, "end_percent": 1.0, "dense_blocks": "",
         "min_tokens": 12288, "extra_tokens": 256,
-        "sink_conditioning": "exact_kv_and_rows", "verbose": False,
+        "sink_conditioning": "exact_kv_and_rows", "verbose": True,
     })
 
 

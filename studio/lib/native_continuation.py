@@ -19,15 +19,16 @@ def state_path(comfy_root, key):
 def capture(graph, job, frames):
     if '14' not in graph:
         raise ValueError('Native tail capture requires a normal H3 sampler')
+    samples = ['studio_quality_refine', 0] if 'studio_quality_refine' in graph else ['14', 0]
     graph['studio_tail'] = {'class_type': 'H3StudioSaveContinuationTail', 'inputs': {
-        'samples': ['14', 0], 'key': job['id'], 'frames': frames}}
+        'samples': samples, 'key': job['id'], 'frames': frames}}
     for key, node in graph.items():
         if key == 'studio_tail': continue
         if node.get('class_type') in ('VAEDecode', 'VAEDecodeAudio', 'H3TAEDecode', 'VAEDecodeTiled'):
-            if node['inputs'].get('samples') == ['14', 0]:
+            if node['inputs'].get('samples') == samples:
                 node['inputs']['samples'] = ['studio_tail', 0]
         elif node.get('class_type') == 'LTXVSeparateAVLatent':
-            if node['inputs'].get('av_latent') == ['14', 0]:
+            if node['inputs'].get('av_latent') == samples:
                 node['inputs']['av_latent'] = ['studio_tail', 0]
     job['continuation_state_key'] = job['id']
     job['continuation_state_frames'] = 39

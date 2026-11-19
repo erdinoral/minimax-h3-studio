@@ -8,7 +8,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi import HTTPException
-from lib import cinema, continuum, native_continuation
+from lib import asset_references, cinema, continuum, native_continuation
 
 
 SPIDER = {'id': 's', 'name': 'Spider-Man', 'kind': 'character', 'notes': 'Red and gold suit.'}
@@ -21,6 +21,7 @@ class ContinuumReferenceManifest(unittest.IsolatedAsyncioTestCase):
         nodes = [n for n in tree.body if getattr(n, 'name', '') == '_queue_cinema_seamless']
         async def capabilities(): return {'continuum_ready': True}
         ns = dict(Any=Any, Optional=Optional, HTTPException=HTTPException, continuum=continuum,
+                  asset_references=asset_references,
                   cinema=cinema, workflow_capabilities=capabilities, detect_multishot_pack=lambda r: True,
                   COMFY_ROOT='.', MULTISHOT_MAX_SHOTS=4, resolve_size=lambda a, q: (864, 480),
                   normalize_quality=lambda q: q, _lora_src_for_shot=lambda b, h, m: (None, None),
@@ -33,6 +34,23 @@ class ContinuumReferenceManifest(unittest.IsolatedAsyncioTestCase):
                   uuid=__import__('uuid'))
         exec(compile(ast.Module(body=nodes, type_ignores=[]), 'seamless', 'exec'), ns)
         return ns
+
+    async def test_fresh_new_and_two_continues_share_one_fifteen_second_video(self):
+        ns = self.environment()
+        body = SimpleNamespace(seamless_backend='continuum', duration=5, continuum_max_chunks=16,
+                               continuum_grouping='cuts', aspect='16:9', quality='480', steps=8,
+                               sampler=None, scheduler=None, seed=7, post_pass='')
+        shots = [dict(id='a', mode='t2v'), dict(id='b', mode='continue'), dict(id='c', mode='continue')]
+        plans = [dict(prompt=text, hits=[], ref_images=[], rows=[]) for text in ('Start.', 'Next.', 'End.')]
+        result = await ns['_queue_cinema_seamless'](
+            body=body, parsed=shots, prompts=['Start.', 'Next.', 'End.'],
+            lib={'film_id': 'f'}, audio={}, cinema_batch='b', silent=False, purpose='short_film',
+            reference_plans=plans, parent_job_ids=[None] * 3)
+        self.assertEqual(len(result['jobs']), 1)
+        job = result['jobs'][0]
+        self.assertEqual(job['continuum_scene_ids'], ['a', 'b', 'c'])
+        self.assertEqual(job['planned_duration'], 15)
+        self.assertIsNone(job['continue_from'])
 
     async def test_continuum_take_keeps_asset_ownership_for_each_reference(self):
         ns = self.environment()

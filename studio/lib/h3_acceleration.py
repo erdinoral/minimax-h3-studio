@@ -32,6 +32,23 @@ def graph_settings(graph):
             'offline_smoothing_replay': inputs.get('offline_smoothing_replay')}
 
 
+def sparse_graph_settings(graph):
+    """Record the configured path without claiming a GPU kernel executed.
+
+    With verbose enabled Core records sparse execution or dense fallback reasons
+    in ComfyUI's log. Actual GPU acceptance is verified separately from this plan.
+    """
+    inputs = next((node.get('inputs', {}) for node in graph.values()
+                   if node.get('class_type') == 'BlockSparseAttention'), None)
+    if inputs is None:
+        return {'configured': False, 'runtime_verified': False}
+    return {'configured': True, 'method': inputs.get('selection'),
+            'tau': inputs.get('selection.tau'), 'min_tokens': inputs.get('min_tokens'),
+            'start_percent': inputs.get('start_percent'), 'end_percent': inputs.get('end_percent'),
+            'sink_conditioning': inputs.get('sink_conditioning'),
+            'diagnostics': bool(inputs.get('verbose')), 'runtime_verified': False}
+
+
 def clean_settings(raw):
     raw = raw if isinstance(raw, dict) else {}
     preset = raw.get("spectrum_preset", "balanced")

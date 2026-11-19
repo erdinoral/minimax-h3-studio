@@ -32,6 +32,7 @@ _director_progress: contextvars.ContextVar = contextvars.ContextVar(
 )
 
 from lib import h3_enhancements, continuum, video_labels, native_continuation, motion_long, face_crop
+from lib import local_quality
 from lib import h3_acceleration, render_control, diagnostics
 from lib import motionbricks
 from lib import sketch
@@ -818,6 +819,8 @@ notifier = NotifyService(NOTIFY_SETTINGS_FILE)
 _jobs: list[dict] = []
 from lib.review_api import create_router as create_review_router
 app.include_router(create_review_router(llm, lambda: _jobs))
+from lib.music_workspace import create_router as create_music_workspace_router
+app.include_router(create_music_workspace_router(DATA))
 from lib.game_api import create_router as create_game_router
 app.include_router(create_game_router(
     jobs=lambda: _jobs,
@@ -1361,7 +1364,16 @@ def _remember_removed_asset(kind: str, name: str, asset_id: str = "") -> None:
         _save_sessions()
 
 
+class MusicVideoJobInfo(BaseModel):
+    song_name: str = Field("", max_length=255)
+    start_sec: float = Field(0, ge=0)
+    duration_sec: float = Field(5, gt=0, le=240)
+    audio_file: str = Field(..., max_length=255, pattern=r"^[A-Za-z0-9_.-]+$")
+    audio_offset: float = Field(0, ge=0)
+
+
 class GenerateBody(BaseModel):
+    music_video: Optional[MusicVideoJobInfo] = None
     _motion_original_audio: Optional[str] = PrivateAttr(default=None)
     continuation_method: str = "standard"
     continuum_chunks: int = Field(1, ge=1, le=16)
@@ -3137,6 +3149,7 @@ async def generate(body: GenerateBody):
         ) else None,
         "ref_videos": ref_videos,
         "scene_audio_file": body.scene_audio_file,
+        "music_video": body.music_video.model_dump() if body.music_video else None,
         "scene_audio_mode": body.scene_audio_mode if body.scene_audio_file else None,
         "include_video_audio": bool(body.include_video_audio),
         "audio_continuity": bool(body.audio_continuity),
@@ -3158,6 +3171,7 @@ async def generate(body: GenerateBody):
         "prompt_rewritten": bool(body.prompt_rewriter_enabled),
         "h3_models": h3_models.resolve("ref2va" if audio_reference or (mode == 'continuum' and (ref_images or ref_videos)) else h3_models.graph_for_mode(mode)),
         "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+        "local_quality_version": local_quality.VERSION,
         "fast_preview": bool(body.fast_preview),
         "sheet_job": bool(getattr(body, "sheet_job", False)),
         "sheet_spectrum_full": bool(body.sheet_job and body.sheet_spectrum_full),
@@ -3683,6 +3697,7 @@ async def batch(body: BatchBody):
                 ) else "",
                 "h3_models": h3_models.resolve(h3_models.graph_for_mode(mode)),
                 "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+                "local_quality_version": local_quality.VERSION,
                 **shot_lora,
             }
             if cont_from:
@@ -5207,6 +5222,8 @@ async def _queue_cinema_seamless(
             ))
             texts.append(bound["prompt"] if bound.get("hits") else text)
             bound_hits.append(bound)
+        if use_continuum and reference_plans:
+            bound_hits = asset_references.fit_continuum_views(bound_hits, chunk_parsed)
         merged_hits = {"hits": []}
         for b in bound_hits:
             merged_hits["hits"].extend(b.get("hits") or [])
@@ -5287,6 +5304,7 @@ async def _queue_cinema_seamless(
             "lane": "director",
             "film_id": str((lib or {}).get("film_id") or ""),
             "post_pass": _normalize_post_pass(getattr(body, "post_pass", None)),
+            "local_quality_version": local_quality.VERSION,
             "voice_refs": _voice_refs_from_hits(merged_hits.get("hits") or []),
             "chain_normalize": True,
             "shot_id": (chunk_parsed[0] or {}).get("id") if chunk_parsed else None,
@@ -7217,7 +7235,15 @@ async def cinema_produce(body: CinemaProduceBody):
         want_seamless = False
     if want_seamless and still_lock and body.seamless_backend != "continuum":
         want_seamless = False
-    if body.seamless_backend == 'continuum':
+    if want_seamless and body.seamless_backend == 'continuum' and not any(parent_job_ids):
+        invalid_guide = any(s.get("mode") == "continue" and s.get("first_frame_name") for s in to_queue)
+        if invalid_guide:
+            raise HTTPException(400, "Continue uses its parent clip; put separate starting images on New scenes")
+        queued = await _queue_cinema_seamless(
+            body=body, parsed=to_queue, prompts=prompts, lib=lib, audio=audio,
+            cinema_batch=cinema_batch, silent=silent, purpose=purpose or 'short_film',
+            reference_plans=identity_plans, parent_job_ids=parent_job_ids)
+    elif body.seamless_backend == 'continuum':
         queued = await _queue_director_chains(
             body=body, parsed=to_queue, prompts=prompts, lib=lib, audio=audio,
             cinema_batch=cinema_batch, silent=silent, purpose=purpose or 'short_film',
@@ -10569,9 +10595,11 @@ async def _run_job_impl(job: dict):
         if job.get("sheet_method") == "look_sheets":
             look_sheets.add_nodes(prompt, job.get("sheet_kind") or "character", f"H3_Studio_Look/{job['id'][:8]}")
         prompt = h3_enhancements.patch_graph(prompt, job)
+        prompt = local_quality.apply(prompt, job)
         if job.get('save_continuation_tail'):
             prompt = native_continuation.capture(prompt, job, length)
         job['effective_spectrum'] = h3_acceleration.graph_settings(prompt)
+        job['effective_sparse'] = h3_acceleration.sparse_graph_settings(prompt)
         # Freeze inputs before output last-frame extraction mutates job fields.
         job['reproduction_snapshot'] = shot_reproduce.snapshot(job)
         await render_control.prepare(COMFY_URL, prompt, job)

@@ -1168,11 +1168,55 @@
     setDirectorModal(!!open);
   }
 
+  function directorTarget() {
+    return state.studioWorkspace || "scene";
+  }
+
+  function directorTargetContext() {
+    const workspace = directorTarget();
+    if (workspace === "music") return window.H3MusicProduction?.directorContext?.() || { workspace };
+    return {
+      workspace, mode: workspace === "motion" ? "v2v" : state.produceMode,
+      motion_source: workspace === "motion" ? window.h3MotionSource?.() : undefined,
+      motion_kind: workspace === "motion" ? state.v2vKind : undefined,
+      clip_duration: state.duration || 5, quality: state.quality, aspect: state.aspect,
+      visual_style: state.projectStyle,
+      current_prompt: $("prompt")?.value || "",
+      ...(workspace === "game" ? window.H3GameDirector?.context?.() : {}),
+    };
+  }
+
+  function syncDirectorTarget() {
+    const workspace = directorTarget();
+    const tr = document.documentElement.lang === "tr";
+    const names = tr
+      ? { scene: "Sahne", director: "Direktör", motion: "Motion", music: "Müzik Klibi", game: "Oyun / Sprites", influencer: "AI Influencer" }
+      : { scene: "Scene", director: "Director", motion: "Motion", music: "Music Video", game: "Game / Sprites", influencer: "AI Influencer" };
+    $("director-dock").dataset.workspace = workspace;
+    $("director-target").textContent = (tr ? "Çalışılan bölüm · " : "Working in · ") + names[workspace];
+    const label = document.querySelector('[data-director-text="llmSettings"]');
+    if (label) label.textContent = tr ? "Yönetmen LLM" : "Director LLM";
+    $("director-msg").placeholder = tr ? names[workspace] + " için ne yapmak istiyorsun?" : "What would you like to create in " + names[workspace] + "?";
+    syncProjectChips();
+  }
+
+  function setDirectorSettingsOpen(open) {
+    $("director-llm-toggle").setAttribute("aria-expanded", String(open));
+    $("director-llm-body").inert = !open;
+    $("director-llm-body").classList.toggle("open", open);
+  }
+  $("director-llm-toggle")?.addEventListener("click", () => {
+    setDirectorSettingsOpen($("director-llm-toggle").getAttribute("aria-expanded") !== "true");
+  });
+  document.addEventListener("h3-workspace", syncDirectorTarget);
+  document.addEventListener("h3-lang", syncDirectorTarget);
+
   function setDirectorModal(open) {
     const dock = $("director-dock");
     const backdrop = $("director-backdrop");
     if (!dock) return;
     const on = !!open;
+    if (on) syncDirectorTarget();
     dock.classList.toggle("modal-open", on);
     dock.setAttribute("aria-hidden", on ? "false" : "true");
     backdrop?.classList.toggle("hidden", !on);
@@ -6464,8 +6508,38 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     log.scrollTop = log.scrollHeight;
   }
 
-  function dirThinkPhases() {
-    return [tt("dir.think0"), tt("dir.think1"), tt("dir.think2"), tt("dir.think3")];
+  let directorActivityToken = 0;
+  let directorActivityTimer;
+  let directorActivityStarted = 0;
+  let dirThinkActivityToken;
+
+  function updateDirectorActivity(token, stage, detail = "") {
+    if (token !== directorActivityToken) return;
+    const labels = document.documentElement.lang === "tr"
+      ? { thinking: "Düşünüyor", writing: "Yanıtı hazırlıyor", applying: "Uyguluyor", queueing: "Üretime aktarıyor", rewriting: "Planı düzenliyor", connecting: "Yönetmene bağlanıyor" }
+      : { thinking: "Thinking", writing: "Preparing response", applying: "Applying", queueing: "Sending to production", rewriting: "Revising the plan", connecting: "Connecting to the director" };
+    $("director-activity").hidden = false;
+    $("director-activity").dataset.stage = stage;
+    $("director-activity-label").textContent = labels[stage] || labels.thinking;
+    $("director-activity-detail").textContent = String(detail).slice(0, 180);
+  }
+
+  function beginDirectorActivity(stage, detail = "") {
+    const token = ++directorActivityToken;
+    clearInterval(directorActivityTimer);
+    directorActivityStarted = Date.now();
+    $("director-activity-elapsed").textContent = "0s";
+    updateDirectorActivity(token, stage, detail);
+    directorActivityTimer = setInterval(() => {
+      $("director-activity-elapsed").textContent = Math.floor((Date.now() - directorActivityStarted) / 1000) + "s";
+    }, 1000);
+    return token;
+  }
+
+  function endDirectorActivity(token) {
+    if (token !== directorActivityToken) return;
+    clearInterval(directorActivityTimer);
+    $("director-activity").hidden = true;
   }
 
   function createDirectorMessage(role, text) {
@@ -6498,6 +6572,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   let _dirThinkFull = "";
 
   function clearDirectorThinking() {
+    endDirectorActivity(dirThinkActivityToken);
     if (_dirThinkTimer) {
       clearInterval(_dirThinkTimer);
       _dirThinkTimer = null;
@@ -6508,6 +6583,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
 
   function beginDirectorThinking(label) {
     clearDirectorThinking();
+    dirThinkActivityToken = beginDirectorActivity("thinking", label || "");
     const log = $("director-log");
     if (!log) return null;
     const div = document.createElement("div");
@@ -6524,22 +6600,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     _dirThinkFull = "";
     const body = div.querySelector(".think-body");
     const elapsed = div.querySelector(".think-elapsed");
-    let phase = 0;
     if (label) body.textContent = label;
-    else body.textContent = dirThinkPhases()[0] + "…";
+    else body.textContent = "";
     _dirThinkTimer = setInterval(() => {
       const el = document.getElementById("director-thinking");
       if (!el) return;
       const sec = Math.floor((Date.now() - _dirThinkStarted) / 1000);
       const e = el.querySelector(".think-elapsed");
       if (e) e.textContent = `${sec}s`;
-      // Rotate phases only when no live model thoughts yet
-      if (!_dirThinkFull) {
-        const phases = dirThinkPhases();
-        phase = Math.floor(sec / 4) % phases.length;
-        const b = el.querySelector(".think-body");
-        if (b) b.textContent = phases[phase] + "…";
-      }
       log.scrollTop = log.scrollHeight;
     }, 1000);
     return div;
@@ -6552,16 +6620,21 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!body) return;
     const type = (ev && ev.type) || "";
     if (type === "thinking") {
+      el.classList.add("has-content");
+      updateDirectorActivity(dirThinkActivityToken, "thinking");
       _dirThinkFull = (ev.full || _dirThinkFull + (ev.text || "")).slice(-1600);
       body.textContent = _dirThinkFull;
       el.classList.remove("answering");
     } else if (type === "answer") {
+      el.classList.add("has-content");
+      updateDirectorActivity(dirThinkActivityToken, "writing");
       el.classList.add("answering");
       _dirThinkFull = (_dirThinkFull + (ev.text || "")).slice(-2000);
       body.textContent = _dirThinkFull;
       const dots = el.querySelector(".think-dots");
       if (dots) dots.textContent = tt("dir.writing");
     } else if (type === "status" && ev.text) {
+      updateDirectorActivity(dirThinkActivityToken, "thinking", localizeSystemLabel(ev.text));
       if (!_dirThinkFull) body.textContent = localizeSystemLabel(ev.text);
     }
     $("director-log").scrollTop = $("director-log").scrollHeight;
@@ -7397,6 +7470,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       "";
     syncModelSelects(model);
     _setLlmBtnBusy("btn-llm-provider-save", true, "ayar.llmApplying", "ayar.llmApply");
+    const activity = beginDirectorActivity("connecting");
     try {
       let pub = await ensureLlmPub({ fresh: true });
       const unsavedKey = _unsavedLlmKeyForProvider(provider);
@@ -7450,6 +7524,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       directorLlmFeedback(String(e.message || e), "err");
     } finally {
       _setLlmBtnBusy("btn-llm-provider-save", false, "ayar.llmApplying", "ayar.llmApply");
+      endDirectorActivity(activity);
     }
     void refreshDirectorStatus();
   }
@@ -7579,7 +7654,9 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
             : nvidiaWarn || `${provider} · ${activeModel}`;
         setDirectorUi(true, label);
         if (!$("director-log").children.length && s.opening && !state.directorSessions.length) {
-          appendDirectorMsg("assistant", s.opening);
+          appendDirectorMsg("assistant", document.documentElement.lang === "tr"
+            ? "Ne yapmak istediğini anlat. Açık bölümün ayarları ve referanslarıyla bir plan hazırlayıp aynı bölümde üretime aktarabilirim."
+            : "Tell me what you want to create. I can prepare a plan using the active workspace's settings and references, then send it to production there.");
         }
       } else {
         const why = s.detail || "";
@@ -7682,14 +7759,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   function syncProjectChips() {
+    const musicContext = directorTarget() === "music" ? window.H3MusicProduction?.directorContext?.() : null;
     document
       .querySelectorAll("#director-chips .chip, #scene-purpose-chips .chip, #scene-style-chips .chip")
       .forEach((btn) => {
         const g = btn.dataset.group;
         let on = false;
         if (g === "purpose") on = btn.dataset.purpose === state.projectPurpose;
-        else if (g === "style") on = btn.dataset.style === state.projectStyle;
-        else if (g === "clip") on = Number(btn.dataset.clip) === Number(state.duration);
+        else if (g === "style") on = btn.dataset.style === (musicContext && btn.closest("#director-chips") ? musicContext.visual_style : state.projectStyle);
+        else if (g === "clip") on = Number(btn.dataset.clip) === Number(musicContext?.clip_duration || state.duration);
         btn.classList.toggle("on", on);
         btn.setAttribute("aria-pressed", on ? "true" : "false");
       });
@@ -7704,10 +7782,10 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     const badge = $("director-project");
     if (badge) {
       const bits = [];
-      if (state.projectPurpose) bits.push(purposeLabel(state.projectPurpose) || state.projectPurpose);
-      if (state.projectStyle) bits.push(styleLabel(state.projectStyle) || state.projectStyle);
-      bits.push(`${state.duration} ${tt("sec")}`);
-      if (state.projectSilent || state.projectPurpose === "music_video") bits.push(tt("project.silentVisual"));
+      if (["scene", "director"].includes(directorTarget()) && state.projectPurpose) bits.push(purposeLabel(state.projectPurpose) || state.projectPurpose);
+      const currentStyle = musicContext?.visual_style || state.projectStyle;
+      if (currentStyle) bits.push(styleLabel(currentStyle) || currentStyle);
+      bits.push(`${musicContext?.clip_duration || state.duration} ${tt("sec")}`);
       badge.textContent = bits.length ? tf("project.badge", { bits: bits.join(" · ") }) : tt("project.pick");
     }
     updateProjectAudioHint();
@@ -7746,6 +7824,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     if (!btn || btn.disabled) return;
     const g = btn.dataset.group;
     const fromScene = !!(opts && opts.fromScene);
+    if (!fromScene && directorTarget() === "music") {
+      window.H3MusicProduction?.setDirectorSettings?.({ style: btn.dataset.style, duration: btn.dataset.clip });
+      syncProjectChips();
+      return;
+    }
     if (!fromScene) setDirectorOpen(true);
     if (g === "purpose") {
       const p = btn.dataset.purpose;
@@ -7807,6 +7890,15 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function directorChatRequest(message, onProgress) {
+    const targetContext = directorTargetContext();
+    const instructions = {
+      motion: "Help operate the active Motion workspace. Preserve the uploaded motion video and identity references. Write prompts for the selected Motion mode, not a standalone film. Return ready prompts in brief.shots when requested. Do not require a production-purpose selection.",
+      music: "Help operate the Music Video workspace with its selected song interval and performer image. Write visual performance directions in brief.shots. Keep the requested section count. Normal mode uses the song as an audio reference. Continuum currently supports visuals with song playback but not song-driven lip sync.",
+      game: "Help operate Game / Sprites using its selected character and animations. Return a static character description of at most 400 characters in brief.shots[0].h3Prompt. Existing animation templates handle movement, fixed camera and background. Do not introduce cinematic camera movement or scenery.",
+      influencer: "The AI Influencer workspace is in development. Help plan the request within that context.",
+    };
+    message += "\n\n[Active H3 Studio workspace]\n" + JSON.stringify(targetContext);
+    if (instructions[targetContext.workspace]) message += "\n" + instructions[targetContext.workspace];
     const sections = handmadeSceneWorkflow()
       ? window.getVideoWorkflowPayload?.().continuum_segment_prompts : null;
     if (sections?.length) {
@@ -7823,12 +7915,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       session_id: state.directorSessionId,
       message,
       model: $("director-model").value || null,
-      purpose: state.projectPurpose,
-      visual_style: state.projectStyle,
-      silent_audio: state.projectSilent || state.projectPurpose === "music_video",
-      clip_duration: state.duration || 5,
-      cinema_studio: !handmadeSceneWorkflow() &&
-        (!!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden")),
+      purpose: targetContext.workspace === "music" ? "music_video" : state.projectPurpose,
+      visual_style: targetContext.visual_style || state.projectStyle,
+      silent_audio: targetContext.workspace === "music" || state.projectSilent || state.projectPurpose === "music_video",
+      clip_duration: targetContext.clip_duration || state.duration || 5,
+      cinema_studio: targetContext.workspace === "director",
       prompt_rewriter_enabled: !!$("prompt-rewriter-enabled")?.checked,
     };
     // Prefer SSE stream so thinking shows in the same assistant row
@@ -8065,6 +8156,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       return;
     }
     const btns = [$("btn-plan-rewrite"), $("btn-rewrite-brief")].filter(Boolean);
+    const activity = beginDirectorActivity("rewriting");
     btns.forEach((b) => {
       b.disabled = true;
     });
@@ -8092,6 +8184,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     } catch (e) {
       toast(String(e.message || e));
     } finally {
+      endDirectorActivity(activity);
       btns.forEach((b) => {
         b.disabled = false;
       });
@@ -8620,6 +8713,47 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
   }
 
   async function applyBrief(queue) {
+    const target = directorTarget();
+    if (!["scene", "director"].includes(target)) {
+      const texts = promptsFromBrief(state.directorBrief);
+      if (!texts.length) { tToast("toast.directorTalkFirst"); return; }
+      const buttons = [$("btn-queue-brief"), $("btn-plan-queue")].filter(Boolean);
+      if (state.directorApplying) return;
+      state.directorApplying = true;
+      const activity = beginDirectorActivity(queue ? "queueing" : "applying");
+      buttons.forEach(button => { button.disabled = true; });
+      try {
+        let applied = false;
+        if (target === "music") {
+          applied = await window.H3MusicProduction?.applyDirector?.(texts, { queue });
+        } else if (target === "game") {
+          applied = await window.H3GameDirector?.apply?.(texts, { queue });
+        } else if (target === "motion") {
+          setQueueFromTexts(texts);
+          $("prompt").value = texts[0];
+          applied = true;
+          if (queue) {
+            for (const text of texts) {
+              $("prompt").value = text;
+              if (!await submitGenerate()) { applied = false; break; }
+            }
+          }
+        } else {
+          toast(document.documentElement.lang === "tr" ? "Bu bölüm geliştirme aşamasında." : "This workspace is in development.");
+        }
+        if (applied) {
+          if (queue) setDirectorOpen(false);
+          else tToast("toast.shotListTransfer");
+        }
+      } catch (error) {
+        toast(String(error.message || error));
+      } finally {
+        endDirectorActivity(activity);
+        state.directorApplying = false;
+        buttons.forEach(button => { button.disabled = false; });
+      }
+      return;
+    }
     if (handmadeSceneWorkflow()) {
       if (!fillHandmadeSections(state.directorBrief)) {
         toast(tt("dir.handmadeSectionsMissing"));
@@ -8638,11 +8772,11 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       return;
     }
     const queueBtns = [$("btn-queue-brief"), $("btn-plan-queue")].filter(Boolean);
+    const activity = beginDirectorActivity(queue ? "queueing" : "applying");
     queueBtns.forEach((b) => {
       b.disabled = true;
     });
-    const inCinema =
-      !!state.cinemaDirector || !$("view-cinema")?.classList.contains("hidden");
+    const inCinema = target === "director";
     // Immediate UX: mirror local plan shots into Prompt / Sahne before commit returns
     const localPrompts = promptsFromBrief(state.directorBrief);
     if (localPrompts.length) {
@@ -8725,6 +8859,7 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     } catch (e) {
       toast(String(e.message || e));
     } finally {
+      endDirectorActivity(activity);
       queueBtns.forEach((b) => {
         b.disabled = false;
       });
@@ -10785,12 +10920,14 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
     updateLoraHint();
   }
 
-  const V2V_FACE_SWAP_PROMPT = "Edit <Video 1> on its original timeline. Apply the face, hairstyle, hairline and facial hair from <Picture 1> to one target person. "
+  const V2V_FACE_SWAP_PROMPT = "Edit <Video 1> on its original timeline. Change only the selected person's facial identity to the face in <Picture 1>. "
+    + "Use <Picture 1> for facial identity only. All composition, appearance outside the face and motion come from <Video 1>. "
     + "Use the person specified in the prompt, or select the main person once when no target is specified. Track that same source identity through cuts, changes in camera angle and reflections. "
     + "Preserve every other person's original face and hair, even in close-ups. When the target is absent or cannot be identified confidently, preserve the source shot. "
     + "Match the target's original head pose, expressions, mouth shapes and lip timing to the source dialogue. Preserve the original gestures and keep hands and objects in front of the face where they cover it in the source. "
     + "Match the original shots and cut times. Keep the framing, camera motion, lighting, people, animals, objects and scenery as they appear in each source frame. "
-    + "Add visual elements only when explicitly requested.";
+    + "Preserve the target's source hairstyle, hairline, clothing and body. Match the replacement face to the source frame's light and shadows. "
+    + "Preserve the complete source video from its first frame to its last, including source audio and synchronization, with the selected face as the sole edited region.";
 
   function readyLora(id) {
     return (state.loraCatalog || []).find((spec) => spec.id === id && spec.file && spec.ready) || null;
@@ -10823,6 +10960,19 @@ async function pullCinemaLibraryAsset(kind, libraryId) {
       lora_strengths: Object.fromEntries((picked.length ? picked : [spec]).map(item => [item.file, loraWeight(item)])),
     };
   }
+
+  window.H3MusicProduction = {
+    styleHint: (style) => STYLE_HINT[style] || STYLE_HINT.realistic,
+    async speedLora() {
+      if (!state.loraCatalog.length) await loadLoras();
+      const spec = readyLora(DRAFT_LORA_ID);
+      if (!spec) throw Error(document.documentElement.lang === "tr"
+        ? "Taslak ve Orta için Ayarlar’dan Hybrid r48 LoRA’yı indirin."
+        : "Download the Hybrid r48 LoRA in Settings for Draft and Medium.");
+      return { lora_id: spec.id, lora_name: spec.file, lora_strength: 1,
+        lora_strengths: { [spec.file]: 1 } };
+    },
+  };
 
   function collectGenerateKnobs() {
     return {

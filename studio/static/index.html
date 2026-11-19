@@ -16,12 +16,12 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=roadmap-paths" />
+  <link rel="stylesheet" href="/static/app.css?v=director-activity10" />
   <link rel="stylesheet" href="/static/chrome-fit.css?v=cinema112" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/film-workspace.css?v=queue-dialog303" />
-  <link rel="stylesheet" href="/static/music-video.css?v=3" />
+  <link rel="stylesheet" href="/static/music-video.css?v=19" />
   <link rel="stylesheet" href="/static/prompt-library.css?v=4" />
 </head>
 <body>
@@ -762,10 +762,16 @@
       <h2>H3 Yönetmen</h2>
       <span class="muted director-project" id="director-project">Proje seç</span>
       <div class="director-tools">
-        <span class="muted" id="director-status">Ollama …</span>
+
         <button type="button" class="dir-tool" id="btn-dir-collapse" data-i18n-title="dir.llmClose" title="Kapat">×</button>
       </div>
     </div>
+    <div class="director-context-bar"><span id="director-target" role="status"></span></div>
+    <div class="director-llm-settings">
+      <button type="button" class="director-llm-summary" id="director-llm-toggle" aria-expanded="false" aria-controls="director-llm-body">
+        <span data-director-text="llmSettings">Yönetmen LLM</span><span class="muted" id="director-status">Ollama …</span><span class="res-drop-chevron" aria-hidden="true"></span>
+      </button>
+      <div class="director-llm-body" id="director-llm-body" inert><div class="director-llm-inner">
     <div class="llm-prod-pick" id="llm-prod-pick">
       <label id="llm-prod-provider-label"><span data-i18n="ayar.llm">Yönetmen (hangi LLM)</span>
         <select id="llm-provider">
@@ -785,9 +791,11 @@
       <button type="button" class="btn-secondary" id="btn-llm-provider-save">Yönetmeni uygula</button>
       <p class="muted mode-hint" id="llm-prod-hint" data-i18n="ayar.llmHint">API anahtarları sağ üst Ayarlar’da. Üretim (Comfy/H3) bundan etkilenmez.</p>
     </div>
+      </div></div>
+    </div>
     <div class="director-scroll" id="director-scroll">
-      <div class="director-chips" id="director-chips">
-        <div class="director-choice-group" role="group" aria-labelledby="director-purpose-title">
+      <div class="director-chips scene-project" id="director-chips">
+        <div class="director-choice-group chips" id="director-purpose-choices" role="group" aria-labelledby="director-purpose-title">
           <span id="director-purpose-title" data-i18n="scene.purpose">Üretim türü</span>
           <button type="button" class="chip" data-group="purpose" data-purpose="short_film" data-chip="kısa film" aria-pressed="false">kısa film</button>
           <button type="button" class="chip" data-group="purpose" data-purpose="music_video" data-chip="müzik klibi" data-silent="1" aria-pressed="false" title="Sessiz görüntü; şarkı finalde">müzik klibi</button>
@@ -800,7 +808,7 @@
           <button type="button" class="chip" data-group="purpose" data-purpose="intro" data-chip="intro" aria-pressed="false">intro</button>
           <button type="button" class="chip" data-group="purpose" data-purpose="outro" data-chip="outro" aria-pressed="false">outro</button>
         </div>
-        <div class="director-choice-group" role="group" aria-labelledby="director-style-title">
+        <div class="director-choice-group chips" id="director-style-choices" role="group" aria-labelledby="director-style-title">
           <span id="director-style-title" data-i18n="scene.style">Görsel tarz</span>
           <button type="button" class="chip" data-group="style" data-style="realistic" data-chip="gerçekçi tarz" aria-pressed="false">gerçekçi</button>
           <button type="button" class="chip" data-group="style" data-style="anime" data-chip="anime tarz" aria-pressed="false">anime</button>
@@ -813,7 +821,7 @@
           <button type="button" class="chip" data-group="style" data-style="clay" data-chip="kil animasyon tarz" aria-pressed="false">kil</button>
           <button type="button" class="chip" data-group="style" data-style="found_footage" data-chip="found footage tarz" aria-pressed="false">found footage</button>
         </div>
-        <div class="director-choice-group" role="group" aria-labelledby="director-clip-title">
+        <div class="director-choice-group chips" id="director-clip-choices" role="group" aria-labelledby="director-clip-title">
           <span id="director-clip-title" data-i18n="scene.duration">Süre</span>
           <button type="button" class="chip" data-group="clip" data-clip="4" data-chip="4 sn klipler" aria-pressed="false">4 sn</button>
           <button type="button" class="chip" data-group="clip" data-clip="5" data-chip="5 sn klipler" aria-pressed="false">5 sn</button>
@@ -930,6 +938,12 @@
       <div class="director-chat" id="director-log"></div>
     </div>
     <div class="director-footer" id="director-footer">
+      <div class="director-activity" id="director-activity" hidden>
+        <span class="director-activity-dot" aria-hidden="true"></span>
+        <span id="director-activity-label" role="status" aria-live="polite"></span>
+        <span class="muted" id="director-activity-detail"></span>
+        <span class="muted" id="director-activity-elapsed" aria-hidden="true"></span>
+      </div>
       <div class="director-actions" id="director-actions">
         <label style="display:inline-flex;align-items:center;gap:8px;margin-right:12px;">
           <input type="checkbox" id="link-continue" checked />
@@ -1061,57 +1075,145 @@
     <form id="music-video-form">
       <section class="zone zone-scene panel scene">
         <h2 data-music-text="title">Müzik Klibi</h2>
-        <label class="file-pick">
+        <div class="music-video-project-toolbar">
+          <select id="music-video-project-select" aria-label="Kayıtlı çalışmalar"><option value="" data-music-text="newRecord">Yeni kayıt</option></select>
+          <button type="button" class="btn-secondary" id="music-video-project-save" data-music-text="saveProject">Çalışmayı kaydet</button>
+        </div>
+        <input id="music-video-project-name" type="text" maxlength="160" aria-label="Çalışma adı" placeholder="Çalışma adı" />
+        <p id="music-video-project-status" class="muted" role="status"></p>
+        <div class="studio-upload-card studio-upload-field"><label class="file-pick">
           <input id="music-video-song" class="file-pick-input" type="file" accept=".mp3,.wav,.flac,.ogg,.m4a,.aac" required />
           <span class="file-pick-btn" data-music-text="song">Şarkı seç</span>
           <span class="file-pick-name" id="music-video-song-name" data-music-text="none">Seçilmedi</span>
-        </label>
-        <label class="file-pick">
+        </label></div>
+        <div class="studio-upload-card studio-upload-field"><label class="file-pick">
           <input id="music-video-character" class="file-pick-input" type="file" accept="image/png,image/jpeg,image/webp" required />
           <span class="file-pick-btn" data-music-text="character">Karakter görseli seç</span>
           <span class="file-pick-name" id="music-video-character-name" data-music-text="none">Seçilmedi</span>
-        </label>
-        <div class="music-video-development">
-          <span data-music-text="development">Geliştirme aşamasında</span>
+        </label></div>
+        <div id="music-video-controls" class="scene-project">
+          <label data-music-text="style">Görsel tarz</label>
+          <div class="chips wrap" id="music-video-styles"></div>
+          <label for="music-video-duration" data-music-text="duration">Bölüm süresi</label>
+          <select id="music-video-duration"><option>4</option><option selected>5</option><option>6</option><option>8</option><option>10</option><option>15</option></select>
+          <label data-music-text="aspect">Görüntü oranı</label>
+          <div class="chips wrap" id="music-video-aspects">
+            <button type="button" class="chip on" data-aspect="16:9">16:9</button>
+            <button type="button" class="chip" data-aspect="9:16">9:16</button>
+            <button type="button" class="chip" data-aspect="1:1">1:1</button>
+            <button type="button" class="chip" data-aspect="21:9">21:9</button>
+            <button type="button" class="chip" data-aspect="4:3">4:3</button>
+          </div>
+          <label for="music-video-quality" data-music-text="quality">Çözünürlük</label>
+          <select id="music-video-quality"><option value="352">352p</option><option value="480">480p</option><option value="608">608p</option><option value="736" selected>736p</option><option value="768">768p</option><option value="1088">1088p</option></select>
         </div>
+        <div class="music-video-knobs">
+          <label for="music-video-seed">Seed<input id="music-video-seed" type="number" min="-1" max="4294967295" value="-1" required /></label>
+          <label for="music-video-steps"><span data-music-text="steps">Adım</span><input id="music-video-steps" type="number" min="1" max="100" value="8" required /></label>
+        </div>
+        <label data-music-text="preset">Kalite ön ayarı</label>
+        <div class="chips wrap" id="music-video-presets">
+          <button type="button" class="chip" data-preset="draft" data-music-text="draft">Taslak</button>
+          <button type="button" class="chip on" data-preset="medium" data-music-text="medium">Orta</button>
+          <button type="button" class="chip" data-preset="high" data-music-text="high">Kaliteli</button>
+        </div>
+        <p class="muted" id="music-video-preset-summary"></p>
+        <p id="music-video-status" role="status" aria-live="polite"></p>
       </section>
       <section class="zone zone-player panel player">
-        <h2 data-music-text="preview">Performans Önizlemesi</h2>
+        <div class="motion-view-switch" id="music-video-view" role="tablist" data-view="workspace" aria-label="Performans önizlemesi">
+          <button type="button" role="tab" class="on" data-music-view="workspace" aria-selected="true" aria-controls="music-video-stage" tabindex="0"><span class="mv-rec" aria-hidden="true"></span><span data-music-text="workspace">Çalışma alanı</span></button>
+          <button type="button" role="tab" data-music-view="result" aria-selected="false" aria-controls="music-video-stage" tabindex="-1"><span data-music-text="result">Sonuç</span></button>
+        </div>
         <div class="player-stage" id="music-video-stage">
-          <span class="player-empty muted" data-music-text="noPreview">Henüz önizleme yok</span>
+          <span class="player-empty muted" id="music-video-stage-empty">Karakter görselini seçerek başla.</span>
           <img id="music-video-character-preview" hidden alt="" />
           <video id="music-video-result" controls playsinline preload="metadata" hidden></video>
         </div>
         <audio id="music-video-original" preload="auto"></audio>
         <label id="music-video-original-toggle" hidden><input id="music-video-use-original" type="checkbox" checked /> <span data-music-text="original">Orijinal şarkıyla dinle</span></label>
       </section>
-      <section class="zone zone-prompt panel">
-        <h2><label for="music-video-direction" data-music-text="direction">Sahne tarifi</label></h2>
-        <textarea id="music-video-direction" rows="3" maxlength="1000"></textarea>
-        <button type="submit" class="cta" id="music-video-generate" data-music-text="generate" disabled>Performans klibi üret</button>
+      <section class="zone zone-prompt panel prompt">
+        <h2>Prompt</h2>
+        <div class="h3-workflow-card">
+          <div class="continuum-heading"><strong>Continuum <small data-music-text="experimental">Deneysel</small></strong>
+            <label class="continuum-toggle"><input id="music-video-continuum" type="checkbox" aria-label="Continuum" /><span id="music-video-continuum-state">OFF</span></label>
+          </div>
+          <div id="music-video-continuum-settings" hidden>
+            <div class="continuum-layout" id="music-video-layout">
+              <button type="button" class="chip on" data-layout="single" data-music-text="singlePrompt">Tek prompt</button>
+              <button type="button" class="chip" data-layout="sections" data-music-text="perSection">Bölüm bölüm</button>
+            </div>
+            <label id="music-video-count-label"><span data-music-text="sectionCount">Bölüm sayısı</span><input id="music-video-count" type="number" min="1" max="16" value="2" /></label>
+            <details class="continuum-advanced">
+              <summary data-music-text="continuitySettings">Tutarlılık ayarları</summary>
+              <label><span data-music-text="sharedContext">Ortak karakter ve ortam</span><textarea id="music-video-context" rows="3" maxlength="8000"></textarea></label>
+              <label><span data-music-text="transitionContext">Geçiş bağlamı</span><select id="music-video-continuity"><option value="balanced" data-music-text="balancedContext">Dengeli · 22 kare</option><option value="strong" data-music-text="strongContext">Güçlü · 39 kare (deneysel)</option></select></label>
+              <label class="continuum-extendable"><input id="music-video-extendable" type="checkbox" checked /><span data-music-text="extendable">Sonradan uzatılabilir kaydet</span><small class="muted" data-music-text="extendableHint">Açıkken bu iş Spectrum olmadan üretilir. Kapalıyken mevcut Spectrum ayarı kullanılır.</small></label>
+            </details>
+            <p id="music-video-total" class="muted"></p>
+          </div>
+        </div>
+        <label id="music-video-first-section" for="music-video-direction" hidden></label>
+        <textarea id="music-video-direction" rows="3" maxlength="8000"></textarea>
+        <div id="music-video-sections" hidden></div>
+        <button type="button" class="btn-secondary" id="music-video-add-section" data-music-text="addSection" hidden>+ Devam bölümü</button>
+        <div class="gen-actions">
+          <button type="button" class="btn-ghost" id="music-video-rewrite">Rewrite</button>
+          <button type="submit" class="cta" id="music-video-generate" data-music-text="generate" disabled>Üret</button>
+        </div>
+        <p class="muted gen-hint" id="music-video-mode-hint"></p>
       </section>
       <section class="zone zone-prod panel music-video-timeline">
         <h2 id="music-video-timeline-label" data-music-text="timeline">Şarkı zaman çizelgesi</h2>
-        <div class="music-video-wave">
-          <canvas id="music-video-waveform" aria-hidden="true"></canvas>
-          <input id="music-video-range" type="range" min="0" max="0" step="0.01" value="0" aria-labelledby="music-video-timeline-label" disabled />
+        <div class="chips music-video-timeline-tabs" role="tablist" aria-label="Şarkı ve üretimler">
+          <button type="button" class="chip on" id="music-video-song-tab" role="tab" aria-selected="true" aria-controls="music-video-song-panel" data-music-text="songTab">Şarkı</button>
+          <button type="button" class="chip" id="music-video-queue-tab" role="tab" aria-selected="false" aria-controls="music-video-queue" data-music-text="productionQueue">Üretim kuyruğu</button>
         </div>
-        <div class="music-video-range-row">
-          <label><span data-music-text="start">Başlangıç (saniye)</span><input id="music-video-start" type="number" value="0" min="0" step="0.01" required /></label>
-          <output id="music-video-selection">0:00.00 – 0:05.00</output>
-          <button type="button" id="music-video-listen" class="btn-secondary" data-music-text="listen" disabled>5 saniyeyi dinle</button>
+        <div class="music-video-queue" id="music-video-queue" role="tabpanel" aria-labelledby="music-video-queue-tab" hidden>
+          <p id="music-video-queue-count" class="muted"></p>
+          <div id="music-video-queue-list" role="list"></div>
+        </div>
+        <div id="music-video-song-panel" role="tabpanel" aria-labelledby="music-video-song-tab">
+        <div class="music-video-stem-toolbar">
+          <div class="music-video-stem-options">
+            <label for="music-video-stem-channels"><span data-music-text="stemChannels">Kanallar</span><select id="music-video-stem-channels"><option value="4" data-music-text="stemFour">4 kanal</option><option value="6" data-music-text="stemSix">6 kanal</option></select></label>
+            <label for="music-video-stem-device"><span data-music-text="stemDevice">İşlemci</span><select id="music-video-stem-device"><option value="cpu">CPU</option><option value="gpu">GPU · CUDA</option></select></label>
+            <label for="music-video-stem-preset"><span data-music-text="stemQuality">Ayrıştırma kalitesi</span><select id="music-video-stem-preset"><option value="fast" data-music-text="stemFast">Hızlı</option><option value="quality" data-music-text="stemHigh">Kaliteli</option></select></label>
+          </div>
+          <button type="button" class="btn-secondary" id="music-video-separate" data-music-text="separate" disabled>Stemleri ayır</button>
+          <span class="muted" data-music-text="stemHint">Yerel HDemucs · ilk kullanımda model indirilir · en fazla 10 dk</span>
+        </div>
+        <p id="music-video-stem-profile" class="muted"></p>
+        <p id="music-video-stem-status" class="muted" role="status"></p>
+        <div class="music-video-wave" role="slider" tabindex="0" aria-label="Şarkıda gezin" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+          <canvas id="music-video-waveform" aria-hidden="true"></canvas>
+        </div>
+        <div id="music-video-stems"></div>
+        <div class="music-video-playback-row">
+          <output id="music-video-clock">0:00.00 / 0:00.00</output>
+          <div class="music-video-transport" role="group" aria-label="Şarkı oynatıcısı">
+            <button type="button" id="music-video-play" class="btn-secondary" aria-label="Oynat" title="Oynat" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg></button>
+            <button type="button" id="music-video-stop" class="btn-secondary" aria-label="Durdur" title="Durdur" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="1" /></svg></button>
+            <button type="button" id="music-video-restart" class="btn-secondary" aria-label="En baştan başlat" title="En baştan başlat" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9a8 8 0 1 1 0 6M4 3v6h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+          </div>
         </div>
         <audio id="music-video-source" preload="metadata"></audio>
         <p id="music-video-wave-status" class="muted" role="status"></p>
+        </div>
       </section>
       <section class="zone zone-ayar panel">
-        <h2 data-music-text="quality">Kalite</h2>
-        <div class="chips" role="group" aria-labelledby="music-video-quality-label" id="music-video-quality-options">
-          <span id="music-video-quality-label" class="hidden" data-music-text="quality">Kalite</span>
-          <button type="button" class="chip on" data-quality="736" aria-pressed="true" data-music-text="medium">Orta · 736p</button>
-          <button type="button" class="chip" data-quality="1088" aria-pressed="false" data-music-text="high">Kaliteli · 1088p</button>
+        <h2 data-music-text="lyrics">Şarkı sözleri</h2>
+        <div class="music-video-lyrics-actions">
+          <button type="button" class="btn-secondary" id="music-video-lyrics-extract" data-music-text="extractLyrics" disabled>Otomatik çıkar</button>
+          <button type="button" class="btn-secondary" id="music-video-lyrics-edit" data-music-text="editLyrics">Düzenle</button>
+          <label class="file-pick"><input class="file-pick-input" id="music-video-lyrics-file" type="file" accept=".lrc,.txt" /><span class="file-pick-btn" data-music-text="importLyrics">LRC / TXT aç</span></label>
         </div>
-        <p id="music-video-status" role="status" aria-live="polite"></p>
+        <p id="music-video-lyrics-status" class="muted" role="status" aria-live="polite"></p>
+        <p class="muted" data-music-text="lyricsHint">Zamanlı sözlere tıklayarak şarkıda o ana geç. Düzenlerken satır başına [00:12.50] ekleyebilir veya Dinlenen anı ekle düğmesini kullanabilirsin.</p>
+        <textarea id="music-video-lyrics-input" rows="12" placeholder="[00:12.50] …" aria-label="Şarkı sözlerini düzenle" hidden></textarea>
+        <button type="button" class="btn-secondary" id="music-video-stamp-lyric" data-music-text="stampLyric" hidden>Dinlenen anı ekle</button>
+        <div id="music-video-lyrics" aria-live="off"></div>
       </section>
     </form>
   </main>
@@ -1871,8 +1973,8 @@
   <script src="/static/vram-guard.js?v=2" charset="utf-8"></script>
   <script src="/static/prompt-library.js?v=4" charset="utf-8"></script>
   <script src="/static/roadmap-map.js?v=3" charset="utf-8"></script>
-  <script src="/static/app.js?v=roadmap-pixel1" charset="utf-8"></script>
-  <script src="/static/music-video.js?v=3" charset="utf-8"></script>
+  <script src="/static/app.js?v=director-activity10" charset="utf-8"></script>
+  <script src="/static/music-video.js?v=19" charset="utf-8"></script>
   <script src="/static/lora-access.js?v=film1" charset="utf-8"></script>
   <script src="/static/model-storage.js?v=hardware3" charset="utf-8"></script>
   <script src="/static/model-downloads.js?v=3" charset="utf-8"></script>
@@ -1883,8 +1985,8 @@
   <script src="/static/video-labels.js?v=1"></script>
   <script src="/static/motion-sketch.js?v=6"></script>
   <script src="/static/motion-robot.js?v=9"></script>
-  <script src="/static/game-sprites.js?v=7"></script>
-  <script src="/static/scene-selectors.js?v=4"></script>
+  <script src="/static/game-sprites.js?v=director9-7"></script>
+  <script src="/static/scene-selectors.js?v=9"></script>
   <script src="/static/scene-settings.js?v=3"></script>
   <script src="/static/sponsor-banner.js?v=6"></script>
 </body>

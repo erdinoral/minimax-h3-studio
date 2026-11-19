@@ -1,10 +1,29 @@
 import unittest
 import copy
 from unittest.mock import AsyncMock, patch
-from lib import director_identity
+from lib import cinema, director_identity
 
 
 class DirectorIdentityTests(unittest.TestCase):
+    def test_written_dialogue_uses_only_the_named_speaker(self):
+        fields = {"character": "Albedo, Ainz", "action": "Ainz looks up.",
+                  "speaker": "Ainz", "dialogue": "Buraya gel.", "dialogue_lang": "tr"}
+        prompt = director_identity.prompt_for_shot(
+            {"structured": fields, "text": cinema.compose_h3_prompt(fields)}, self.film())
+        self.assertIn("Ainz (S1) says: <d>[Turkish] Buraya gel.</d>", prompt)
+        self.assertIn("Everyone else stays silent", prompt)
+        self.assertNotIn("soft melodic", prompt)
+        self.assertEqual(prompt.count("<d>"), 1)
+
+    def test_blank_dialogue_preserves_non_vocal_soundscape(self):
+        fields = {"character": "Albedo", "action": "Albedo looks up.", "audio": "Rain and footsteps."}
+        prompt = director_identity.prompt_for_shot(
+            {"structured": fields, "text": cinema.compose_h3_prompt(fields)}, self.film())
+        self.assertIn("NO DIALOGUE IN THIS SECTION", prompt)
+        self.assertIn("Rain and footsteps.", prompt)
+        self.assertNotIn("<d>", prompt)
+        self.assertNotIn("soft melodic", prompt)
+
     def film(self):
         return {"characters":[
             {"id":"albedo","kind":"character","name":"Albedo","voice":"soft melodic","images":[{"file":"albedo.png"}]},

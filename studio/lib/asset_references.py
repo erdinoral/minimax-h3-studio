@@ -84,6 +84,29 @@ def resolve(text, bindings, lib, exists, existing=(), continuation=False):
             **{"has_" + k[:-1]: any(a.get("kind") == k[:-1] for a in hits) for k in film_project.KINDS}}
 
 
+def fit_continuum_views(plans, shots, limit=9):
+    """Fit a shared take's slots without removing a section's selected asset."""
+    unique = {row["file"]: row for plan in plans for row in plan.get("rows", [])}
+    if len(unique) <= limit:
+        return plans
+    fixed = set()
+    for plan, shot in zip(plans, shots):
+        first_by_role = {}
+        for row in plan.get("rows", []):
+            key = ((row.get("asset") or {}).get("id"), row.get("reference_role", ""))
+            first_by_role.setdefault(key, row["file"])
+        fixed.update(first_by_role.values())
+        fixed.update(name for binding in shot.get("bindings") or [] for name in binding.get("files") or [])
+        if re.search(r"<Picture\s+\d+>|@R\d+\b", shot.get("text") or "", re.I):
+            fixed.update(plan.get("ref_images") or [])
+    removable = [name for name in reversed(unique) if name not in fixed]
+    drop = set(removable[:len(unique) - limit])
+    return [{**plan,
+             "rows": [row for row in plan.get("rows", []) if row["file"] not in drop],
+             "ref_images": [name for name in plan.get("ref_images", []) if name not in drop]}
+            for plan in plans]
+
+
 def prompt(text, rows, start_index=0, *, new_scene=False):
     if start_index:
         text = re.sub(r"<Picture\s+(\d+)>", lambda m: f"<Picture {int(m[1]) + start_index}>", text, flags=re.I)

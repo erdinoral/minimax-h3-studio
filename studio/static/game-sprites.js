@@ -406,9 +406,11 @@
       toast(t("game.queued", { n: data.jobs.length }));
       if (data.failed?.length) toast(t("game.someFailed", { n: data.failed.length }));
       await window.h3RefreshJobs?.();
+      return true;
     } catch (e) {
       live.generateError = t("game.queueFailed", { err: e.message || String(e) });
       toast(live.generateError);
+      return false;
     } finally {
       if (btn) btn.dataset.busy = "0";
       syncGenerate();
@@ -931,6 +933,25 @@
     }
     renderSettings();
   }
+
+  window.H3GameDirector = {
+    context: () => ({ description: ui.description, animations: [...ui.anims], character_selected: Boolean(ui.ref) }),
+    async apply(prompts, { queue = false } = {}) {
+      const description = prompts[0] || "";
+      if (description.length > 400) throw Error(window.h3Lang?.() === "tr"
+        ? "Sprites karakter tanımı en fazla 400 karakter olmalı. Yönetmenden kısa bir karakter tanımı iste."
+        : "Sprites needs a character description of 400 characters or fewer.");
+      ui.description = description;
+      $("gs-desc").value = description;
+      saveSettings();
+      if (!queue) return true;
+      if (!ui.ref || !ui.anims.size) {
+        toast(window.h3Lang?.() === "tr" ? "Karakter görselini ve animasyonları seç." : "Choose a character image and animations.");
+        return false;
+      }
+      return Boolean(await generate());
+    },
+  };
 
   function init() {
     if (!$("panel-workspace-game")) return;

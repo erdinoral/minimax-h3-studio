@@ -57,21 +57,41 @@ def _prepare_cast(shot, lib):
 
 
 def prompt_for_shot(shot, lib, silent=False):
-    hits = cinema.match_prompt(str(shot.get("text") or ""), lib)
+    text = str(shot.get("text") or "")
+    hits = cinema.match_prompt(text, lib)
     selected = {b.get("asset_id") for b in shot.get("bindings") or []}
     actors = [a for a in lib.get("characters", []) if a.get("id") in selected]
     if shot.get("bindings") is None:
         actors = [a for a in hits if a.get("kind") == "character"]
-    scoped = {**lib,"characters":actors}
+    fields = shot.get("structured") or {}
+    speaker = str(fields.get("speaker") or "").strip().casefold()
+    speaking_actors = [actor for actor in actors if actor["name"].casefold() == speaker] if speaker else actors
+    scoped = {**lib, "characters": speaking_actors}
+    tagged_dialogue = bool(re.search(r"<d>\s*\S.*?</d>", text, flags=re.I | re.S))
+    authored = bool(fields.get("action") or "dialogue" in fields)
+    dialogue_rule = ""
+    if not silent and tagged_dialogue:
+        dialogue_rule = (
+            "DIALOGUE FOR THIS SECTION ONLY: Speak the exact words inside this section's dialogue tags, "
+            "once, by the specified speaker. Everyone else stays silent. "
+            "No ad-libs, filler words, narration, background voices, or lines carried over from another section."
+        )
+    elif not silent and authored:
+        dialogue_rule = (
+            "NO DIALOGUE IN THIS SECTION. Nobody speaks or mouths words. "
+            "No whispers, narration, intelligible background voices, or repeated lines from other sections. "
+            "Use only non-vocal ambience and Foley appropriate to the scene."
+        )
     head = "\n\n".join(part for part in (
         cinema.setup_preamble(lib.get("setup") or {}),
-        "" if silent else cinema.film_audio_preamble(cinema._clean_audio(lib.get("audio"))),
-        "" if silent else cinema.cast_voice_bible(scoped),
+        dialogue_rule,
+        "" if silent or (authored and not tagged_dialogue) else cinema.film_audio_preamble(cinema._clean_audio(lib.get("audio"))),
+        "" if silent or (authored and not tagged_dialogue) else cinema.cast_voice_bible(scoped),
         ("VISUAL CAST LOCK: " + ", ".join(a["name"] for a in actors)
          + ". Keep each actor's identity separate. Do not transfer facial features, hair, costume or voice between actors."
          if actors else ""),
     ) if part)
-    return cinema.apply_look(backdrop.apply(str(shot.get("text") or ""), shot_backdrop(shot)),head)
+    return cinema.apply_look(backdrop.apply(text, shot_backdrop(shot)),head)
 
 
 def manifest(plan):

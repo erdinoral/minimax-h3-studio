@@ -1,6 +1,6 @@
 window.createLoraGuidanceEditor = function (catalog, toast) {
   const t=k=>window.t(`loraGuide.${k}`);
-  function translate(){document.querySelectorAll('[data-lora-notes]').forEach(b=>b.textContent=window.h3Lang?.() !== 'tr' ? 'Usage notes' : 'Kullanım notları');}
+  function translate(){document.querySelectorAll('[data-lora-notes]').forEach(b=>b.textContent={tr:'Kullanım notları',pl:'Notatki użycia'}[window.h3Lang?.()]||'Usage notes');}
   translate();document.addEventListener('h3-lang',translate);
   document.addEventListener('click',async e=>{
     const button=e.target.closest('[data-lora-notes]');if(!button)return;
@@ -50,8 +50,46 @@ window.createLoraGuidanceEditor = function (catalog, toast) {
     ['Kamera hareketleri', 'Camera movement', 'Kamera kaydırma, yaklaşma veya benzeri çekim hareketlerini yönlendirmeye yardımcı olur. Sonuç seçilen LoRA’ya ve prompta bağlıdır.', 'Help guide camera motion such as pans or push-ins. Results depend on the selected LoRA and prompt.'],
     ['Yüz ve karakter değiştirme', 'Face and character replacement', 'Uyumlu iş akışlarında yüz veya karakter görünümünü değiştirmeye yardımcı olur. Gerekli referansları ilgili üretim modunda hazırlamak gerekir.', 'Help change face or character appearance in compatible workflows. Prepare the required references in the relevant generation mode.']
   ];
-  const en = () => window.h3Lang?.() !== 'tr';
-  const label = (tr, english) => en() ? english : tr;
+  const PL = {
+  "LoRA guide": "Poradnik LoRA",
+  "Close": "Zamknij",
+  "Your first video, step by step": "Twój pierwszy film krok po kroku",
+  "What do the LoRA categories do?": "Do czego służą grupy LoRA?",
+  "Generation acceleration": "Przyspieszenie generowania",
+  "Helps compatible workflows generate video in fewer steps. The selected LoRA applies its step and sampler presets; speed and quality depend on the model.": "Pomaga w zgodnych przepływach generować wideo w mniejszej liczbie kroków. Wybrana LoRA stosuje własne ustawienia kroków i samplera; szybkość i jakość zależą od modelu.",
+  "Character LoRAs": "LoRA postaci",
+  "Bring a specific character’s appearance into generation. Trigger words and suitable weights matter; these can help maintain appearance across scenes.": "Przenoszą wygląd konkretnej postaci do generowania. Ważne są słowa wyzwalające i odpowiednia waga; pomagają zachować ten sam wygląd w kolejnych scenach.",
+  "Visual style and detail": "Styl wizualny i detale",
+  "Influence aesthetics, textures and detail. These affect visual style rather than selecting a character or accelerating generation.": "Kształtują estetykę, tekstury i detale. Wpływają na styl obrazu, a nie na wybór postaci czy przyspieszenie generowania.",
+  "Motion and action": "Ruch i akcja",
+  "Support particular movements and actions. Describe the desired action in the prompt as well.": "Wspierają konkretne ruchy i akcje. Pożądaną akcję opisz także w prompcie.",
+  "Expression and speech": "Mimika i mowa",
+  "Support facial expressions and speech-like motion. This does not imply exact lip synchronization to uploaded audio.": "Wspierają mimikę twarzy i ruchy przypominające mowę. Nie oznacza to dokładnej synchronizacji ust z wgranym dźwiękiem.",
+  "Camera movement": "Ruchy kamery",
+  "Help guide camera motion such as pans or push-ins. Results depend on the selected LoRA and prompt.": "Pomagają sterować ruchem kamery, np. panoramowaniem lub najazdem. Efekt zależy od wybranej LoRA i promptu.",
+  "Face and character replacement": "Podmiana twarzy i postaci",
+  "Help change face or character appearance in compatible workflows. Prepare the required references in the relevant generation mode.": "Pomagają zmienić wygląd twarzy lub postaci w zgodnych przepływach. Wymagane referencje przygotuj w odpowiednim trybie generowania.",
+  "1. Choose a production mode": "1. Wybierz tryb produkcji",
+  "Start with New video in the Scene tab. Choose T2V to generate from text, or I2V and upload an opening image. Use Continue video to extend an existing clip.": "Zacznij od Nowy film w zakładce Scena. Wybierz T2V, aby generować z tekstu, albo I2V i wgraj obraz startowy. Aby przedłużyć istniejący klip, użyj trybu Kontynuuj film.",
+  "2. Set the look and video settings": "2. Ustaw wygląd i parametry wideo",
+  "Choose Project type and Visual style. For a first test, use a short duration and low resolution, such as 5 seconds at 480p. Choose 16:9 for landscape or 9:16 for portrait video.": "Wybierz Typ projektu i Styl wizualny. Na pierwszą próbę użyj krótkiego czasu i niskiej rozdzielczości, np. 5 sekund w 480p. Wybierz 16:9 dla filmu poziomego lub 9:16 dla pionowego.",
+  "3. Write the prompt": "3. Napisz prompt",
+  "Describe the subject, setting, action and camera in Prompt / Scene. Start with one main action per clip. Example: A woman walks along a rainy street. The camera tracks her from the side. Neon reflections on wet pavement, realistic cinematic look.": "W polu Prompt / Scena opisz postać, otoczenie, akcję i kamerę. Zacznij od jednej głównej akcji w klipie. Przykład: Kobieta idzie deszczową ulicą. Kamera śledzi ją z boku. Neonowe odbicia na mokrym bruku, realistyczny kinowy wygląd.",
+  "4. Select a LoRA if needed": "4. W razie potrzeby wybierz LoRA",
+  "You can generate without a LoRA. Open a relevant category: acceleration for faster tests, character or style for appearance, camera for shot motion. Enable the switch, check the weight and click Apply. Start with the default weight and avoid adding many LoRAs at once.": "Możesz generować bez LoRA. Otwórz odpowiednią grupę: przyspieszenie dla szybszych testów, postać lub styl dla wyglądu, kamera dla ruchu ujęcia. Włącz przełącznik, sprawdź wagę i kliknij Zastosuj. Zacznij od domyślnej wagi i nie dodawaj naraz wielu LoRA.",
+  "5. Triggers are applied automatically": "5. Wyzwalacze stosują się automatycznie",
+  "Catalog trigger words are applied automatically with the selected LoRA. You do not need to type them. Not every LoRA requires a trigger; only recorded information is used.": "Słowa wyzwalające zapisane w katalogu są stosowane automatycznie razem z wybraną LoRA. Nie musisz ich wpisywać. Nie każda LoRA wymaga wyzwalacza; używane są tylko zapisane informacje.",
+  "6. Optional audio and post-pass": "6. Opcjonalny dźwięk i przetwarzanie końcowe",
+  "Select a recording under Audio and click Prepare audio. An audio reference guides generated sound; Add my recording to the video places the recording in the result. Neither provides exact lip sync. Keep Post-pass off for the first test; use upscale once you have a suitable result.": "W sekcji Dźwięk wybierz nagranie i kliknij Przygotuj dźwięk. Referencja audio steruje generowanym dźwiękiem; Dodaj moje nagranie do filmu umieszcza nagranie w wyniku. Żadne z nich nie daje dokładnej synchronizacji ust. Przy pierwszej próbie zostaw Przetwarzanie końcowe wyłączone; upscale użyj, gdy będziesz mieć dobry wynik.",
+  "7. Generate or add to queue": "7. Generuj lub dodaj do kolejki",
+  "Click Generate for a single test. To prepare several prompts, add each to the queue. Follow progress in the Production list. If a job fails, inspect the error instead of repeatedly retrying the same settings.": "Kliknij Generuj dla pojedynczej próby. Aby przygotować kilka promptów, dodaj każdy do kolejki. Postęp śledź na Liście produkcji. Jeśli zadanie się nie powiedzie, sprawdź komunikat błędu zamiast wielokrotnie powtarzać te same ustawienia.",
+  "8. Review and refine": "8. Oceń i popraw wynik",
+  "Open a finished clip with Play. Check action, character and camera first. Change the prompt or one setting at a time and retry. Increase resolution after you have a good result. Download to save, use Continue from this video for an extension, and merge clips in Gallery.": "Otwórz gotowy klip przyciskiem Odtwórz. Najpierw sprawdź akcję, postać i kamerę. Zmieniaj prompt lub jedno ustawienie naraz i próbuj ponownie. Zwiększ rozdzielczość, gdy będziesz mieć dobry wynik. Pobierz, aby zapisać; do przedłużenia użyj Kontynuuj od tego filmu; klipy łączy się w Galerii.",
+  "Enable a LoRA, set its weight and click Apply. Do not combine multiple acceleration LoRAs. Catalog trigger words are applied automatically.": "Włącz LoRA, ustaw jej wagę i kliknij Zastosuj. Nie łącz kilku LoRA przyspieszających. Słowa wyzwalające z katalogu stosują się automatycznie.",
+  "Usage notes": "Notatki użycia"
+  };
+  const lang = () => window.h3Lang?.();
+  const label = (tr, english) => lang() === 'pl' ? (PL[english] ?? english) : lang() === 'tr' ? tr : english;
   const translate = () => document.querySelectorAll('[data-lora-guide]').forEach(button => {button.textContent = label('LoRA rehberi', 'LoRA guide');});
   document.addEventListener('h3-lang', translate);
   document.addEventListener('click', event => {

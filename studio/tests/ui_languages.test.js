@@ -24,9 +24,9 @@ function boot({ stored = null, browser = [] } = {}) {
 
 const holes = (s) => (String(s).match(/\{\w+\}/g) || []).sort().join(",");
 
-test("French, Spanish and German packs cover every English key with the same placeholders", () => {
+test("French, Spanish, German and Polish packs cover every English key with the same placeholders", () => {
   const { en } = boot().window.H3_I18N;
-  for (const lang of ["fr", "es", "de"]) {
+  for (const lang of ["fr", "es", "de", "pl"]) {
     const pack = JSON.parse(fs.readFileSync(path.join(STATIC, "i18n", `${lang}.json`), "utf8"));
     assert.deepEqual(Object.keys(pack).sort(), Object.keys(en).sort(), lang);
     for (const [key, value] of Object.entries(en)) assert.equal(holes(pack[key]), holes(value), `${lang}: ${key}`);

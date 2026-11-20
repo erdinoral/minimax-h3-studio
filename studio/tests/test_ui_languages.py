@@ -9,11 +9,13 @@ class UiLanguageTests(unittest.TestCase):
         self.assertEqual(normalize_ui_lang("fr-FR"), "fr")
         self.assertEqual(normalize_ui_lang("es"), "es")
         self.assertEqual(normalize_ui_lang("DE"), "de")
+        self.assertEqual(normalize_ui_lang("pl-PL"), "pl")
         self.assertEqual(normalize_ui_lang("it"), "en")
 
     def test_director_speaks_the_ui_language_but_keeps_english_prompts(self):
         addendum = ui_lang_addendum("de")
         self.assertIn("Speak to the user in **German**", addendum)
+        self.assertIn("Speak to the user in **Polish**", ui_lang_addendum("pl"))
         self.assertIn("MUST stay English", addendum)
         self.assertIn("**English**", ui_lang_addendum("en"))
         self.assertIn("Türkçe", ui_lang_addendum("tr"))

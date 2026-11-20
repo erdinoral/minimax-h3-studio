@@ -3988,8 +3988,8 @@
     ["#lora-url-span", "lora.url"],
   ];
 
-  // fr/es/de live in /static/i18n/<lang>.json and load on demand; missing keys fall back to English.
-  const LANGS = ["en", "tr", "fr", "es", "de"];
+  // fr/es/de/pl live in /static/i18n/<lang>.json and load on demand; missing keys fall back to English.
+  const LANGS = ["en", "tr", "fr", "es", "de", "pl"];
   const PACK_VERSION = "8";
 
   function pickLang(value) {

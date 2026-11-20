@@ -479,7 +479,7 @@
     return typeof h3Lang === "function" ? h3Lang() : "tr";
   }
   function uiLocale(english) {
-    return { tr: "tr-TR", fr: "fr-FR", es: "es-ES", de: "de-DE" }[uiLang()] || english;
+    return { tr: "tr-TR", fr: "fr-FR", es: "es-ES", de: "de-DE", pl: "pl-PL" }[uiLang()] || english;
   }
 
   const CINEMA_LOOK_PRESETS = {

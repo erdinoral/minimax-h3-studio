@@ -2154,7 +2154,7 @@ def validate_brief(brief: dict[str, Any]) -> dict[str, Any]:
     return brief
 
 
-UI_LANG_NAMES = {"en": "English", "tr": "Turkish", "fr": "French", "es": "Spanish", "de": "German"}
+UI_LANG_NAMES = {"en": "English", "tr": "Turkish", "fr": "French", "es": "Spanish", "de": "German", "pl": "Polish"}
 
 
 def normalize_ui_lang(value: Any = None) -> str:
